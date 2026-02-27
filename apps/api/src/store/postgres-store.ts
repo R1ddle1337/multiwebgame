@@ -732,22 +732,7 @@ export function createPostgresStore(): Store {
 
     async joinRoom(roomId: string, userId: string, asSpectator = false): Promise<RoomDTO> {
       return withTransaction(async (client) => {
-        const roomResult = await client.query<{
-          id: string;
-          game_type: GameType;
-          status: 'open' | 'in_match' | 'closed';
-          max_players: number;
-        }>(
-          `
-            SELECT id, game_type, status, max_players
-            FROM rooms
-            WHERE id = $1
-            FOR UPDATE
-          `,
-          [roomId]
-        );
-
-        const room = roomResult.rows[0];
+        const room = await reconcileRoomLifecycleTx(client, roomId, 'stale_match_recovery');
         if (!room) {
           throw new StoreError('Room not found', 'not_found');
         }
@@ -756,44 +741,16 @@ export function createPostgresStore(): Store {
           throw new StoreError('Room is closed', 'forbidden');
         }
 
-        const existing = await client.query<{
-          id: string;
-        }>(
-          `
-            SELECT id
-            FROM room_players
-            WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
-            LIMIT 1
-          `,
-          [roomId, userId]
-        );
-
-        if (existing.rowCount && existing.rowCount > 0) {
-          const current = await fetchRoomById(client, roomId);
-          if (!current) {
-            throw new StoreError('Room not found', 'not_found');
-          }
-          return current;
+        if (room.players.some((member) => member.userId === userId)) {
+          return room;
         }
 
-        const activeMembers = await client.query<{
-          role: 'player' | 'spectator';
-          seat: number | null;
-        }>(
-          `
-            SELECT role, seat
-            FROM room_players
-            WHERE room_id = $1 AND left_at IS NULL
-          `,
-          [roomId]
-        );
-
-        if (activeMembers.rows.length >= room.max_players) {
+        if (room.players.length >= room.maxPlayers) {
           throw new StoreError('Room capacity reached', 'capacity_reached');
         }
 
-        const maxPlayersForMode = playerSlotsForGame(room.game_type);
-        const activePlayers = activeMembers.rows.filter((member) => member.role === 'player');
+        const maxPlayersForMode = playerSlotsForGame(room.gameType);
+        const activePlayers = room.players.filter((member) => member.role === 'player');
 
         let role: 'player' | 'spectator' = 'spectator';
         let seat: number | null = null;
