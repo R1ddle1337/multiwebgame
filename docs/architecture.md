@@ -28,6 +28,17 @@
 - `maxPlayers` controls total room participants.
 - Board modes reserve active seats for two players and allow extra room capacity as spectators.
 - Spectator subscriptions are explicit (`room.subscribe` / `room.unsubscribe`) and read-only.
+- Host lifecycle is deterministic:
+  - creator/host leaves -> ownership is reassigned
+  - empty rooms auto-close
+- Impossible active matches auto-abandon and room status is reconciled back to `open`.
+- Realtime applies inactive-player timeout with reconnect grace; reconnecting with same session before timeout restores control without seat ghosting.
+
+## Client i18n Model
+
+- Web client uses locale context with persistent local preference (`localStorage`).
+- v1 default policy is `zh-CN`; users can switch to `en-US` from UI language controls.
+- Core translated flows: auth, lobby/matchmaking, room gameplay controls, errors, replay controls.
 
 ## Moderation Model
 

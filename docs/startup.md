@@ -50,6 +50,12 @@ Services:
 - Realtime WS: `ws://localhost:4001`
 - Web: `http://localhost:5173`
 
+## i18n Defaults (Web)
+
+- UI locale defaults to `zh-CN` unless user explicitly switches.
+- Locale preference is persisted in browser local storage and reused on next load.
+- English (`en-US`) can be selected from language controls in auth/shell UI.
+
 ## Quality Gates
 
 ```bash

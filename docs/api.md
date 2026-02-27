@@ -72,6 +72,11 @@ Auth uses `Authorization: Bearer <jwt>`.
 - `POST /rooms/:roomId/leave`
   - Auth required
   - Returns: `{ room: RoomDTO | null }`
+  - Lifecycle policy:
+    - if room becomes empty -> room is closed
+    - if host leaves -> ownership transfers to next active player (or earliest remaining participant)
+    - if required player count is no longer satisfiable for an active match -> active match is marked `abandoned`, room reopens
+  - Room cleanup supports reconnect grace in realtime; prolonged inactivity can be treated as leave by server policy.
 
 ## Invitations
 
