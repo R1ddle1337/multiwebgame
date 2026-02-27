@@ -1,10 +1,12 @@
-export type GameType = 'single_2048' | 'gomoku';
+export type GameType = 'single_2048' | 'gomoku' | 'xiangqi' | 'go';
+export type BoardGameType = 'gomoku' | 'xiangqi' | 'go';
 
 export interface UserDTO {
   id: string;
   displayName: string;
   isGuest: boolean;
   rating: number;
+  ratings: Partial<Record<GameType, number>>;
   createdAt: string;
 }
 
@@ -15,11 +17,14 @@ export interface SessionDTO {
   expiresAt: string;
 }
 
+export type RoomPlayerRole = 'player' | 'spectator';
+
 export interface RoomPlayerDTO {
   id: string;
   roomId: string;
   userId: string;
-  seat: number;
+  role: RoomPlayerRole;
+  seat: number | null;
   joinedAt: string;
   leftAt: string | null;
   user: UserDTO;
@@ -30,6 +35,7 @@ export interface RoomDTO {
   hostUserId: string;
   gameType: GameType;
   status: 'open' | 'in_match' | 'closed';
+  maxPlayers: number;
   createdAt: string;
   players: RoomPlayerDTO[];
 }
@@ -65,6 +71,32 @@ export interface MatchDTO {
   moves: MatchMoveDTO[];
 }
 
+export interface RatingDTO {
+  gameType: GameType;
+  rating: number;
+  updatedAt: string;
+}
+
+export interface BlockDTO {
+  id: string;
+  blockerUserId: string;
+  blockedUserId: string;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface ReportDTO {
+  id: string;
+  reporterUserId: string;
+  targetUserId: string | null;
+  matchId: string | null;
+  reason: string;
+  details: string | null;
+  status: 'open' | 'reviewed' | 'resolved' | 'dismissed';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ApiError {
   error: string;
 }
@@ -92,6 +124,70 @@ export interface GomokuState {
   moveCount: number;
 }
 
+export type GoStone = 'black' | 'white';
+
+export interface GoPoint {
+  x: number;
+  y: number;
+}
+
+export type GoMove =
+  | {
+      type: 'place';
+      x: number;
+      y: number;
+      player: GoStone;
+    }
+  | {
+      type: 'pass';
+      player: GoStone;
+    };
+
+export interface GoState {
+  boardSize: number;
+  board: (GoStone | null)[][];
+  nextPlayer: GoStone;
+  status: 'playing' | 'completed';
+  moveCount: number;
+  consecutivePasses: number;
+  koPoint: GoPoint | null;
+}
+
+export type XiangqiColor = 'red' | 'black';
+
+export type XiangqiPieceType =
+  | 'general'
+  | 'advisor'
+  | 'elephant'
+  | 'horse'
+  | 'chariot'
+  | 'cannon'
+  | 'soldier';
+
+export interface XiangqiPiece {
+  type: XiangqiPieceType;
+  color: XiangqiColor;
+}
+
+export interface XiangqiPosition {
+  x: number;
+  y: number;
+}
+
+export interface XiangqiMove {
+  from: XiangqiPosition;
+  to: XiangqiPosition;
+  player: XiangqiColor;
+}
+
+export interface XiangqiState {
+  board: (XiangqiPiece | null)[][];
+  nextPlayer: XiangqiColor;
+  status: 'playing' | 'completed';
+  winner: XiangqiColor | null;
+  moveCount: number;
+}
+
 export type Direction2048 = 'up' | 'down' | 'left' | 'right';
 
 export interface Game2048State {
@@ -105,13 +201,61 @@ export interface WsEnvelope<TType extends string, TPayload> {
   payload: TPayload;
 }
 
+export type RoomStatePayload =
+  | {
+      room: RoomDTO;
+      gameType: 'gomoku';
+      state: GomokuState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
+      gameType: 'go';
+      state: GoState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
+      gameType: 'xiangqi';
+      state: XiangqiState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
+      gameType: 'single_2048';
+      state: null;
+      viewerRole: RoomPlayerRole;
+    };
+
+export type MatchMoveAppliedPayload =
+  | {
+      roomId: string;
+      gameType: 'gomoku';
+      state: GomokuState;
+      lastMove: GomokuMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'go';
+      state: GoState;
+      lastMove: GoMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'xiangqi';
+      state: XiangqiState;
+      lastMove: XiangqiMove;
+    };
+
 export type ClientToServerMessage =
   | WsEnvelope<'auth', { token: string; reconnectKey?: string }>
-  | WsEnvelope<'lobby.subscribe', {}>
-  | WsEnvelope<'room.subscribe', { roomId: string }>
-  | WsEnvelope<'room.move', { roomId: string; x: number; y: number }>
-  | WsEnvelope<'matchmaking.join', { gameType: 'gomoku' }>
-  | WsEnvelope<'matchmaking.leave', {}>
+  | WsEnvelope<'lobby.subscribe', Record<string, never>>
+  | WsEnvelope<'room.subscribe', { roomId: string; asSpectator?: boolean }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'go'; move: GoMove }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }>
+  | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>
+  | WsEnvelope<'matchmaking.leave', Record<string, never>>
   | WsEnvelope<'invite.respond', { invitationId: string; action: 'accept' | 'decline' }>
   | WsEnvelope<'ping', { ts: number }>;
 
@@ -119,13 +263,15 @@ export type ServerToClientMessage =
   | WsEnvelope<'auth.ok', { connectionId: string; reconnectKey: string; user: UserDTO }>
   | WsEnvelope<'auth.error', { reason: string }>
   | WsEnvelope<'lobby.presence', { onlineUsers: Array<{ userId: string; displayName: string }> }>
-  | WsEnvelope<'room.state', { room: RoomDTO; gomokuState: GomokuState | null }>
-  | WsEnvelope<'room.player_joined', { roomId: string; user: UserDTO }>
+  | WsEnvelope<'room.state', RoomStatePayload>
+  | WsEnvelope<'room.player_joined', { roomId: string; user: UserDTO; role: RoomPlayerRole }>
   | WsEnvelope<'room.player_left', { roomId: string; userId: string }>
   | WsEnvelope<'invite.received', { invitation: InvitationDTO }>
   | WsEnvelope<'invite.updated', { invitationId: string; status: InvitationDTO['status'] }>
-  | WsEnvelope<'matchmaking.queued', { queueSize: number }>
+  | WsEnvelope<'matchmaking.queued', { gameType: BoardGameType; queueSize: number }>
+  | WsEnvelope<'matchmaking.timeout', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.matched', { room: RoomDTO; matchId: string }>
-  | WsEnvelope<'match.move_applied', { roomId: string; state: GomokuState; lastMove: GomokuMove }>
+  | WsEnvelope<'match.move_applied', MatchMoveAppliedPayload>
+  | WsEnvelope<'match.completed', { roomId: string; matchId: string; winnerUserId: string | null }>
   | WsEnvelope<'error', { reason: string }>
   | WsEnvelope<'pong', { ts: number }>;

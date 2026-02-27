@@ -27,10 +27,11 @@ async function run(): Promise<void> {
     await pool.query(
       `
         INSERT INTO ratings (user_id, game_type, rating)
-        VALUES ($1, 'gomoku', 1200)
+        SELECT $1, game_type, 1200
+        FROM UNNEST($2::text[]) AS game_type
         ON CONFLICT (user_id, game_type) DO NOTHING
       `,
-      [row.id]
+      [row.id, ['single_2048', 'gomoku', 'xiangqi', 'go']]
     );
   }
 
