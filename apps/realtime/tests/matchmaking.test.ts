@@ -71,4 +71,18 @@ describe('MatchmakingQueue', () => {
     const finalPair = queue.popPair('go');
     expect(finalPair?.map((entry) => entry.userId)).toEqual(['u1', 'u2']);
   });
+
+  it('re-joining updates game type without duplicating queue entries', () => {
+    const queue = new MatchmakingQueue();
+    queue.join('u1', 'gomoku', 0);
+    queue.join('u1', 'go', 1);
+    queue.join('u2', 'go', 2);
+
+    expect(queue.getQueueSize()).toBe(2);
+    expect(queue.getQueueSize('gomoku')).toBe(0);
+    expect(queue.getQueueSize('go')).toBe(2);
+
+    const pair = queue.popPair('go');
+    expect(pair?.map((entry) => entry.userId)).toEqual(['u1', 'u2']);
+  });
 });

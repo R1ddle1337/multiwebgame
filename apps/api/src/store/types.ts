@@ -3,7 +3,9 @@ import type {
   GameType,
   InvitationDTO,
   MatchDTO,
+  RatingFormulaDTO,
   RatingDTO,
+  ReportDTO,
   RoomDTO,
   SessionDTO,
   UserDTO
@@ -43,6 +45,7 @@ export interface Store {
   createSession(userId: string): Promise<SessionDTO>;
   getSessionById(sessionId: string): Promise<SessionDTO | null>;
   deleteSession(sessionId: string): Promise<void>;
+  listRatingFormulas(): Promise<RatingFormulaDTO[]>;
   listOpenRooms(): Promise<RoomDTO[]>;
   getRoomById(roomId: string): Promise<RoomDTO | null>;
   createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO>;
@@ -71,4 +74,9 @@ export interface Store {
     reason: string;
     details?: string | null;
   }): Promise<void>;
+  listReports(params: { status?: ReportDTO['status']; limit: number }): Promise<ReportDTO[]>;
+  resolveReport(params: {
+    reportId: string;
+    status: Exclude<ReportDTO['status'], 'open'>;
+  }): Promise<ReportDTO>;
 }

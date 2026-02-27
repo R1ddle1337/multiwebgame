@@ -15,6 +15,13 @@ type DbExecutor = Pick<PoolClient, 'query'>;
 type RatingMap = Partial<Record<GameType, number>>;
 
 const ALL_GAME_TYPES: GameType[] = ['single_2048', 'gomoku', 'xiangqi', 'go'];
+const INITIAL_RATING = 1200;
+const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
+  single_2048: 24,
+  gomoku: 24,
+  xiangqi: 24,
+  go: 24
+};
 
 function toIso(value: Date | string): string {
   return new Date(value).toISOString();
@@ -22,10 +29,10 @@ function toIso(value: Date | string): string {
 
 function createDefaultRatings(): RatingMap {
   return {
-    single_2048: 1200,
-    gomoku: 1200,
-    xiangqi: 1200,
-    go: 1200
+    single_2048: INITIAL_RATING,
+    gomoku: INITIAL_RATING,
+    xiangqi: INITIAL_RATING,
+    go: INITIAL_RATING
   };
 }
 
@@ -42,6 +49,7 @@ function mapUser(
     id: string;
     display_name: string;
     is_guest: boolean;
+    is_admin: boolean;
     created_at: Date | string;
     rating?: number | null;
   },
@@ -56,7 +64,8 @@ function mapUser(
     id: row.id,
     displayName: row.display_name,
     isGuest: row.is_guest,
-    rating: merged.gomoku ?? row.rating ?? 1200,
+    isAdmin: row.is_admin,
+    rating: merged.gomoku ?? row.rating ?? INITIAL_RATING,
     ratings: merged,
     createdAt: toIso(row.created_at)
   };
@@ -108,6 +117,7 @@ function mapMatch(row: {
   game_type: GameType;
   status: 'active' | 'completed' | 'abandoned';
   winner_user_id: string | null;
+  result_payload: Record<string, unknown> | null;
   started_at: Date | string;
   ended_at: Date | string | null;
 }): MatchDTO {
@@ -117,6 +127,7 @@ function mapMatch(row: {
     gameType: row.game_type,
     status: row.status,
     winnerUserId: row.winner_user_id,
+    resultPayload: row.result_payload,
     startedAt: toIso(row.started_at),
     endedAt: row.ended_at ? toIso(row.ended_at) : null,
     moves: []
@@ -127,11 +138,11 @@ async function ensureAllRatings(client: DbExecutor, userId: string): Promise<voi
   await client.query(
     `
       INSERT INTO ratings (user_id, game_type, rating)
-      SELECT $1, game_type, 1200
+      SELECT $1, game_type, $3
       FROM UNNEST($2::text[]) AS game_type
       ON CONFLICT (user_id, game_type) DO NOTHING
     `,
-    [userId, ALL_GAME_TYPES]
+    [userId, ALL_GAME_TYPES, INITIAL_RATING]
   );
 }
 
@@ -201,6 +212,7 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     left_at: Date | string | null;
     display_name: string;
     is_guest: boolean;
+    is_admin: boolean;
     created_at: Date | string;
   }>(
     `
@@ -214,6 +226,7 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
         rp.left_at,
         u.display_name,
         u.is_guest,
+        u.is_admin,
         u.created_at
       FROM room_players rp
       JOIN users u ON u.id = rp.user_id
@@ -297,8 +310,8 @@ async function updateRatingsForMatch(
     currentByUser.set(row.user_id, row.rating);
   }
 
-  const ratingA = currentByUser.get(a) ?? 1200;
-  const ratingB = currentByUser.get(b) ?? 1200;
+  const ratingA = currentByUser.get(a) ?? INITIAL_RATING;
+  const ratingB = currentByUser.get(b) ?? INITIAL_RATING;
 
   const expectedA = 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
   const expectedB = 1 - expectedA;
@@ -313,7 +326,7 @@ async function updateRatingsForMatch(
     scoreB = 1;
   }
 
-  const k = 24;
+  const k = ELO_K_FACTOR_BY_GAME[gameType];
   const newA = Math.round(ratingA + k * (scoreA - expectedA));
   const newB = Math.round(ratingB + k * (scoreB - expectedB));
 
@@ -341,10 +354,11 @@ export async function getUserFromSession(sessionId: string, userId: string): Pro
     id: string;
     display_name: string;
     is_guest: boolean;
+    is_admin: boolean;
     created_at: Date | string;
   }>(
     `
-      SELECT u.id, u.display_name, u.is_guest, u.created_at
+      SELECT u.id, u.display_name, u.is_guest, u.is_admin, u.created_at
       FROM sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.id = $1 AND s.user_id = $2 AND s.expires_at > NOW()
@@ -450,11 +464,12 @@ export async function getLatestMatchForRoom(roomId: string): Promise<MatchDTO | 
     game_type: GameType;
     status: 'active' | 'completed' | 'abandoned';
     winner_user_id: string | null;
+    result_payload: Record<string, unknown> | null;
     started_at: Date | string;
     ended_at: Date | string | null;
   }>(
     `
-      SELECT id, room_id, game_type, status, winner_user_id, started_at, ended_at
+      SELECT id, room_id, game_type, status, winner_user_id, result_payload, started_at, ended_at
       FROM matches
       WHERE room_id = $1
       ORDER BY started_at DESC
@@ -505,6 +520,7 @@ export async function completeMatch(params: {
   roomId: string;
   winnerUserId: string | null;
   status: 'completed' | 'abandoned';
+  resultPayload?: Record<string, unknown> | null;
 }): Promise<void> {
   await withTransaction(async (client) => {
     const matchResult = await client.query<{ game_type: GameType }>(
@@ -525,10 +541,10 @@ export async function completeMatch(params: {
     await client.query(
       `
         UPDATE matches
-        SET status = $1, winner_user_id = $2, ended_at = NOW()
-        WHERE id = $3
+        SET status = $1, winner_user_id = $2, result_payload = $3, ended_at = NOW()
+        WHERE id = $4
       `,
-      [params.status, params.winnerUserId, params.matchId]
+      [params.status, params.winnerUserId, params.resultPayload ?? null, params.matchId]
     );
 
     await updateRatingsForMatch(client, params.roomId, match.game_type, params.winnerUserId);

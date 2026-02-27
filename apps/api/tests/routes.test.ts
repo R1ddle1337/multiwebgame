@@ -4,6 +4,8 @@ import type {
   InvitationDTO,
   MatchDTO,
   RatingDTO,
+  RatingFormulaDTO,
+  ReportDTO,
   RoomDTO,
   SessionDTO,
   UserDTO
@@ -13,7 +15,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
-import type { Store } from '../src/store/types.js';
+import { StoreError, type Store } from '../src/store/types.js';
 
 class InMemoryStore implements Store {
   private users = new Map<string, UserDTO>();
@@ -30,13 +32,7 @@ class InMemoryStore implements Store {
 
   private blocks = new Map<string, BlockDTO>();
 
-  private reports: Array<{
-    reporterUserId: string;
-    targetUserId?: string | null;
-    matchId?: string | null;
-    reason: string;
-    details?: string | null;
-  }> = [];
+  private reports = new Map<string, ReportDTO>();
 
   private defaultRatings(): Record<GameType, number> {
     return {
@@ -52,6 +48,7 @@ class InMemoryStore implements Store {
       id: randomUUID(),
       displayName,
       isGuest: true,
+      isAdmin: /admin/i.test(displayName),
       rating: 1200,
       ratings: this.defaultRatings(),
       createdAt: new Date().toISOString()
@@ -76,6 +73,7 @@ class InMemoryStore implements Store {
       id: randomUUID(),
       displayName: params.displayName,
       isGuest: false,
+      isAdmin: /admin/i.test(params.displayName),
       rating: 1200,
       ratings: this.defaultRatings(),
       createdAt: new Date().toISOString()
@@ -140,6 +138,16 @@ class InMemoryStore implements Store {
     this.sessions.delete(sessionId);
   }
 
+  async listRatingFormulas(): Promise<RatingFormulaDTO[]> {
+    return (['single_2048', 'gomoku', 'xiangqi', 'go'] as const).map((gameType) => ({
+      gameType,
+      system: 'elo',
+      initialRating: 1200,
+      kFactor: 24,
+      expectedScore: '1 / (1 + 10^((opponent - player) / 400))'
+    }));
+  }
+
   async listOpenRooms(): Promise<RoomDTO[]> {
     return Array.from(this.rooms.values()).filter((room) => room.status !== 'closed');
   }
@@ -192,7 +200,7 @@ class InMemoryStore implements Store {
     }
 
     if (room.players.length >= room.maxPlayers) {
-      throw new Error('capacity');
+      throw new StoreError('Room capacity reached', 'capacity_reached');
     }
 
     const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
@@ -329,7 +337,40 @@ class InMemoryStore implements Store {
     reason: string;
     details?: string | null;
   }): Promise<void> {
-    this.reports.push(params);
+    const report: ReportDTO = {
+      id: randomUUID(),
+      reporterUserId: params.reporterUserId,
+      targetUserId: params.targetUserId ?? null,
+      matchId: params.matchId ?? null,
+      reason: params.reason,
+      details: params.details ?? null,
+      status: 'open',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    this.reports.set(report.id, report);
+  }
+
+  async listReports(params: { status?: ReportDTO['status']; limit: number }): Promise<ReportDTO[]> {
+    return Array.from(this.reports.values())
+      .filter((report) => (params.status ? report.status === params.status : true))
+      .slice(0, params.limit);
+  }
+
+  async resolveReport(params: {
+    reportId: string;
+    status: Exclude<ReportDTO['status'], 'open'>;
+  }): Promise<ReportDTO> {
+    const report = this.reports.get(params.reportId);
+    if (!report) {
+      throw new Error('report_not_found');
+    }
+
+    report.status = params.status;
+    report.updatedAt = new Date().toISOString();
+    this.reports.set(report.id, report);
+    return report;
   }
 }
 
@@ -346,6 +387,7 @@ describe('critical API routes', () => {
     expect(me.body.user.id).toBe(auth.body.user.id);
     expect(me.body.session.id).toBe(auth.body.session.id);
     expect(me.body.user.ratings.gomoku).toBe(1200);
+    expect(me.body.user.isAdmin).toBe(false);
   });
 
   it('upgrades guest account with credentials', async () => {
@@ -404,6 +446,72 @@ describe('critical API routes', () => {
     expect(watcherRow.seat).toBeNull();
   });
 
+  it('enforces room capacity and seat role semantics for 4-player rooms', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const p2 = await request(app).post('/auth/guest').send({ displayName: 'P2' }).expect(201);
+    const s1 = await request(app).post('/auth/guest').send({ displayName: 'S1' }).expect(201);
+    const s2 = await request(app).post('/auth/guest').send({ displayName: 'S2' }).expect(201);
+    const overflow = await request(app).post('/auth/guest').send({ displayName: 'Overflow' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'gomoku', maxPlayers: 4 })
+      .expect(201);
+
+    const joinP2 = await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${p2.body.token}`)
+      .send({})
+      .expect(200);
+
+    const joinS1 = await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${s1.body.token}`)
+      .send({})
+      .expect(200);
+
+    const joinS2 = await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${s2.body.token}`)
+      .send({})
+      .expect(200);
+
+    const p2Row = joinP2.body.room.players.find(
+      (player: { userId: string }) => player.userId === p2.body.user.id
+    );
+    const s1Row = joinS1.body.room.players.find(
+      (player: { userId: string }) => player.userId === s1.body.user.id
+    );
+    const s2Row = joinS2.body.room.players.find(
+      (player: { userId: string }) => player.userId === s2.body.user.id
+    );
+
+    expect(p2Row.role).toBe('player');
+    expect(p2Row.seat).toBe(2);
+    expect(s1Row.role).toBe('spectator');
+    expect(s2Row.role).toBe('spectator');
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${overflow.body.token}`)
+      .send({})
+      .expect(409);
+  });
+
+  it('exposes rating formulas', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const response = await request(app).get('/ratings/formula').expect(200);
+
+    expect(response.body.formulas).toHaveLength(4);
+    expect(response.body.formulas[0].system).toBe('elo');
+  });
+
   it('supports block + report moderation endpoints', async () => {
     const store = new InMemoryStore();
     const app = createApp(store);
@@ -437,5 +545,44 @@ describe('critical API routes', () => {
         reason: 'abusive behavior'
       })
       .expect(201);
+  });
+
+  it('supports admin report triage workflow', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const admin = await request(app).post('/auth/guest').send({ displayName: 'Admin Root' }).expect(201);
+    const reporter = await request(app).post('/auth/guest').send({ displayName: 'Reporter' }).expect(201);
+    const target = await request(app).post('/auth/guest').send({ displayName: 'Target' }).expect(201);
+
+    await request(app)
+      .post('/moderation/reports')
+      .set('Authorization', `Bearer ${reporter.body.token}`)
+      .send({
+        targetUserId: target.body.user.id,
+        reason: 'game abuse'
+      })
+      .expect(201);
+
+    await request(app)
+      .get('/moderation/reports')
+      .set('Authorization', `Bearer ${reporter.body.token}`)
+      .expect(403);
+
+    const listed = await request(app)
+      .get('/moderation/reports?status=open&limit=10')
+      .set('Authorization', `Bearer ${admin.body.token}`)
+      .expect(200);
+
+    expect(listed.body.reports).toHaveLength(1);
+
+    const reportId = listed.body.reports[0].id as string;
+    const resolved = await request(app)
+      .patch(`/moderation/reports/${reportId}`)
+      .set('Authorization', `Bearer ${admin.body.token}`)
+      .send({ status: 'resolved' })
+      .expect(200);
+
+    expect(resolved.body.report.status).toBe('resolved');
   });
 });

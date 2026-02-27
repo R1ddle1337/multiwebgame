@@ -68,6 +68,19 @@ const historyQuerySchema = z.object({
     .pipe(z.number().int().min(1).max(100))
 });
 
+const reportListQuerySchema = z.object({
+  status: z.enum(['open', 'reviewed', 'resolved', 'dismissed']).optional(),
+  limit: z
+    .string()
+    .optional()
+    .transform((value) => (value ? Number(value) : 50))
+    .pipe(z.number().int().min(1).max(200))
+});
+
+const resolveReportSchema = z.object({
+  status: z.enum(['reviewed', 'resolved', 'dismissed'])
+});
+
 function randomGuestName(): string {
   return `Guest-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -211,6 +224,15 @@ export function createApp(store: Store) {
     try {
       const ratings = await store.listRatingsForUser(req.auth!.userId);
       res.json({ ratings });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/ratings/formula', async (_req, res, next) => {
+    try {
+      const formulas = await store.listRatingFormulas();
+      res.json({ formulas });
     } catch (error) {
       next(error);
     }
@@ -373,6 +395,45 @@ export function createApp(store: Store) {
         details: input.details
       });
       res.status(201).json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/moderation/reports', requireAuth(store), async (req: AuthedRequest, res, next) => {
+    try {
+      const user = await store.getUserById(req.auth!.userId);
+      if (!user?.isAdmin) {
+        res.status(403).json({ error: 'Admin role required' });
+        return;
+      }
+
+      const query = reportListQuerySchema.parse(req.query);
+      const reports = await store.listReports({
+        status: query.status,
+        limit: query.limit
+      });
+
+      res.json({ reports });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/moderation/reports/:reportId', requireAuth(store), async (req: AuthedRequest, res, next) => {
+    try {
+      const user = await store.getUserById(req.auth!.userId);
+      if (!user?.isAdmin) {
+        res.status(403).json({ error: 'Admin role required' });
+        return;
+      }
+
+      const input = resolveReportSchema.parse(req.body);
+      const report = await store.resolveReport({
+        reportId: firstParam(req.params.reportId),
+        status: input.status
+      });
+      res.json({ report });
     } catch (error) {
       next(error);
     }

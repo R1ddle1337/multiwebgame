@@ -4,7 +4,9 @@ import type {
   InvitationDTO,
   MatchDTO,
   MatchMoveDTO,
+  RatingFormulaDTO,
   RatingDTO,
+  ReportDTO,
   RoomDTO,
   RoomPlayerDTO,
   SessionDTO,
@@ -20,6 +22,13 @@ type DbExecutor = Pick<PoolClient, 'query'>;
 type RatingMap = Partial<Record<GameType, number>>;
 
 const ALL_GAME_TYPES: GameType[] = ['single_2048', 'gomoku', 'xiangqi', 'go'];
+const INITIAL_RATING = 1200;
+const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
+  single_2048: 24,
+  gomoku: 24,
+  xiangqi: 24,
+  go: 24
+};
 
 function playerSlotsForGame(gameType: GameType): number {
   return gameType === 'single_2048' ? 1 : 2;
@@ -47,11 +56,21 @@ function toIso(value: Date | string): string {
 
 function createDefaultRatings(): RatingMap {
   return {
-    single_2048: 1200,
-    gomoku: 1200,
-    xiangqi: 1200,
-    go: 1200
+    single_2048: INITIAL_RATING,
+    gomoku: INITIAL_RATING,
+    xiangqi: INITIAL_RATING,
+    go: INITIAL_RATING
   };
+}
+
+function getRatingFormula(): RatingFormulaDTO[] {
+  return ALL_GAME_TYPES.map((gameType) => ({
+    gameType,
+    system: 'elo',
+    initialRating: INITIAL_RATING,
+    kFactor: ELO_K_FACTOR_BY_GAME[gameType],
+    expectedScore: '1 / (1 + 10^((opponent - player) / 400))'
+  }));
 }
 
 function mapUser(
@@ -59,6 +78,7 @@ function mapUser(
     id: string;
     display_name: string;
     is_guest: boolean;
+    is_admin: boolean;
     created_at: Date | string;
     rating?: number | null;
   },
@@ -73,7 +93,8 @@ function mapUser(
     id: row.id,
     displayName: row.display_name,
     isGuest: row.is_guest,
-    rating: merged.gomoku ?? row.rating ?? 1200,
+    isAdmin: row.is_admin,
+    rating: merged.gomoku ?? row.rating ?? INITIAL_RATING,
     ratings: merged,
     createdAt: toIso(row.created_at)
   };
@@ -119,6 +140,7 @@ function mapMatch(row: {
   game_type: GameType;
   status: 'active' | 'completed' | 'abandoned';
   winner_user_id: string | null;
+  result_payload: Record<string, unknown> | null;
   started_at: Date | string;
   ended_at: Date | string | null;
 }): MatchDTO {
@@ -128,6 +150,7 @@ function mapMatch(row: {
     gameType: row.game_type,
     status: row.status,
     winnerUserId: row.winner_user_id,
+    resultPayload: row.result_payload,
     startedAt: toIso(row.started_at),
     endedAt: row.ended_at ? toIso(row.ended_at) : null,
     moves: []
@@ -178,15 +201,39 @@ function mapBlock(row: {
   };
 }
 
+function mapReport(row: {
+  id: string;
+  reporter_user_id: string;
+  target_user_id: string | null;
+  match_id: string | null;
+  reason: string;
+  details: string | null;
+  status: 'open' | 'reviewed' | 'resolved' | 'dismissed';
+  created_at: Date | string;
+  updated_at: Date | string;
+}): ReportDTO {
+  return {
+    id: row.id,
+    reporterUserId: row.reporter_user_id,
+    targetUserId: row.target_user_id,
+    matchId: row.match_id,
+    reason: row.reason,
+    details: row.details,
+    status: row.status,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
 async function ensureAllRatings(client: DbExecutor, userId: string): Promise<void> {
   await client.query(
     `
       INSERT INTO ratings (user_id, game_type, rating)
-      SELECT $1, game_type, 1200
+      SELECT $1, game_type, $3
       FROM UNNEST($2::text[]) AS game_type
       ON CONFLICT (user_id, game_type) DO NOTHING
     `,
-    [userId, ALL_GAME_TYPES]
+    [userId, ALL_GAME_TYPES, INITIAL_RATING]
   );
 }
 
@@ -255,6 +302,7 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     left_at: Date | string | null;
     display_name: string;
     is_guest: boolean;
+    is_admin: boolean;
     created_at: Date | string;
   }>(
     `
@@ -268,6 +316,7 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
         rp.left_at,
         u.display_name,
         u.is_guest,
+        u.is_admin,
         u.created_at
       FROM room_players rp
       JOIN users u ON u.id = rp.user_id
@@ -349,12 +398,13 @@ export function createPostgresStore(): Store {
           id: string;
           display_name: string;
           is_guest: boolean;
+          is_admin: boolean;
           created_at: Date | string;
         }>(
           `
             INSERT INTO users (display_name, is_guest)
             VALUES ($1, TRUE)
-            RETURNING id, display_name, is_guest, created_at
+            RETURNING id, display_name, is_guest, is_admin, created_at
           `,
           [displayName]
         );
@@ -372,12 +422,13 @@ export function createPostgresStore(): Store {
           id: string;
           display_name: string;
           is_guest: boolean;
+          is_admin: boolean;
           created_at: Date | string;
         }>(
           `
             INSERT INTO users (display_name, email, password_hash, is_guest)
             VALUES ($1, $2, $3, FALSE)
-            RETURNING id, display_name, is_guest, created_at
+            RETURNING id, display_name, is_guest, is_admin, created_at
           `,
           [params.displayName, params.email.toLowerCase(), params.passwordHash]
         );
@@ -405,13 +456,14 @@ export function createPostgresStore(): Store {
           id: string;
           display_name: string;
           is_guest: boolean;
+          is_admin: boolean;
           created_at: Date | string;
         }>(
           `
             UPDATE users
             SET display_name = $2, email = $3, password_hash = $4, is_guest = FALSE
             WHERE id = $1 AND is_guest = TRUE
-            RETURNING id, display_name, is_guest, created_at
+            RETURNING id, display_name, is_guest, is_admin, created_at
           `,
           [params.userId, params.displayName, params.email.toLowerCase(), params.passwordHash]
         );
@@ -443,10 +495,11 @@ export function createPostgresStore(): Store {
         display_name: string;
         password_hash: string | null;
         is_guest: boolean;
+        is_admin: boolean;
         created_at: Date | string;
       }>(
         `
-          SELECT id, display_name, password_hash, is_guest, created_at
+          SELECT id, display_name, password_hash, is_guest, is_admin, created_at
           FROM users
           WHERE email = $1
           LIMIT 1
@@ -472,10 +525,11 @@ export function createPostgresStore(): Store {
         id: string;
         display_name: string;
         is_guest: boolean;
+        is_admin: boolean;
         created_at: Date | string;
       }>(
         `
-          SELECT id, display_name, is_guest, created_at
+          SELECT id, display_name, is_guest, is_admin, created_at
           FROM users
           WHERE id = $1
           LIMIT 1
@@ -532,6 +586,10 @@ export function createPostgresStore(): Store {
 
     async deleteSession(sessionId: string): Promise<void> {
       await pool.query('DELETE FROM sessions WHERE id = $1', [sessionId]);
+    },
+
+    async listRatingFormulas(): Promise<RatingFormulaDTO[]> {
+      return getRatingFormula();
     },
 
     async listOpenRooms(): Promise<RoomDTO[]> {
@@ -889,6 +947,7 @@ export function createPostgresStore(): Store {
         game_type: GameType;
         status: 'active' | 'completed' | 'abandoned';
         winner_user_id: string | null;
+        result_payload: Record<string, unknown> | null;
         started_at: Date | string;
         ended_at: Date | string | null;
       }>(
@@ -899,6 +958,7 @@ export function createPostgresStore(): Store {
             m.game_type,
             m.status,
             m.winner_user_id,
+            m.result_payload,
             m.started_at,
             m.ended_at
           FROM matches m
@@ -930,11 +990,12 @@ export function createPostgresStore(): Store {
         game_type: GameType;
         status: 'active' | 'completed' | 'abandoned';
         winner_user_id: string | null;
+        result_payload: Record<string, unknown> | null;
         started_at: Date | string;
         ended_at: Date | string | null;
       }>(
         `
-          SELECT id, room_id, game_type, status, winner_user_id, started_at, ended_at
+          SELECT id, room_id, game_type, status, winner_user_id, result_payload, started_at, ended_at
           FROM matches
           WHERE id = $1
           LIMIT 1
@@ -1034,6 +1095,89 @@ export function createPostgresStore(): Store {
           params.details ?? null
         ]
       );
+    },
+
+    async listReports(params): Promise<ReportDTO[]> {
+      const clauses: string[] = [];
+      const values: unknown[] = [];
+
+      if (params.status) {
+        values.push(params.status);
+        clauses.push(`status = $${values.length}`);
+      }
+
+      values.push(params.limit);
+
+      const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+      const result = await pool.query<{
+        id: string;
+        reporter_user_id: string;
+        target_user_id: string | null;
+        match_id: string | null;
+        reason: string;
+        details: string | null;
+        status: 'open' | 'reviewed' | 'resolved' | 'dismissed';
+        created_at: Date | string;
+        updated_at: Date | string;
+      }>(
+        `
+          SELECT
+            id,
+            reporter_user_id,
+            target_user_id,
+            match_id,
+            reason,
+            details,
+            status,
+            created_at,
+            updated_at
+          FROM user_reports
+          ${where}
+          ORDER BY created_at DESC
+          LIMIT $${values.length}
+        `,
+        values
+      );
+
+      return result.rows.map(mapReport);
+    },
+
+    async resolveReport(params): Promise<ReportDTO> {
+      const result = await pool.query<{
+        id: string;
+        reporter_user_id: string;
+        target_user_id: string | null;
+        match_id: string | null;
+        reason: string;
+        details: string | null;
+        status: 'open' | 'reviewed' | 'resolved' | 'dismissed';
+        created_at: Date | string;
+        updated_at: Date | string;
+      }>(
+        `
+          UPDATE user_reports
+          SET status = $2, updated_at = NOW()
+          WHERE id = $1
+          RETURNING
+            id,
+            reporter_user_id,
+            target_user_id,
+            match_id,
+            reason,
+            details,
+            status,
+            created_at,
+            updated_at
+        `,
+        [params.reportId, params.status]
+      );
+
+      const row = result.rows[0];
+      if (!row) {
+        throw new StoreError('Report not found', 'not_found');
+      }
+
+      return mapReport(row);
     }
   };
 }

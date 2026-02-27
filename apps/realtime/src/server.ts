@@ -112,6 +112,13 @@ const roomSubscribeSchema = z.object({
   })
 });
 
+const roomUnsubscribeSchema = z.object({
+  type: z.literal('room.unsubscribe'),
+  payload: z.object({
+    roomId: z.string().uuid()
+  })
+});
+
 const roomMoveSchema = z.union([
   z.object({
     type: z.literal('room.move'),
@@ -388,6 +395,10 @@ function replayMoves(
         player
       });
 
+      if (!applied.accepted) {
+        continue;
+      }
+
       current = {
         ...current,
         state: applied.nextState
@@ -402,6 +413,9 @@ function replayMoves(
       }
 
       const applied = applyGoMove(current.state, payload);
+      if (!applied.accepted) {
+        continue;
+      }
       current = {
         ...current,
         state: applied.nextState
@@ -415,6 +429,9 @@ function replayMoves(
     }
 
     const applied = applyXiangqiMove(current.state, payload as XiangqiMove);
+    if (!applied.accepted) {
+      continue;
+    }
     current = {
       ...current,
       state: applied.nextState
@@ -645,12 +662,21 @@ async function handleGomokuMove(
         : runtime.state.winner === 'white'
           ? runtime.players.white
           : null;
+    const resultPayload: Record<string, unknown> = {
+      gomoku: {
+        ruleset: runtime.state.ruleset,
+        winner: runtime.state.winner,
+        status: runtime.state.status,
+        moveCount: runtime.state.moveCount
+      }
+    };
 
     await completeMatch({
       matchId: runtime.matchId,
       roomId: runtime.roomId,
       winnerUserId,
-      status: 'completed'
+      status: 'completed',
+      resultPayload
     });
 
     activeRuntimes.delete(runtime.roomId);
@@ -659,7 +685,8 @@ async function handleGomokuMove(
       payload: {
         roomId: runtime.roomId,
         matchId: runtime.matchId,
-        winnerUserId
+        winnerUserId,
+        resultPayload
       }
     });
   }
@@ -717,11 +744,20 @@ async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoM
   });
 
   if (runtime.state.status === 'completed') {
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+    const resultPayload = runtime.state.scoring ? { go: runtime.state.scoring } : null;
+
     await completeMatch({
       matchId: runtime.matchId,
       roomId: runtime.roomId,
-      winnerUserId: null,
-      status: 'completed'
+      winnerUserId,
+      status: 'completed',
+      resultPayload
     });
 
     activeRuntimes.delete(runtime.roomId);
@@ -730,7 +766,8 @@ async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoM
       payload: {
         roomId: runtime.roomId,
         matchId: runtime.matchId,
-        winnerUserId: null
+        winnerUserId,
+        resultPayload
       }
     });
   }
@@ -785,13 +822,26 @@ async function handleXiangqiMove(
   });
 
   if (runtime.state.status === 'completed') {
-    const winnerUserId = runtime.state.winner === 'red' ? runtime.players.red : runtime.players.black;
+    const winnerUserId =
+      runtime.state.winner === 'red'
+        ? runtime.players.red
+        : runtime.state.winner === 'black'
+          ? runtime.players.black
+          : null;
+    const resultPayload: Record<string, unknown> = {
+      xiangqi: {
+        winner: runtime.state.winner,
+        outcomeReason: runtime.state.outcomeReason,
+        moveCount: runtime.state.moveCount
+      }
+    };
 
     await completeMatch({
       matchId: runtime.matchId,
       roomId: runtime.roomId,
       winnerUserId,
-      status: 'completed'
+      status: 'completed',
+      resultPayload
     });
 
     activeRuntimes.delete(runtime.roomId);
@@ -800,7 +850,8 @@ async function handleXiangqiMove(
       payload: {
         roomId: runtime.roomId,
         matchId: runtime.matchId,
-        winnerUserId
+        winnerUserId,
+        resultPayload
       }
     });
   }
@@ -815,6 +866,11 @@ async function handleMove(
 ): Promise<void> {
   if (!client.user) {
     sendError(client, 'not_authenticated');
+    return;
+  }
+
+  if (!client.subscribedRooms.has(message.roomId)) {
+    sendError(client, 'room_not_subscribed');
     return;
   }
 
@@ -1012,6 +1068,23 @@ wss.on('connection', (socket) => {
         return;
       }
 
+      if (parsed.type === 'room.unsubscribe') {
+        const msg = roomUnsubscribeSchema.parse(parsed);
+        if (client.subscribedRooms.has(msg.payload.roomId)) {
+          removeRoomSubscription(client, msg.payload.roomId);
+          if (!isUserSubscribedToRoom(authedUser.id, msg.payload.roomId)) {
+            broadcast(roomSubscribers.get(msg.payload.roomId) ?? [], {
+              type: 'room.player_left',
+              payload: {
+                roomId: msg.payload.roomId,
+                userId: authedUser.id
+              }
+            });
+          }
+        }
+        return;
+      }
+
       if (parsed.type === 'room.move') {
         const msg = roomMoveSchema.parse(parsed);
 
@@ -1139,7 +1212,9 @@ wss.on('connection', (socket) => {
       matchmakingQueue.markDisconnected(client.user.id);
     }
 
-    for (const roomId of client.subscribedRooms) {
+    const subscribedRoomIds = Array.from(client.subscribedRooms);
+
+    for (const roomId of subscribedRoomIds) {
       removeRoomSubscription(client, roomId);
       if (client.user && !isUserSubscribedToRoom(client.user.id, roomId)) {
         broadcast(roomSubscribers.get(roomId) ?? [], {
@@ -1156,7 +1231,7 @@ wss.on('connection', (socket) => {
       reconnectSnapshots.set(client.reconnectKey, {
         userId: client.user.id,
         lobbySubscribed: client.lobbySubscribed,
-        roomIds: Array.from(client.subscribedRooms),
+        roomIds: subscribedRoomIds,
         expiresAt: Date.now() + 60_000
       });
     }
