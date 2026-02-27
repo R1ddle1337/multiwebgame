@@ -7,7 +7,7 @@ Message shape:
 ```json
 {
   "type": "event.name",
-  "payload": { }
+  "payload": {}
 }
 ```
 
@@ -20,13 +20,19 @@ Message shape:
   - `{}`
 
 - `room.subscribe`
-  - `{ roomId: string }`
+  - `{ roomId: string, asSpectator?: boolean }`
 
-- `room.move`
-  - `{ roomId: string, x: number, y: number }`
+- `room.move` (Gomoku)
+  - `{ roomId: string, gameType: "gomoku", x: number, y: number }`
+
+- `room.move` (Go)
+  - `{ roomId: string, gameType: "go", move: { type: "place", x, y, player } | { type: "pass", player } }`
+
+- `room.move` (Xiangqi)
+  - `{ roomId: string, gameType: "xiangqi", move: { from, to, player } }`
 
 - `matchmaking.join`
-  - `{ gameType: "gomoku" }`
+  - `{ gameType: "gomoku" | "go" | "xiangqi" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -49,10 +55,13 @@ Message shape:
   - `{ onlineUsers: [{ userId, displayName }] }`
 
 - `room.state`
-  - `{ room, gomokuState }`
+  - Gomoku: `{ room, gameType: "gomoku", state, viewerRole }`
+  - Go: `{ room, gameType: "go", state, viewerRole }`
+  - Xiangqi: `{ room, gameType: "xiangqi", state, viewerRole }`
+  - 2048 room: `{ room, gameType: "single_2048", state: null, viewerRole }`
 
 - `room.player_joined`
-  - `{ roomId, user }`
+  - `{ roomId, user, role }`
 
 - `room.player_left`
   - `{ roomId, userId }`
@@ -64,13 +73,19 @@ Message shape:
   - `{ invitationId, status }`
 
 - `matchmaking.queued`
-  - `{ queueSize }`
+  - `{ gameType, queueSize }`
+
+- `matchmaking.timeout`
+  - `{ gameType }`
 
 - `matchmaking.matched`
   - `{ room, matchId }`
 
 - `match.move_applied`
-  - `{ roomId, state, lastMove }`
+  - Game-specific payload including `{ roomId, gameType, state, lastMove }`
+
+- `match.completed`
+  - `{ roomId, matchId, winnerUserId }`
 
 - `pong`
   - `{ ts }`
@@ -78,8 +93,11 @@ Message shape:
 - `error`
   - `{ reason }`
 
-## Reconnect Handling
+## Reconnect, Timeout, Heartbeat
 
 - Client stores `reconnectKey` from `auth.ok`.
 - On reconnect, client sends `auth` with prior `reconnectKey`.
 - Server restores lobby + room subscriptions for a short reconnect window.
+- Matchmaking entries keep a reconnect grace period; stale disconnected entries are dropped.
+- Matchmaking queue entries time out automatically if unmatched.
+- Client sends periodic `ping`; server tracks last activity and closes stale sockets.

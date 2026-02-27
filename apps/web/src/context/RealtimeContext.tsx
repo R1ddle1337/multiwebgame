@@ -1,8 +1,10 @@
 import type {
+  BoardGameType,
   ClientToServerMessage,
-  GomokuState,
   InvitationDTO,
   RoomDTO,
+  RoomPlayerRole,
+  RoomStatePayload,
   ServerToClientMessage,
   UserDTO
 } from '@multiwebgame/shared-types';
@@ -12,19 +14,23 @@ import { storage } from '../lib/api';
 
 interface RoomSnapshot {
   room: RoomDTO;
-  gomokuState: GomokuState | null;
+  gameType: RoomStatePayload['gameType'];
+  state: RoomStatePayload['state'];
+  viewerRole: RoomPlayerRole;
 }
 
 interface RealtimeValue {
   status: 'disconnected' | 'connecting' | 'connected';
   onlineUsers: Array<{ userId: string; displayName: string }>;
   invitations: InvitationDTO[];
-  queueSize: number;
+  queueSizes: Record<BoardGameType, number>;
   roomStates: Record<string, RoomSnapshot>;
   matchedRoom: { room: RoomDTO; matchId: string } | null;
+  matchmakingTimeout: BoardGameType | null;
   send: (message: ClientToServerMessage) => void;
   setInvitations: React.Dispatch<React.SetStateAction<InvitationDTO[]>>;
   clearMatchedRoom: () => void;
+  clearMatchmakingTimeout: () => void;
 }
 
 const RealtimeContext = createContext<RealtimeValue | null>(null);
@@ -40,13 +46,19 @@ interface Props {
 export function RealtimeProvider({ token, user, children }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const pingTimerRef = useRef<number | null>(null);
 
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected'>('connecting');
   const [onlineUsers, setOnlineUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
   const [invitations, setInvitations] = useState<InvitationDTO[]>([]);
-  const [queueSize, setQueueSize] = useState(0);
+  const [queueSizes, setQueueSizes] = useState<Record<BoardGameType, number>>({
+    gomoku: 0,
+    go: 0,
+    xiangqi: 0
+  });
   const [roomStates, setRoomStates] = useState<Record<string, RoomSnapshot>>({});
   const [matchedRoom, setMatchedRoom] = useState<{ room: RoomDTO; matchId: string } | null>(null);
+  const [matchmakingTimeout, setMatchmakingTimeout] = useState<BoardGameType | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -77,6 +89,23 @@ export function RealtimeProvider({ token, user, children }: Props) {
             setStatus('connected');
             storage.setReconnectKey(message.payload.reconnectKey);
             socket.send(JSON.stringify({ type: 'lobby.subscribe', payload: {} }));
+
+            if (pingTimerRef.current !== null) {
+              clearInterval(pingTimerRef.current);
+            }
+
+            pingTimerRef.current = window.setInterval(() => {
+              if (socket.readyState !== WebSocket.OPEN) {
+                return;
+              }
+
+              socket.send(
+                JSON.stringify({
+                  type: 'ping',
+                  payload: { ts: Date.now() }
+                })
+              );
+            }, 15_000);
             break;
           }
           case 'auth.error': {
@@ -110,7 +139,14 @@ export function RealtimeProvider({ token, user, children }: Props) {
             break;
           }
           case 'matchmaking.queued': {
-            setQueueSize(message.payload.queueSize);
+            setQueueSizes((current) => ({
+              ...current,
+              [message.payload.gameType]: message.payload.queueSize
+            }));
+            break;
+          }
+          case 'matchmaking.timeout': {
+            setMatchmakingTimeout(message.payload.gameType);
             break;
           }
           case 'matchmaking.matched': {
@@ -122,7 +158,9 @@ export function RealtimeProvider({ token, user, children }: Props) {
               ...current,
               [message.payload.room.id]: {
                 room: message.payload.room,
-                gomokuState: message.payload.gomokuState
+                gameType: message.payload.gameType,
+                state: message.payload.state,
+                viewerRole: message.payload.viewerRole
               }
             }));
             break;
@@ -138,7 +176,8 @@ export function RealtimeProvider({ token, user, children }: Props) {
                 ...current,
                 [message.payload.roomId]: {
                   ...existing,
-                  gomokuState: message.payload.state
+                  state: message.payload.state,
+                  gameType: message.payload.gameType
                 }
               };
             });
@@ -151,6 +190,11 @@ export function RealtimeProvider({ token, user, children }: Props) {
 
       socket.addEventListener('close', () => {
         setStatus('disconnected');
+        if (pingTimerRef.current !== null) {
+          clearInterval(pingTimerRef.current);
+          pingTimerRef.current = null;
+        }
+
         if (!isMounted) {
           return;
         }
@@ -165,6 +209,9 @@ export function RealtimeProvider({ token, user, children }: Props) {
       isMounted = false;
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current);
+      }
+      if (pingTimerRef.current !== null) {
+        clearInterval(pingTimerRef.current);
       }
       socketRef.current?.close();
       socketRef.current = null;
@@ -184,14 +231,16 @@ export function RealtimeProvider({ token, user, children }: Props) {
       status,
       onlineUsers,
       invitations,
-      queueSize,
+      queueSizes,
       roomStates,
       matchedRoom,
+      matchmakingTimeout,
       send,
       setInvitations,
-      clearMatchedRoom: () => setMatchedRoom(null)
+      clearMatchedRoom: () => setMatchedRoom(null),
+      clearMatchmakingTimeout: () => setMatchmakingTimeout(null)
     }),
-    [status, onlineUsers, invitations, queueSize, roomStates, matchedRoom]
+    [status, onlineUsers, invitations, queueSizes, roomStates, matchedRoom, matchmakingTimeout]
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

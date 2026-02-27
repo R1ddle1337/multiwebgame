@@ -37,7 +37,8 @@ export function Game2048Page() {
     <main className="panel game-2048">
       <h2>2048</h2>
       <p>
-        Use arrow keys or buttons. Score: <strong>{state.score}</strong> • Status: <strong>{state.status}</strong>
+        Use arrow keys or buttons. Score: <strong>{state.score}</strong> • Status:{' '}
+        <strong>{state.status}</strong>
       </p>
 
       <div className="tile-grid">

@@ -42,6 +42,28 @@ Services:
 - Realtime WS: `ws://localhost:4001`
 - Web: `http://localhost:5173`
 
+## Quality Gates
+
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run format:check
+```
+
+## Git Hooks
+
+Husky + lint-staged + commitlint are configured workspace-wide.
+
+- `pre-commit`: ESLint + Prettier on staged files.
+- `commit-msg`: Conventional Commits validation.
+
+If hooks are not installed yet:
+
+```bash
+npm run prepare
+```
+
 ## Full Docker Stack
 
 ```bash
@@ -52,10 +74,4 @@ docker compose up --build
 
 ```bash
 npm run build
-```
-
-## Test
-
-```bash
-npm test
 ```

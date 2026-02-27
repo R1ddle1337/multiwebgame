@@ -1,7 +1,10 @@
 import type {
   AuthResponse,
+  BlockDTO,
+  BoardGameType,
   InvitationDTO,
   MatchDTO,
+  RatingDTO,
   RoomDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
@@ -42,18 +45,43 @@ export class ApiClient {
     });
   }
 
+  authRegister(params: { displayName: string; email: string; password: string }): Promise<AuthResponse> {
+    return this.request<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+  }
+
+  authLogin(params: { email: string; password: string }): Promise<AuthResponse> {
+    return this.request<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+  }
+
+  upgradeGuest(params: { displayName: string; email: string; password: string }): Promise<{ user: UserDTO }> {
+    return this.request('/auth/upgrade', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+  }
+
   me(): Promise<{ user: UserDTO }> {
     return this.request('/me');
+  }
+
+  listRatings(): Promise<{ ratings: RatingDTO[] }> {
+    return this.request('/ratings/me');
   }
 
   listRooms(): Promise<{ rooms: RoomDTO[] }> {
     return this.request('/rooms');
   }
 
-  createRoom(gameType: 'single_2048' | 'gomoku'): Promise<{ room: RoomDTO }> {
+  createRoom(gameType: BoardGameType | 'single_2048', maxPlayers?: number): Promise<{ room: RoomDTO }> {
     return this.request('/rooms', {
       method: 'POST',
-      body: JSON.stringify({ gameType })
+      body: JSON.stringify({ gameType, maxPlayers })
     });
   }
 
@@ -61,9 +89,10 @@ export class ApiClient {
     return this.request(`/rooms/${roomId}`);
   }
 
-  joinRoom(roomId: string): Promise<{ room: RoomDTO }> {
+  joinRoom(roomId: string, asSpectator = false): Promise<{ room: RoomDTO }> {
     return this.request(`/rooms/${roomId}/join`, {
-      method: 'POST'
+      method: 'POST',
+      body: JSON.stringify({ asSpectator })
     });
   }
 
@@ -84,7 +113,10 @@ export class ApiClient {
     });
   }
 
-  respondInvitation(invitationId: string, action: 'accept' | 'decline'): Promise<{ invitation: InvitationDTO }> {
+  respondInvitation(
+    invitationId: string,
+    action: 'accept' | 'decline'
+  ): Promise<{ invitation: InvitationDTO }> {
     return this.request(`/invitations/${invitationId}/respond`, {
       method: 'POST',
       body: JSON.stringify({ action })
@@ -97,6 +129,29 @@ export class ApiClient {
 
   getMatch(matchId: string): Promise<{ match: MatchDTO }> {
     return this.request(`/matches/${matchId}`);
+  }
+
+  listBlocks(): Promise<{ blocks: BlockDTO[] }> {
+    return this.request('/moderation/blocks');
+  }
+
+  blockUser(params: { userId: string; reason?: string }): Promise<{ block: BlockDTO }> {
+    return this.request('/moderation/blocks', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
+  }
+
+  reportUser(params: {
+    targetUserId?: string;
+    matchId?: string;
+    reason: string;
+    details?: string;
+  }): Promise<{ ok: true }> {
+    return this.request('/moderation/reports', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    });
   }
 }
 
