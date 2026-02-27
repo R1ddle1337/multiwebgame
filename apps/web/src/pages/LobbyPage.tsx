@@ -1,4 +1,12 @@
-import type { BoardGameType, MatchDTO, RatingDTO, RoomDTO, UserDTO } from '@multiwebgame/shared-types';
+import type {
+  BoardGameType,
+  MatchDTO,
+  RatingDTO,
+  RatingFormulaDTO,
+  ReportDTO,
+  RoomDTO,
+  UserDTO
+} from '@multiwebgame/shared-types';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -13,13 +21,18 @@ interface Props {
 export function LobbyPage({ api, user }: Props) {
   const realtime = useRealtime();
   const navigate = useNavigate();
+  const setInvitations = realtime.setInvitations;
+  const clearMatchmakingTimeout = realtime.clearMatchmakingTimeout;
 
   const [rooms, setRooms] = useState<RoomDTO[]>([]);
   const [history, setHistory] = useState<MatchDTO[]>([]);
   const [ratings, setRatings] = useState<RatingDTO[]>([]);
+  const [ratingFormulas, setRatingFormulas] = useState<RatingFormulaDTO[]>([]);
+  const [adminReports, setAdminReports] = useState<ReportDTO[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [loadingRatings, setLoadingRatings] = useState(true);
+  const [loadingReports, setLoadingReports] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeQueueGame, setActiveQueueGame] = useState<BoardGameType | null>(null);
   const [blockUserId, setBlockUserId] = useState('');
@@ -80,10 +93,40 @@ export function LobbyPage({ api, user }: Props) {
       });
 
     api
+      .listRatingFormulas()
+      .then((result) => {
+        if (active) {
+          setRatingFormulas(result.formulas);
+        }
+      })
+      .catch(() => {
+        // Formula metadata is informational.
+      });
+
+    if (user.isAdmin) {
+      setLoadingReports(true);
+      api
+        .listReports({ status: 'open', limit: 30 })
+        .then((result) => {
+          if (active) {
+            setAdminReports(result.reports);
+          }
+        })
+        .catch(() => {
+          // Admin triage is best effort for first paint.
+        })
+        .finally(() => {
+          if (active) {
+            setLoadingReports(false);
+          }
+        });
+    }
+
+    api
       .listInvitations()
       .then((result) => {
         if (active) {
-          realtime.setInvitations(result.invitations);
+          setInvitations(result.invitations);
         }
       })
       .catch(() => {
@@ -93,15 +136,15 @@ export function LobbyPage({ api, user }: Props) {
     return () => {
       active = false;
     };
-  }, [api, realtime]);
+  }, [api, setInvitations, user.isAdmin]);
 
   useEffect(() => {
     if (realtime.matchmakingTimeout) {
       setError(`Matchmaking timed out for ${realtime.matchmakingTimeout}.`);
       setActiveQueueGame(null);
-      realtime.clearMatchmakingTimeout();
+      clearMatchmakingTimeout();
     }
-  }, [realtime]);
+  }, [clearMatchmakingTimeout, realtime.matchmakingTimeout]);
 
   const createRoom = async (gameType: RoomDTO['gameType']) => {
     const result = await api.createRoom(gameType, gameType === 'single_2048' ? 1 : 4);
@@ -312,6 +355,90 @@ export function LobbyPage({ api, user }: Props) {
           ))}
           {ratings.length === 0 && !loadingRatings ? <li>No ratings yet.</li> : null}
         </ul>
+
+        <h3>Rating Formula</h3>
+        <ul className="simple-list">
+          {ratingFormulas.map((formula) => (
+            <li key={formula.gameType}>
+              {formula.gameType}: ELO K={formula.kFactor}, initial {formula.initialRating}
+            </li>
+          ))}
+          {ratingFormulas.length === 0 ? <li>Formula metadata unavailable.</li> : null}
+        </ul>
+
+        {user.isAdmin ? (
+          <>
+            <h3>Admin Report Queue</h3>
+            {loadingReports ? <p>Loading reports...</p> : null}
+            <div className="card-list">
+              {adminReports.map((report) => (
+                <article className="card" key={report.id}>
+                  <p>
+                    <strong>{report.status}</strong> • {report.reason}
+                  </p>
+                  <p>
+                    Reporter <code>{report.reporterUserId.slice(0, 8)}</code>{' '}
+                    {report.targetUserId ? (
+                      <>
+                        • Target <code>{report.targetUserId.slice(0, 8)}</code>
+                      </>
+                    ) : null}
+                  </p>
+                  {report.details ? <p>{report.details}</p> : null}
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        api
+                          .resolveReport(report.id, 'reviewed')
+                          .then((response) => {
+                            setAdminReports((current) =>
+                              current.map((entry) =>
+                                entry.id === response.report.id ? response.report : entry
+                              )
+                            );
+                          })
+                          .catch((err) =>
+                            setError(err instanceof Error ? err.message : 'Failed to update report')
+                          );
+                      }}
+                    >
+                      Mark Reviewed
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        api
+                          .resolveReport(report.id, 'resolved')
+                          .then(() => setAdminReports((current) => current.filter((r) => r.id !== report.id)))
+                          .catch((err) =>
+                            setError(err instanceof Error ? err.message : 'Failed to resolve report')
+                          );
+                      }}
+                    >
+                      Resolve
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        api
+                          .resolveReport(report.id, 'dismissed')
+                          .then(() => setAdminReports((current) => current.filter((r) => r.id !== report.id)))
+                          .catch((err) =>
+                            setError(err instanceof Error ? err.message : 'Failed to dismiss report')
+                          );
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {adminReports.length === 0 && !loadingReports ? <p>No open reports.</p> : null}
+            </div>
+          </>
+        ) : null}
 
         <h3>Match History</h3>
         {loadingHistory ? <p>Loading history...</p> : null}

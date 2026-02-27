@@ -4,7 +4,9 @@ import type {
   BoardGameType,
   InvitationDTO,
   MatchDTO,
+  RatingFormulaDTO,
   RatingDTO,
+  ReportDTO,
   RoomDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
@@ -72,6 +74,10 @@ export class ApiClient {
 
   listRatings(): Promise<{ ratings: RatingDTO[] }> {
     return this.request('/ratings/me');
+  }
+
+  listRatingFormulas(): Promise<{ formulas: RatingFormulaDTO[] }> {
+    return this.request('/ratings/formula');
   }
 
   listRooms(): Promise<{ rooms: RoomDTO[] }> {
@@ -151,6 +157,28 @@ export class ApiClient {
     return this.request('/moderation/reports', {
       method: 'POST',
       body: JSON.stringify(params)
+    });
+  }
+
+  listReports(params?: { status?: ReportDTO['status']; limit?: number }): Promise<{ reports: ReportDTO[] }> {
+    const query = new URLSearchParams();
+    if (params?.status) {
+      query.set('status', params.status);
+    }
+    if (typeof params?.limit === 'number') {
+      query.set('limit', String(params.limit));
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/moderation/reports${suffix}`);
+  }
+
+  resolveReport(
+    reportId: string,
+    status: Exclude<ReportDTO['status'], 'open'>
+  ): Promise<{ report: ReportDTO }> {
+    return this.request(`/moderation/reports/${reportId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
     });
   }
 }

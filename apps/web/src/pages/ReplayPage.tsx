@@ -1,12 +1,16 @@
 import {
+  apply2048Move,
   applyGoMove,
   applyGomokuMove,
   applyXiangqiMove,
+  create2048State,
   createGoState,
   createGomokuState,
   createXiangqiState
 } from '@multiwebgame/game-engines';
 import type {
+  Direction2048,
+  Game2048State,
   GoMove,
   GoState,
   GomokuMark,
@@ -26,14 +30,27 @@ interface Props {
   api: ApiClient;
 }
 
+function randomFromSequence(values: number[]): () => number {
+  const queue = [...values];
+  return () => {
+    const next = queue.shift();
+    if (typeof next !== 'number') {
+      return 0.5;
+    }
+    return next;
+  };
+}
+
 export function ReplayPage({ api }: Props) {
   const { matchId = '' } = useParams();
   const [gameType, setGameType] = useState<'gomoku' | 'go' | 'xiangqi' | 'single_2048'>('gomoku');
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
   const [xiangqiStates, setXiangqiStates] = useState<XiangqiState[]>([createXiangqiState()]);
+  const [game2048States, setGame2048States] = useState<Game2048State[]>([create2048State(() => 0)]);
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +81,9 @@ export function ReplayPage({ api }: Props) {
               y: payload.y,
               player: payload.player ?? current.nextPlayer
             });
+            if (!applied.accepted) {
+              continue;
+            }
 
             current = applied.nextState;
             snapshots.push(current);
@@ -85,6 +105,10 @@ export function ReplayPage({ api }: Props) {
             }
 
             const applied = applyGoMove(current, payload);
+            if (!applied.accepted) {
+              continue;
+            }
+
             current = applied.nextState;
             snapshots.push(current);
           }
@@ -105,6 +129,10 @@ export function ReplayPage({ api }: Props) {
             }
 
             const applied = applyXiangqiMove(current, payload as XiangqiMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
             current = applied.nextState;
             snapshots.push(current);
           }
@@ -114,7 +142,41 @@ export function ReplayPage({ api }: Props) {
           return;
         }
 
-        setStep(0);
+        let current = create2048State(() => 0);
+        const snapshots: Game2048State[] = [current];
+
+        for (const move of result.match.moves) {
+          const payload = move.payload as {
+            direction?: Direction2048;
+            forcedSpawn?: { row: number; col: number; value: number };
+            randomValues?: number[];
+            board?: number[][];
+            score?: number;
+            status?: Game2048State['status'];
+          };
+
+          if (payload.board && typeof payload.score === 'number') {
+            current = {
+              board: payload.board,
+              score: payload.score,
+              status: payload.status ?? current.status
+            };
+            snapshots.push(current);
+            continue;
+          }
+
+          if (!payload.direction) {
+            continue;
+          }
+
+          const random = randomFromSequence(payload.randomValues ?? []);
+          const applied = apply2048Move(current, payload.direction, random, payload.forcedSpawn);
+          current = applied.state;
+          snapshots.push(current);
+        }
+
+        setGame2048States(snapshots);
+        setStep(snapshots.length - 1);
       })
       .catch((err) => {
         if (active) {
@@ -132,34 +194,6 @@ export function ReplayPage({ api }: Props) {
     };
   }, [api, matchId]);
 
-  useEffect(() => {
-    if (!playing) {
-      return;
-    }
-
-    const timer = window.setInterval(() => {
-      setStep((current) => {
-        const max =
-          gameType === 'gomoku'
-            ? gomokuStates.length - 1
-            : gameType === 'go'
-              ? goStates.length - 1
-              : gameType === 'xiangqi'
-                ? xiangqiStates.length - 1
-                : 0;
-
-        if (current >= max) {
-          setPlaying(false);
-          return max;
-        }
-
-        return current + 1;
-      });
-    }, 400);
-
-    return () => clearInterval(timer);
-  }, [gameType, goStates.length, gomokuStates.length, playing, xiangqiStates.length]);
-
   const maxStep = useMemo(() => {
     if (gameType === 'gomoku') {
       return Math.max(0, gomokuStates.length - 1);
@@ -170,8 +204,27 @@ export function ReplayPage({ api }: Props) {
     if (gameType === 'xiangqi') {
       return Math.max(0, xiangqiStates.length - 1);
     }
-    return 0;
-  }, [gameType, goStates.length, gomokuStates.length, xiangqiStates.length]);
+    return Math.max(0, game2048States.length - 1);
+  }, [gameType, goStates.length, gomokuStates.length, xiangqiStates.length, game2048States.length]);
+
+  useEffect(() => {
+    if (!playing) {
+      return;
+    }
+
+    const delay = Math.max(120, Math.round(700 / speed));
+    const timer = window.setInterval(() => {
+      setStep((current) => {
+        if (current >= maxStep) {
+          setPlaying(false);
+          return maxStep;
+        }
+        return current + 1;
+      });
+    }, delay);
+
+    return () => clearInterval(timer);
+  }, [maxStep, playing, speed]);
 
   if (loading) {
     return <main className="panel">Loading replay...</main>;
@@ -181,16 +234,21 @@ export function ReplayPage({ api }: Props) {
     return <main className="panel error-text">{error}</main>;
   }
 
+  const clampedStep = Math.min(step, maxStep);
+
   return (
     <main className="panel replay-page">
       <h2>Replay {matchId.slice(0, 8)}</h2>
       <p>
-        Game: <strong>{gameType}</strong> • Step {step}/{maxStep}
+        Game: <strong>{gameType}</strong> • Step {clampedStep}/{maxStep}
       </p>
 
       <div className="button-row">
         <button type="button" className="secondary" onClick={() => setStep(0)}>
           Start
+        </button>
+        <button type="button" className="secondary" onClick={() => setStep((s) => Math.max(0, s - 1))}>
+          Prev
         </button>
         <button
           type="button"
@@ -200,25 +258,50 @@ export function ReplayPage({ api }: Props) {
         >
           {playing ? 'Pause' : 'Play'}
         </button>
+        <button type="button" className="secondary" onClick={() => setStep((s) => Math.min(maxStep, s + 1))}>
+          Next
+        </button>
         <button type="button" className="secondary" onClick={() => setStep(maxStep)}>
           End
         </button>
+
+        <label className="speed-picker">
+          Speed
+          <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
+            <option value={0.5}>0.5x</option>
+            <option value={1}>1x</option>
+            <option value={1.5}>1.5x</option>
+            <option value={2}>2x</option>
+          </select>
+        </label>
       </div>
 
       <input
         type="range"
         min={0}
         max={maxStep}
-        value={step}
+        value={clampedStep}
         onChange={(event) => setStep(Number(event.target.value))}
       />
 
-      {gameType === 'gomoku' ? <GomokuBoard state={gomokuStates[Math.min(step, maxStep)]} disabled /> : null}
-      {gameType === 'go' ? <GoBoard state={goStates[Math.min(step, maxStep)]} disabled /> : null}
-      {gameType === 'xiangqi' ? (
-        <XiangqiBoard state={xiangqiStates[Math.min(step, maxStep)]} disabled />
+      {gameType === 'gomoku' ? <GomokuBoard state={gomokuStates[clampedStep]} disabled /> : null}
+      {gameType === 'go' ? <GoBoard state={goStates[clampedStep]} disabled /> : null}
+      {gameType === 'xiangqi' ? <XiangqiBoard state={xiangqiStates[clampedStep]} disabled /> : null}
+      {gameType === 'single_2048' ? (
+        <div className="game-2048 replay-2048">
+          <p>
+            Score: <strong>{game2048States[clampedStep].score}</strong> • Status:{' '}
+            <strong>{game2048States[clampedStep].status}</strong>
+          </p>
+          <div className="tile-grid">
+            {game2048States[clampedStep].board.flat().map((cell, index) => (
+              <div key={index} className={`tile tile-${cell || 'empty'}`}>
+                {cell || ''}
+              </div>
+            ))}
+          </div>
+        </div>
       ) : null}
-      {gameType === 'single_2048' ? <p>Replay is currently available for board PvP modes.</p> : null}
     </main>
   );
 }

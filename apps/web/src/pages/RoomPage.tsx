@@ -35,6 +35,7 @@ export function RoomPage({ api, user }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const realtime = useRealtime();
+  const send = realtime.send;
 
   const [fallbackRoom, setFallbackRoom] = useState<RoomDTO | null>(null);
   const [inviteUserId, setInviteUserId] = useState('');
@@ -82,7 +83,7 @@ export function RoomPage({ api, user }: Props) {
       return;
     }
 
-    realtime.send({
+    send({
       type: 'room.subscribe',
       payload: { roomId, asSpectator: watchMode }
     });
@@ -100,14 +101,21 @@ export function RoomPage({ api, user }: Props) {
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to load room');
       });
-  }, [api, realtime, roomId, watchMode]);
+
+    return () => {
+      send({
+        type: 'room.unsubscribe',
+        payload: { roomId }
+      });
+    };
+  }, [api, roomId, send, watchMode]);
 
   const sendGomokuMove = (x: number, y: number) => {
     if (!canPlayGomoku) {
       return;
     }
 
-    realtime.send({
+    send({
       type: 'room.move',
       payload: {
         roomId,
@@ -123,7 +131,7 @@ export function RoomPage({ api, user }: Props) {
       return;
     }
 
-    realtime.send({
+    send({
       type: 'room.move',
       payload: {
         roomId,
@@ -138,7 +146,7 @@ export function RoomPage({ api, user }: Props) {
       return;
     }
 
-    realtime.send({
+    send({
       type: 'room.move',
       payload: {
         roomId,
@@ -177,7 +185,7 @@ export function RoomPage({ api, user }: Props) {
               type="button"
               onClick={async () => {
                 await api.joinRoom(room.id, false);
-                realtime.send({ type: 'room.subscribe', payload: { roomId: room.id } });
+                send({ type: 'room.subscribe', payload: { roomId: room.id } });
               }}
             >
               Try Join As Player
@@ -259,7 +267,9 @@ export function RoomPage({ api, user }: Props) {
               <strong>{gomokuState.status}</strong>
             </p>
             <GomokuBoard state={gomokuState} disabled={!canPlayGomoku} onCellClick={sendGomokuMove} />
-            {gomokuState.winner ? <p>Winner: {gomokuState.winner}</p> : null}
+            {gomokuState.status === 'completed' || gomokuState.status === 'draw' ? (
+              <p>Result: {gomokuState.winner ? `winner ${gomokuState.winner}` : 'draw'}</p>
+            ) : null}
           </>
         ) : null}
 
@@ -282,6 +292,13 @@ export function RoomPage({ api, user }: Props) {
                 Pass
               </button>
             </div>
+            {goState.scoring ? (
+              <p>
+                Chinese score • Black: <strong>{goState.scoring.black.total}</strong> • White:{' '}
+                <strong>{goState.scoring.white.total}</strong> (komi {goState.scoring.komi}) • Winner:{' '}
+                <strong>{goState.scoring.winner ?? 'draw'}</strong>
+              </p>
+            ) : null}
           </>
         ) : null}
 
@@ -321,7 +338,14 @@ export function RoomPage({ api, user }: Props) {
                 setXiangqiSelection(null);
               }}
             />
-            {xiangqiState.winner ? <p>Winner: {xiangqiState.winner}</p> : null}
+            {xiangqiState.status === 'completed' ? (
+              <p>
+                Result:{' '}
+                {xiangqiState.winner
+                  ? `winner ${xiangqiState.winner}`
+                  : `draw (${xiangqiState.outcomeReason ?? 'repetition'})`}
+              </p>
+            ) : null}
           </>
         ) : null}
       </section>

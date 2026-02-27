@@ -157,6 +157,7 @@ function Shell({
       <header className="topbar">
         <div>
           <strong>{user.displayName}</strong>
+          {user.isAdmin ? <span className="status-pill">Admin</span> : null}
           <span className="status-pill">Gomoku {user.ratings.gomoku ?? 1200}</span>
           <span className="status-pill">Go {user.ratings.go ?? 1200}</span>
           <span className="status-pill">Xiangqi {user.ratings.xiangqi ?? 1200}</span>

@@ -8,7 +8,7 @@ import type {
   ServerToClientMessage,
   UserDTO
 } from '@multiwebgame/shared-types';
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { storage } from '../lib/api';
 
@@ -218,13 +218,13 @@ export function RealtimeProvider({ token, user, children }: Props) {
     };
   }, [token, user.id]);
 
-  const send = (message: ClientToServerMessage) => {
+  const send = useCallback((message: ClientToServerMessage) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return;
     }
     socket.send(JSON.stringify(message));
-  };
+  }, []);
 
   const value = useMemo<RealtimeValue>(
     () => ({
@@ -240,7 +240,7 @@ export function RealtimeProvider({ token, user, children }: Props) {
       clearMatchedRoom: () => setMatchedRoom(null),
       clearMatchmakingTimeout: () => setMatchmakingTimeout(null)
     }),
-    [status, onlineUsers, invitations, queueSizes, roomStates, matchedRoom, matchmakingTimeout]
+    [status, onlineUsers, invitations, queueSizes, roomStates, matchedRoom, matchmakingTimeout, send]
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
