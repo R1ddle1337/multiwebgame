@@ -7,9 +7,10 @@ import type {
   RoomDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
+import { useI18n } from '../context/I18nContext';
 import { useRealtime } from '../context/RealtimeContext';
 import type { ApiClient } from '../lib/api';
 
@@ -20,6 +21,7 @@ interface Props {
 
 export function LobbyPage({ api, user }: Props) {
   const realtime = useRealtime();
+  const { t, translateError } = useI18n();
   const navigate = useNavigate();
   const setInvitations = realtime.setInvitations;
   const clearMatchmakingTimeout = realtime.clearMatchmakingTimeout;
@@ -36,6 +38,13 @@ export function LobbyPage({ api, user }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [activeQueueGame, setActiveQueueGame] = useState<BoardGameType | null>(null);
   const [blockUserId, setBlockUserId] = useState('');
+
+  const gameLabel = useCallback(
+    (gameType: RoomDTO['gameType'] | BoardGameType) => t(`enum.game.${gameType}`),
+    [t]
+  );
+  const roomStatusLabel = useCallback((status: RoomDTO['status']) => t(`enum.status.${status}`), [t]);
+  const matchStatusLabel = useCallback((status: MatchDTO['status']) => t(`enum.status.${status}`), [t]);
 
   const pendingInvites = useMemo(
     () =>
@@ -57,7 +66,7 @@ export function LobbyPage({ api, user }: Props) {
       })
       .catch((err) => {
         if (active) {
-          setError(err instanceof Error ? err.message : 'Failed to load rooms');
+          setError(translateError(err instanceof Error ? err.message : t('common.error_generic')));
         }
       })
       .finally(() => {
@@ -136,15 +145,28 @@ export function LobbyPage({ api, user }: Props) {
     return () => {
       active = false;
     };
-  }, [api, setInvitations, user.isAdmin]);
+  }, [api, setInvitations, t, translateError, user.isAdmin]);
 
   useEffect(() => {
     if (realtime.matchmakingTimeout) {
-      setError(`Matchmaking timed out for ${realtime.matchmakingTimeout}.`);
+      setError(
+        t('lobby.timeout', {
+          game: gameLabel(realtime.matchmakingTimeout)
+        })
+      );
       setActiveQueueGame(null);
       clearMatchmakingTimeout();
     }
-  }, [clearMatchmakingTimeout, realtime.matchmakingTimeout]);
+  }, [clearMatchmakingTimeout, gameLabel, realtime.matchmakingTimeout, t]);
+
+  useEffect(() => {
+    if (!realtime.lastError) {
+      return;
+    }
+
+    setError(translateError(realtime.lastError));
+    realtime.clearLastError();
+  }, [realtime, translateError]);
 
   const createRoom = async (gameType: RoomDTO['gameType']) => {
     const result = await api.createRoom(gameType, gameType === 'single_2048' ? 1 : 4);
@@ -174,91 +196,85 @@ export function LobbyPage({ api, user }: Props) {
   return (
     <main className="content-grid lobby-layout">
       <section className="panel">
-        <h2>Lobby</h2>
-        <p>Open rooms, live spectators, and multi-mode matchmaking.</p>
+        <h2>{t('lobby.title')}</h2>
+        <p>{t('lobby.subtitle')}</p>
 
         <div className="button-row">
           <button type="button" onClick={() => createRoom('gomoku')}>
-            Create Gomoku Room
+            {t('lobby.create.gomoku')}
           </button>
           <button type="button" onClick={() => createRoom('go')}>
-            Create Go Room
+            {t('lobby.create.go')}
           </button>
           <button type="button" onClick={() => createRoom('xiangqi')}>
-            Create Xiangqi Room
+            {t('lobby.create.xiangqi')}
           </button>
           <button type="button" className="secondary" onClick={() => navigate('/training')}>
-            Training Mode
+            {t('lobby.training')}
           </button>
           <button type="button" className="secondary" onClick={() => navigate('/game/2048')}>
-            2048 Solo
+            {t('lobby.solo_2048')}
           </button>
         </div>
 
         <div className="matchmaking">
-          <h3>Matchmaking</h3>
+          <h3>{t('lobby.matchmaking')}</h3>
           <div className="button-row">
-            <button
-              type="button"
-              className={activeQueueGame === 'gomoku' ? '' : 'secondary'}
-              onClick={() => queueForGame('gomoku')}
-            >
-              {activeQueueGame === 'gomoku' ? 'Leave Gomoku Queue' : 'Queue Gomoku'} (
-              {realtime.queueSizes.gomoku})
-            </button>
-            <button
-              type="button"
-              className={activeQueueGame === 'go' ? '' : 'secondary'}
-              onClick={() => queueForGame('go')}
-            >
-              {activeQueueGame === 'go' ? 'Leave Go Queue' : 'Queue Go'} ({realtime.queueSizes.go})
-            </button>
-            <button
-              type="button"
-              className={activeQueueGame === 'xiangqi' ? '' : 'secondary'}
-              onClick={() => queueForGame('xiangqi')}
-            >
-              {activeQueueGame === 'xiangqi' ? 'Leave Xiangqi Queue' : 'Queue Xiangqi'} (
-              {realtime.queueSizes.xiangqi})
-            </button>
+            {(['gomoku', 'go', 'xiangqi'] as const).map((gameType) => (
+              <button
+                key={gameType}
+                type="button"
+                className={activeQueueGame === gameType ? '' : 'secondary'}
+                onClick={() => queueForGame(gameType)}
+              >
+                {activeQueueGame === gameType
+                  ? t('lobby.queue.leave', { game: gameLabel(gameType) })
+                  : t('lobby.queue.join', { game: gameLabel(gameType) })}{' '}
+                ({realtime.queueSizes[gameType]})
+              </button>
+            ))}
           </div>
         </div>
 
         {error ? <p className="error-text">{error}</p> : null}
 
-        <h3>Open & Live Rooms</h3>
-        {loadingRooms ? <p>Loading rooms...</p> : null}
+        <h3>{t('lobby.rooms')}</h3>
+        {loadingRooms ? <p>{t('lobby.rooms.loading')}</p> : null}
         <div className="card-list">
           {rooms.map((room) => (
             <article className="card" key={room.id}>
               <div>
-                <strong>{room.gameType}</strong>
+                <strong>{gameLabel(room.gameType)}</strong>
                 <p>
-                  {room.players.length}/{room.maxPlayers} participants • {room.status}
+                  {t('lobby.participants', {
+                    count: room.players.length,
+                    max: room.maxPlayers,
+                    status: roomStatusLabel(room.status)
+                  })}
                 </p>
               </div>
               <div className="button-row">
                 <button type="button" onClick={() => joinRoom(room.id)}>
-                  Join
+                  {t('common.join')}
                 </button>
                 <button
                   type="button"
                   className="secondary"
                   onClick={() => navigate(`/rooms/${room.id}?watch=1`)}
                 >
-                  Spectate
+                  {t('common.spectate')}
                 </button>
               </div>
             </article>
           ))}
-          {rooms.length === 0 && !loadingRooms ? <p>No open rooms yet.</p> : null}
+          {rooms.length === 0 && !loadingRooms ? <p>{t('lobby.rooms.empty')}</p> : null}
         </div>
       </section>
 
       <section className="panel">
-        <h2>Presence, Ratings, Moderation</h2>
+        <h2>{t('lobby.presence.title')}</h2>
 
-        <h3>Online</h3>
+        <h3>{t('lobby.online')}</h3>
         <ul className="simple-list">
           {realtime.onlineUsers.map((online) => (
             <li key={online.userId}>
@@ -273,19 +289,19 @@ export function LobbyPage({ api, user }: Props) {
                         targetUserId: online.userId,
                         reason: 'lobby report'
                       })
-                      .then(() => setError('Report submitted.'))
-                      .catch((err) => setError(err instanceof Error ? err.message : 'Report failed'));
+                      .then(() => setError(t('lobby.report_submitted')))
+                      .catch((err) => setError(translateError(err instanceof Error ? err.message : '')));
                   }}
                 >
-                  Report
+                  {t('common.report')}
                 </button>
               )}
             </li>
           ))}
-          {realtime.onlineUsers.length === 0 ? <li>No users online</li> : null}
+          {realtime.onlineUsers.length === 0 ? <li>{t('lobby.online.empty')}</li> : null}
         </ul>
 
-        <h3>Block User</h3>
+        <h3>{t('lobby.block.title')}</h3>
         <form
           className="inline-form"
           onSubmit={(event) => {
@@ -293,21 +309,21 @@ export function LobbyPage({ api, user }: Props) {
             api
               .blockUser({ userId: blockUserId.trim(), reason: 'manual block' })
               .then(() => {
-                setError('User blocked.');
+                setError(t('lobby.user_blocked'));
                 setBlockUserId('');
               })
-              .catch((err) => setError(err instanceof Error ? err.message : 'Block failed'));
+              .catch((err) => setError(translateError(err instanceof Error ? err.message : '')));
           }}
         >
           <input
             value={blockUserId}
             onChange={(event) => setBlockUserId(event.target.value)}
-            placeholder="user UUID"
+            placeholder={t('lobby.block.placeholder')}
           />
-          <button type="submit">Block</button>
+          <button type="submit">{t('lobby.block.submit')}</button>
         </form>
 
-        <h3>Pending Invites</h3>
+        <h3>{t('lobby.invites')}</h3>
         <div className="card-list">
           {pendingInvites.map((invite) => (
             <article className="card" key={invite.id}>
@@ -325,7 +341,7 @@ export function LobbyPage({ api, user }: Props) {
                     })
                   }
                 >
-                  Accept
+                  {t('common.accept')}
                 </button>
                 <button
                   type="button"
@@ -337,39 +353,39 @@ export function LobbyPage({ api, user }: Props) {
                     })
                   }
                 >
-                  Decline
+                  {t('common.decline')}
                 </button>
               </div>
             </article>
           ))}
-          {pendingInvites.length === 0 ? <p>No pending invites.</p> : null}
+          {pendingInvites.length === 0 ? <p>{t('lobby.invites.empty')}</p> : null}
         </div>
 
-        <h3>Your Ratings</h3>
-        {loadingRatings ? <p>Loading ratings...</p> : null}
+        <h3>{t('lobby.ratings')}</h3>
+        {loadingRatings ? <p>{t('lobby.ratings.loading')}</p> : null}
         <ul className="simple-list">
           {ratings.map((entry) => (
             <li key={entry.gameType}>
-              {entry.gameType}: <strong>{entry.rating}</strong>
+              {gameLabel(entry.gameType)}: <strong>{entry.rating}</strong>
             </li>
           ))}
-          {ratings.length === 0 && !loadingRatings ? <li>No ratings yet.</li> : null}
+          {ratings.length === 0 && !loadingRatings ? <li>{t('lobby.ratings.empty')}</li> : null}
         </ul>
 
-        <h3>Rating Formula</h3>
+        <h3>{t('lobby.formula')}</h3>
         <ul className="simple-list">
           {ratingFormulas.map((formula) => (
             <li key={formula.gameType}>
-              {formula.gameType}: ELO K={formula.kFactor}, initial {formula.initialRating}
+              {gameLabel(formula.gameType)}: ELO K={formula.kFactor}, initial {formula.initialRating}
             </li>
           ))}
-          {ratingFormulas.length === 0 ? <li>Formula metadata unavailable.</li> : null}
+          {ratingFormulas.length === 0 ? <li>{t('lobby.formula.unavailable')}</li> : null}
         </ul>
 
         {user.isAdmin ? (
           <>
-            <h3>Admin Report Queue</h3>
-            {loadingReports ? <p>Loading reports...</p> : null}
+            <h3>{t('lobby.admin.queue')}</h3>
+            {loadingReports ? <p>{t('lobby.admin.loading')}</p> : null}
             <div className="card-list">
               {adminReports.map((report) => (
                 <article className="card" key={report.id}>
@@ -398,12 +414,10 @@ export function LobbyPage({ api, user }: Props) {
                               )
                             );
                           })
-                          .catch((err) =>
-                            setError(err instanceof Error ? err.message : 'Failed to update report')
-                          );
+                          .catch((err) => setError(translateError(err instanceof Error ? err.message : '')));
                       }}
                     >
-                      Mark Reviewed
+                      {t('lobby.admin.review')}
                     </button>
                     <button
                       type="button"
@@ -411,12 +425,10 @@ export function LobbyPage({ api, user }: Props) {
                         api
                           .resolveReport(report.id, 'resolved')
                           .then(() => setAdminReports((current) => current.filter((r) => r.id !== report.id)))
-                          .catch((err) =>
-                            setError(err instanceof Error ? err.message : 'Failed to resolve report')
-                          );
+                          .catch((err) => setError(translateError(err instanceof Error ? err.message : '')));
                       }}
                     >
-                      Resolve
+                      {t('lobby.admin.resolve')}
                     </button>
                     <button
                       type="button"
@@ -425,30 +437,29 @@ export function LobbyPage({ api, user }: Props) {
                         api
                           .resolveReport(report.id, 'dismissed')
                           .then(() => setAdminReports((current) => current.filter((r) => r.id !== report.id)))
-                          .catch((err) =>
-                            setError(err instanceof Error ? err.message : 'Failed to dismiss report')
-                          );
+                          .catch((err) => setError(translateError(err instanceof Error ? err.message : '')));
                       }}
                     >
-                      Dismiss
+                      {t('lobby.admin.dismiss')}
                     </button>
                   </div>
                 </article>
               ))}
-              {adminReports.length === 0 && !loadingReports ? <p>No open reports.</p> : null}
+              {adminReports.length === 0 && !loadingReports ? <p>{t('lobby.admin.empty')}</p> : null}
             </div>
           </>
         ) : null}
 
-        <h3>Match History</h3>
-        {loadingHistory ? <p>Loading history...</p> : null}
+        <h3>{t('lobby.history')}</h3>
+        {loadingHistory ? <p>{t('lobby.history.loading')}</p> : null}
         <ul className="simple-list">
           {history.map((match) => (
             <li key={match.id}>
-              {match.gameType} • {match.status} • <Link to={`/matches/${match.id}/replay`}>Replay</Link>
+              {gameLabel(match.gameType)} • {matchStatusLabel(match.status)} •{' '}
+              <Link to={`/matches/${match.id}/replay`}>{t('common.replay')}</Link>
             </li>
           ))}
-          {history.length === 0 && !loadingHistory ? <li>No match history yet.</li> : null}
+          {history.length === 0 && !loadingHistory ? <li>{t('lobby.history.empty')}</li> : null}
         </ul>
       </section>
     </main>

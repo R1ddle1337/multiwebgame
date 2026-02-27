@@ -24,6 +24,7 @@ import { useParams } from 'react-router-dom';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
+import { useI18n } from '../context/I18nContext';
 import type { ApiClient } from '../lib/api';
 
 interface Props {
@@ -42,6 +43,7 @@ function randomFromSequence(values: number[]): () => number {
 }
 
 export function ReplayPage({ api }: Props) {
+  const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
   const [gameType, setGameType] = useState<'gomoku' | 'go' | 'xiangqi' | 'single_2048'>('gomoku');
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
@@ -53,6 +55,10 @@ export function ReplayPage({ api }: Props) {
   const [speed, setSpeed] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const gameLabel = (type: 'gomoku' | 'go' | 'xiangqi' | 'single_2048') => t(`enum.game.${type}`);
+  const statusLabel = (status: 'playing' | 'completed' | 'draw' | 'won' | 'lost') =>
+    t(`enum.status.${status}`);
 
   useEffect(() => {
     let active = true;
@@ -180,7 +186,7 @@ export function ReplayPage({ api }: Props) {
       })
       .catch((err) => {
         if (active) {
-          setError(err instanceof Error ? err.message : 'Failed to load replay');
+          setError(translateError(err instanceof Error ? err.message : t('common.error_generic')));
         }
       })
       .finally(() => {
@@ -192,7 +198,7 @@ export function ReplayPage({ api }: Props) {
     return () => {
       active = false;
     };
-  }, [api, matchId]);
+  }, [api, matchId, t, translateError]);
 
   const maxStep = useMemo(() => {
     if (gameType === 'gomoku') {
@@ -227,7 +233,7 @@ export function ReplayPage({ api }: Props) {
   }, [maxStep, playing, speed]);
 
   if (loading) {
-    return <main className="panel">Loading replay...</main>;
+    return <main className="panel">{t('replay.loading')}</main>;
   }
 
   if (error) {
@@ -238,17 +244,21 @@ export function ReplayPage({ api }: Props) {
 
   return (
     <main className="panel replay-page">
-      <h2>Replay {matchId.slice(0, 8)}</h2>
+      <h2>{t('replay.title', { id: matchId.slice(0, 8) })}</h2>
       <p>
-        Game: <strong>{gameType}</strong> • Step {clampedStep}/{maxStep}
+        {t('replay.meta', {
+          game: gameLabel(gameType),
+          step: clampedStep,
+          max: maxStep
+        })}
       </p>
 
       <div className="button-row">
         <button type="button" className="secondary" onClick={() => setStep(0)}>
-          Start
+          {t('replay.start')}
         </button>
         <button type="button" className="secondary" onClick={() => setStep((s) => Math.max(0, s - 1))}>
-          Prev
+          {t('replay.prev')}
         </button>
         <button
           type="button"
@@ -256,17 +266,17 @@ export function ReplayPage({ api }: Props) {
             setPlaying((current) => !current);
           }}
         >
-          {playing ? 'Pause' : 'Play'}
+          {playing ? t('replay.pause') : t('replay.play')}
         </button>
         <button type="button" className="secondary" onClick={() => setStep((s) => Math.min(maxStep, s + 1))}>
-          Next
+          {t('replay.next')}
         </button>
         <button type="button" className="secondary" onClick={() => setStep(maxStep)}>
-          End
+          {t('replay.end')}
         </button>
 
         <label className="speed-picker">
-          Speed
+          {t('replay.speed')}
           <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
             <option value={0.5}>0.5x</option>
             <option value={1}>1x</option>
@@ -290,8 +300,10 @@ export function ReplayPage({ api }: Props) {
       {gameType === 'single_2048' ? (
         <div className="game-2048 replay-2048">
           <p>
-            Score: <strong>{game2048States[clampedStep].score}</strong> • Status:{' '}
-            <strong>{game2048States[clampedStep].status}</strong>
+            {t('replay.score', {
+              score: game2048States[clampedStep].score,
+              status: statusLabel(game2048States[clampedStep].status)
+            })}
           </p>
           <div className="tile-grid">
             {game2048States[clampedStep].board.flat().map((cell, index) => (

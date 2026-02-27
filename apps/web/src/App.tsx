@@ -2,6 +2,7 @@ import type { UserDTO } from '@multiwebgame/shared-types';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 
+import { LanguageSwitcher, useI18n } from './context/I18nContext';
 import { RealtimeProvider, useRealtime } from './context/RealtimeContext';
 import { ApiClient, storage } from './lib/api';
 import { Game2048Page } from './pages/Game2048Page';
@@ -11,6 +12,7 @@ import { RoomPage } from './pages/RoomPage';
 import { TrainingPage } from './pages/TrainingPage';
 
 function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }) {
+  const { t, translateError } = useI18n();
   const [mode, setMode] = useState<'guest' | 'login' | 'register'>('guest');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -46,15 +48,23 @@ function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }
       });
       onAuth(result.token, result.user);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
+      const message = err instanceof Error ? err.message : t('error.auth_failed');
+      if (message.includes('Failed to fetch') || message.includes('Network') || message.includes('CORS')) {
+        storage.setToken(null);
+        storage.setReconnectKey(null);
+        setError(t('auth.network_reset'));
+      } else {
+        setError(translateError(message));
+      }
     }
   };
 
   return (
     <main className="auth-gate">
       <section className="panel auth-panel">
-        <h1>Multi Web Game</h1>
-        <p>Guest entry, optional credentials, realtime rooms, spectators, and training mode.</p>
+        <LanguageSwitcher />
+        <h1>{t('auth.title')}</h1>
+        <p>{t('auth.subtitle')}</p>
 
         <div className="button-row">
           <button
@@ -62,33 +72,33 @@ function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }
             className={mode === 'guest' ? '' : 'secondary'}
             onClick={() => setMode('guest')}
           >
-            Guest
+            {t('auth.mode.guest')}
           </button>
           <button
             type="button"
             className={mode === 'login' ? '' : 'secondary'}
             onClick={() => setMode('login')}
           >
-            Login
+            {t('auth.mode.login')}
           </button>
           <button
             type="button"
             className={mode === 'register' ? '' : 'secondary'}
             onClick={() => setMode('register')}
           >
-            Register
+            {t('auth.mode.register')}
           </button>
         </div>
 
         <form onSubmit={submit}>
           {mode !== 'login' ? (
             <>
-              <label htmlFor="display-name">Display Name</label>
+              <label htmlFor="display-name">{t('auth.display_name')}</label>
               <input
                 id="display-name"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
-                placeholder="Player Name"
+                placeholder={t('auth.display_name_placeholder')}
                 maxLength={24}
               />
             </>
@@ -96,26 +106,30 @@ function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }
 
           {mode !== 'guest' ? (
             <>
-              <label htmlFor="email">Email</label>
+              <label htmlFor="email">{t('auth.email')}</label>
               <input
                 id="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@example.com"
+                placeholder={t('auth.email_placeholder')}
               />
-              <label htmlFor="password">Password</label>
+              <label htmlFor="password">{t('auth.password')}</label>
               <input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="********"
+                placeholder={t('auth.password_placeholder')}
               />
             </>
           ) : null}
 
           <button type="submit">
-            {mode === 'guest' ? 'Enter Lobby' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            {mode === 'guest'
+              ? t('auth.submit.guest')
+              : mode === 'login'
+                ? t('auth.submit.login')
+                : t('auth.submit.register')}
           </button>
         </form>
         {error ? <p className="error-text">{error}</p> : null}
@@ -135,6 +149,7 @@ function Shell({
   onLogout: () => void;
   onUserUpdate: (user: UserDTO) => void;
 }) {
+  const { t, translateError } = useI18n();
   const api = useMemo(() => new ApiClient(token), [token]);
   const navigate = useNavigate();
   const realtime = useRealtime();
@@ -158,24 +173,31 @@ function Shell({
         <div>
           <strong>{user.displayName}</strong>
           {user.isAdmin ? <span className="status-pill">Admin</span> : null}
-          <span className="status-pill">Gomoku {user.ratings.gomoku ?? 1200}</span>
-          <span className="status-pill">Go {user.ratings.go ?? 1200}</span>
-          <span className="status-pill">Xiangqi {user.ratings.xiangqi ?? 1200}</span>
-          <span className={`status-pill ${realtime.status}`}>{realtime.status}</span>
+          <span className="status-pill">
+            {t('enum.game.gomoku')} {user.ratings.gomoku ?? 1200}
+          </span>
+          <span className="status-pill">
+            {t('enum.game.go')} {user.ratings.go ?? 1200}
+          </span>
+          <span className="status-pill">
+            {t('enum.game.xiangqi')} {user.ratings.xiangqi ?? 1200}
+          </span>
+          <span className={`status-pill ${realtime.status}`}>{t(`common.status.${realtime.status}`)}</span>
         </div>
         <nav>
-          <Link to="/">Lobby</Link>
-          <Link to="/training">Training</Link>
+          <Link to="/">{t('shell.nav.lobby')}</Link>
+          <Link to="/training">{t('shell.nav.training')}</Link>
           <Link to="/game/2048">2048</Link>
+          <LanguageSwitcher />
           <button type="button" className="ghost" onClick={onLogout}>
-            Logout
+            {t('shell.nav.logout')}
           </button>
         </nav>
       </header>
 
       {user.isGuest ? (
         <section className="panel upgrade-panel">
-          <h3>Upgrade Guest Account</h3>
+          <h3>{t('shell.upgrade.title')}</h3>
           <form
             className="inline-form"
             onSubmit={(event) => {
@@ -194,24 +216,32 @@ function Shell({
                   setEmail('');
                   setPassword('');
                 })
-                .catch((err) => setUpgradeError(err instanceof Error ? err.message : 'Upgrade failed'))
+                .catch((err) =>
+                  setUpgradeError(
+                    translateError(err instanceof Error ? err.message : t('common.error_generic'))
+                  )
+                )
                 .finally(() => setUpgrading(false));
             }}
           >
             <input
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="Display name"
+              placeholder={t('auth.display_name')}
             />
-            <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" />
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder={t('auth.email')}
+            />
             <input
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="Password"
+              placeholder={t('auth.password')}
             />
             <button type="submit" disabled={upgrading}>
-              {upgrading ? 'Upgrading...' : 'Upgrade'}
+              {upgrading ? t('shell.upgrade.submitting') : t('shell.upgrade.submit')}
             </button>
           </form>
           {upgradeError ? <p className="error-text">{upgradeError}</p> : null}
@@ -231,6 +261,7 @@ function Shell({
 }
 
 export function App() {
+  const { t } = useI18n();
   const [token, setToken] = useState<string | null>(() => storage.getToken());
   const [user, setUser] = useState<UserDTO | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
@@ -274,7 +305,7 @@ export function App() {
 
   if (!token || !user) {
     if (loading) {
-      return <main className="auth-gate">Loading session...</main>;
+      return <main className="auth-gate">{t('auth.loading_session')}</main>;
     }
 
     return (

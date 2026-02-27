@@ -27,10 +27,12 @@ interface RealtimeValue {
   roomStates: Record<string, RoomSnapshot>;
   matchedRoom: { room: RoomDTO; matchId: string } | null;
   matchmakingTimeout: BoardGameType | null;
+  lastError: string | null;
   send: (message: ClientToServerMessage) => void;
   setInvitations: React.Dispatch<React.SetStateAction<InvitationDTO[]>>;
   clearMatchedRoom: () => void;
   clearMatchmakingTimeout: () => void;
+  clearLastError: () => void;
 }
 
 const RealtimeContext = createContext<RealtimeValue | null>(null);
@@ -59,6 +61,7 @@ export function RealtimeProvider({ token, user, children }: Props) {
   const [roomStates, setRoomStates] = useState<Record<string, RoomSnapshot>>({});
   const [matchedRoom, setMatchedRoom] = useState<{ room: RoomDTO; matchId: string } | null>(null);
   const [matchmakingTimeout, setMatchmakingTimeout] = useState<BoardGameType | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -109,7 +112,11 @@ export function RealtimeProvider({ token, user, children }: Props) {
             break;
           }
           case 'auth.error': {
+            // Fallback: stale reconnect key/session can cause auth loop after deployments.
+            storage.setReconnectKey(null);
             setStatus('disconnected');
+            setLastError(message.payload.reason);
+            socket.close();
             break;
           }
           case 'lobby.presence': {
@@ -183,6 +190,10 @@ export function RealtimeProvider({ token, user, children }: Props) {
             });
             break;
           }
+          case 'error': {
+            setLastError(message.payload.reason);
+            break;
+          }
           default:
             break;
         }
@@ -235,12 +246,24 @@ export function RealtimeProvider({ token, user, children }: Props) {
       roomStates,
       matchedRoom,
       matchmakingTimeout,
+      lastError,
       send,
       setInvitations,
       clearMatchedRoom: () => setMatchedRoom(null),
-      clearMatchmakingTimeout: () => setMatchmakingTimeout(null)
+      clearMatchmakingTimeout: () => setMatchmakingTimeout(null),
+      clearLastError: () => setLastError(null)
     }),
-    [status, onlineUsers, invitations, queueSizes, roomStates, matchedRoom, matchmakingTimeout, send]
+    [
+      status,
+      onlineUsers,
+      invitations,
+      queueSizes,
+      roomStates,
+      matchedRoom,
+      matchmakingTimeout,
+      lastError,
+      send
+    ]
   );
 
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

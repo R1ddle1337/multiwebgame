@@ -1,0 +1,438 @@
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+
+import { storage } from '../lib/api';
+
+export type AppLocale = 'zh-CN' | 'en-US';
+
+type Vars = Record<string, string | number>;
+
+const messages: Record<AppLocale, Record<string, string>> = {
+  'zh-CN': {
+    'common.language': '语言',
+    'common.lang.zh': '中文',
+    'common.lang.en': 'English',
+    'common.loading': '加载中...',
+    'common.join': '加入',
+    'common.spectate': '观战',
+    'common.accept': '接受',
+    'common.decline': '拒绝',
+    'common.replay': '回放',
+    'common.report': '举报',
+    'common.error_generic': '操作失败，请重试',
+    'common.status.connected': '已连接',
+    'common.status.connecting': '连接中',
+    'common.status.disconnected': '已断开',
+    'auth.title': 'Multi Web Game',
+    'auth.subtitle': '游客登录、账号模式、实时房间、观战与训练模式',
+    'auth.mode.guest': '游客',
+    'auth.mode.login': '登录',
+    'auth.mode.register': '注册',
+    'auth.display_name': '昵称',
+    'auth.display_name_placeholder': '玩家昵称',
+    'auth.email': '邮箱',
+    'auth.email_placeholder': 'you@example.com',
+    'auth.password': '密码',
+    'auth.password_placeholder': '********',
+    'auth.submit.guest': '进入大厅',
+    'auth.submit.login': '登录',
+    'auth.submit.register': '创建账号',
+    'auth.loading_session': '正在恢复会话...',
+    'auth.network_reset': '网络异常（可能是缓存/CORS旧状态），会话已重置，请重试',
+    'shell.nav.lobby': '大厅',
+    'shell.nav.training': '训练',
+    'shell.nav.2048': '2048',
+    'shell.nav.logout': '退出',
+    'shell.upgrade.title': '升级游客账号',
+    'shell.upgrade.submit': '升级',
+    'shell.upgrade.submitting': '升级中...',
+    'lobby.title': '大厅',
+    'lobby.subtitle': '开放房间、实时观战、多模式匹配',
+    'lobby.create.gomoku': '创建五子棋房间',
+    'lobby.create.go': '创建围棋房间',
+    'lobby.create.xiangqi': '创建象棋房间',
+    'lobby.training': '训练模式',
+    'lobby.solo_2048': '2048 单人',
+    'lobby.matchmaking': '匹配队列',
+    'lobby.queue.gomoku': '五子棋',
+    'lobby.queue.go': '围棋',
+    'lobby.queue.xiangqi': '象棋',
+    'lobby.queue.join': '加入{game}队列',
+    'lobby.queue.leave': '离开{game}队列',
+    'lobby.timeout': '{game}匹配超时',
+    'lobby.rooms': '开放与进行中房间',
+    'lobby.rooms.loading': '正在加载房间...',
+    'lobby.rooms.empty': '暂无开放房间',
+    'lobby.participants': '{count}/{max} 人 • {status}',
+    'lobby.presence.title': '在线、积分、管理',
+    'lobby.online': '在线用户',
+    'lobby.online.empty': '暂无在线用户',
+    'lobby.block.title': '屏蔽用户',
+    'lobby.block.placeholder': '用户 UUID',
+    'lobby.block.submit': '屏蔽',
+    'lobby.invites': '待处理邀请',
+    'lobby.invites.empty': '暂无邀请',
+    'lobby.ratings': '我的积分',
+    'lobby.ratings.loading': '正在加载积分...',
+    'lobby.ratings.empty': '暂无积分记录',
+    'lobby.formula': '积分公式',
+    'lobby.formula.unavailable': '暂无法获取公式信息',
+    'lobby.admin.queue': '管理员举报队列',
+    'lobby.admin.loading': '正在加载举报...',
+    'lobby.admin.empty': '暂无待处理举报',
+    'lobby.admin.review': '标记已查看',
+    'lobby.admin.resolve': '解决',
+    'lobby.admin.dismiss': '驳回',
+    'lobby.history': '对局历史',
+    'lobby.history.loading': '正在加载历史...',
+    'lobby.history.empty': '暂无历史对局',
+    'lobby.report_submitted': '举报已提交',
+    'lobby.user_blocked': '用户已屏蔽',
+    'room.loading': '正在加载房间...',
+    'room.title': '房间 {id}',
+    'room.meta': '游戏: {game} • 状态: {status} • 视角: {role}',
+    'room.leave': '离开房间',
+    'room.try_join_player': '尝试成为玩家',
+    'room.participants': '参与者 ({count}/{max})',
+    'room.invite.title': '按用户 ID 邀请',
+    'room.invite.placeholder': '目标用户 UUID',
+    'room.invite.submit': '发送邀请',
+    'room.game.title': '对局',
+    'room.next_turn': '下一手: {player} • 状态: {status}',
+    'room.result.winner': '结果: 胜方 {winner}',
+    'room.result.draw': '结果: 和局',
+    'room.pass': '停一手',
+    'room.single_2048': '该房间为 2048 单人模式，请打开 2048 页面',
+    'room.open_2048': '打开 2048',
+    'room.go.scoring': '中国规则 • 黑: {black} • 白: {white} (贴目 {komi}) • 胜方: {winner}',
+    'replay.loading': '正在加载回放...',
+    'replay.title': '回放 {id}',
+    'replay.meta': '游戏: {game} • 步数 {step}/{max}',
+    'replay.start': '开局',
+    'replay.prev': '上一步',
+    'replay.play': '播放',
+    'replay.pause': '暂停',
+    'replay.next': '下一步',
+    'replay.end': '终局',
+    'replay.speed': '速度',
+    'replay.score': '分数: {score} • 状态: {status}',
+    'enum.role.player': '玩家',
+    'enum.role.spectator': '观战',
+    'enum.status.open': '开放',
+    'enum.status.in_match': '对局中',
+    'enum.status.closed': '已关闭',
+    'enum.status.active': '进行中',
+    'enum.status.abandoned': '已中止',
+    'enum.status.playing': '进行中',
+    'enum.status.completed': '已结束',
+    'enum.status.draw': '和局',
+    'enum.status.lost': '失败',
+    'enum.status.won': '胜利',
+    'enum.color.black': '黑',
+    'enum.color.white': '白',
+    'enum.color.red': '红',
+    'enum.game.gomoku': '五子棋',
+    'enum.game.go': '围棋',
+    'enum.game.xiangqi': '象棋',
+    'enum.game.single_2048': '2048',
+    'error.room_not_found': '房间不存在',
+    'error.room_access_denied': '无权加入该房间',
+    'error.room_capacity': '房间已满',
+    'error.room_closed': '房间已关闭',
+    'error.no_active_match': '当前没有可进行的对局',
+    'error.not_a_match_player': '你不是当前对局玩家',
+    'error.game_type_mismatch': '游戏类型不匹配',
+    'error.invalid_move': '非法落子',
+    'error.network': '网络连接异常，请稍后重试',
+    'error.auth_failed': '认证失败'
+  },
+  'en-US': {
+    'common.language': 'Language',
+    'common.lang.zh': '中文',
+    'common.lang.en': 'English',
+    'common.loading': 'Loading...',
+    'common.join': 'Join',
+    'common.spectate': 'Spectate',
+    'common.accept': 'Accept',
+    'common.decline': 'Decline',
+    'common.replay': 'Replay',
+    'common.report': 'Report',
+    'common.error_generic': 'Operation failed. Please try again.',
+    'common.status.connected': 'connected',
+    'common.status.connecting': 'connecting',
+    'common.status.disconnected': 'disconnected',
+    'auth.title': 'Multi Web Game',
+    'auth.subtitle': 'Guest entry, account mode, realtime rooms, spectators, and training mode.',
+    'auth.mode.guest': 'Guest',
+    'auth.mode.login': 'Login',
+    'auth.mode.register': 'Register',
+    'auth.display_name': 'Display Name',
+    'auth.display_name_placeholder': 'Player Name',
+    'auth.email': 'Email',
+    'auth.email_placeholder': 'you@example.com',
+    'auth.password': 'Password',
+    'auth.password_placeholder': '********',
+    'auth.submit.guest': 'Enter Lobby',
+    'auth.submit.login': 'Sign In',
+    'auth.submit.register': 'Create Account',
+    'auth.loading_session': 'Loading session...',
+    'auth.network_reset': 'Network issue detected (cache/CORS stale state). Session reset, please retry.',
+    'shell.nav.lobby': 'Lobby',
+    'shell.nav.training': 'Training',
+    'shell.nav.2048': '2048',
+    'shell.nav.logout': 'Logout',
+    'shell.upgrade.title': 'Upgrade Guest Account',
+    'shell.upgrade.submit': 'Upgrade',
+    'shell.upgrade.submitting': 'Upgrading...',
+    'lobby.title': 'Lobby',
+    'lobby.subtitle': 'Open rooms, live spectators, and multi-mode matchmaking.',
+    'lobby.create.gomoku': 'Create Gomoku Room',
+    'lobby.create.go': 'Create Go Room',
+    'lobby.create.xiangqi': 'Create Xiangqi Room',
+    'lobby.training': 'Training Mode',
+    'lobby.solo_2048': '2048 Solo',
+    'lobby.matchmaking': 'Matchmaking',
+    'lobby.queue.gomoku': 'Gomoku',
+    'lobby.queue.go': 'Go',
+    'lobby.queue.xiangqi': 'Xiangqi',
+    'lobby.queue.join': 'Queue {game}',
+    'lobby.queue.leave': 'Leave {game} Queue',
+    'lobby.timeout': 'Matchmaking timed out for {game}.',
+    'lobby.rooms': 'Open & Live Rooms',
+    'lobby.rooms.loading': 'Loading rooms...',
+    'lobby.rooms.empty': 'No open rooms yet.',
+    'lobby.participants': '{count}/{max} participants • {status}',
+    'lobby.presence.title': 'Presence, Ratings, Moderation',
+    'lobby.online': 'Online',
+    'lobby.online.empty': 'No users online',
+    'lobby.block.title': 'Block User',
+    'lobby.block.placeholder': 'user UUID',
+    'lobby.block.submit': 'Block',
+    'lobby.invites': 'Pending Invites',
+    'lobby.invites.empty': 'No pending invites.',
+    'lobby.ratings': 'Your Ratings',
+    'lobby.ratings.loading': 'Loading ratings...',
+    'lobby.ratings.empty': 'No ratings yet.',
+    'lobby.formula': 'Rating Formula',
+    'lobby.formula.unavailable': 'Formula metadata unavailable.',
+    'lobby.admin.queue': 'Admin Report Queue',
+    'lobby.admin.loading': 'Loading reports...',
+    'lobby.admin.empty': 'No open reports.',
+    'lobby.admin.review': 'Mark Reviewed',
+    'lobby.admin.resolve': 'Resolve',
+    'lobby.admin.dismiss': 'Dismiss',
+    'lobby.history': 'Match History',
+    'lobby.history.loading': 'Loading history...',
+    'lobby.history.empty': 'No match history yet.',
+    'lobby.report_submitted': 'Report submitted.',
+    'lobby.user_blocked': 'User blocked.',
+    'room.loading': 'Loading room...',
+    'room.title': 'Room {id}',
+    'room.meta': 'Game: {game} • Status: {status} • View: {role}',
+    'room.leave': 'Leave Room',
+    'room.try_join_player': 'Try Join As Player',
+    'room.participants': 'Participants ({count}/{max})',
+    'room.invite.title': 'Invite User By ID',
+    'room.invite.placeholder': 'target user UUID',
+    'room.invite.submit': 'Send Invite',
+    'room.game.title': 'Game',
+    'room.next_turn': 'Next turn: {player} • Status: {status}',
+    'room.result.winner': 'Result: winner {winner}',
+    'room.result.draw': 'Result: draw',
+    'room.pass': 'Pass',
+    'room.single_2048': 'This room uses solo 2048 mode. Open the 2048 page.',
+    'room.open_2048': 'Open 2048',
+    'room.go.scoring': 'Chinese score • Black: {black} • White: {white} (komi {komi}) • Winner: {winner}',
+    'replay.loading': 'Loading replay...',
+    'replay.title': 'Replay {id}',
+    'replay.meta': 'Game: {game} • Step {step}/{max}',
+    'replay.start': 'Start',
+    'replay.prev': 'Prev',
+    'replay.play': 'Play',
+    'replay.pause': 'Pause',
+    'replay.next': 'Next',
+    'replay.end': 'End',
+    'replay.speed': 'Speed',
+    'replay.score': 'Score: {score} • Status: {status}',
+    'enum.role.player': 'player',
+    'enum.role.spectator': 'spectator',
+    'enum.status.open': 'open',
+    'enum.status.in_match': 'in_match',
+    'enum.status.closed': 'closed',
+    'enum.status.active': 'active',
+    'enum.status.abandoned': 'abandoned',
+    'enum.status.playing': 'playing',
+    'enum.status.completed': 'completed',
+    'enum.status.draw': 'draw',
+    'enum.status.lost': 'lost',
+    'enum.status.won': 'won',
+    'enum.color.black': 'black',
+    'enum.color.white': 'white',
+    'enum.color.red': 'red',
+    'enum.game.gomoku': 'gomoku',
+    'enum.game.go': 'go',
+    'enum.game.xiangqi': 'xiangqi',
+    'enum.game.single_2048': '2048',
+    'error.room_not_found': 'Room not found',
+    'error.room_access_denied': 'Room access denied',
+    'error.room_capacity': 'Room capacity reached',
+    'error.room_closed': 'Room is closed',
+    'error.no_active_match': 'No active match',
+    'error.not_a_match_player': 'Not a match player',
+    'error.game_type_mismatch': 'Game type mismatch',
+    'error.invalid_move': 'Invalid move',
+    'error.network': 'Network error, please retry',
+    'error.auth_failed': 'Authentication failed'
+  }
+};
+
+function normalizeLocale(input: string | null | undefined): AppLocale {
+  if (!input) {
+    return 'zh-CN';
+  }
+
+  const value = input.toLowerCase();
+  if (value.startsWith('en')) {
+    return 'en-US';
+  }
+  return 'zh-CN';
+}
+
+function interpolate(template: string, vars?: Vars): string {
+  if (!vars) {
+    return template;
+  }
+
+  return template.replace(/\{(\w+)\}/g, (_match, key: string) => String(vars[key] ?? ''));
+}
+
+function detectDefaultLocale(): AppLocale {
+  const saved = storage.getLocale();
+  if (saved) {
+    return normalizeLocale(saved);
+  }
+
+  if (typeof navigator !== 'undefined') {
+    const browser = normalizeLocale(navigator.language);
+    if (browser === 'zh-CN') {
+      return browser;
+    }
+  }
+
+  // v1 policy: default to Simplified Chinese unless user explicitly selects English.
+  return 'zh-CN';
+}
+
+interface I18nValue {
+  locale: AppLocale;
+  setLocale: (locale: AppLocale) => void;
+  t: (key: string, vars?: Vars) => string;
+  translateError: (message: string) => string;
+}
+
+const I18nContext = createContext<I18nValue | null>(null);
+
+export function I18nProvider({ children }: { children: React.ReactNode }) {
+  const [locale, setLocaleState] = useState<AppLocale>(() => detectDefaultLocale());
+
+  const setLocale = useCallback((next: AppLocale) => {
+    setLocaleState(next);
+    storage.setLocale(next);
+  }, []);
+
+  const t = useCallback(
+    (key: string, vars?: Vars) => {
+      const template = messages[locale][key] ?? messages['en-US'][key] ?? key;
+      return interpolate(template, vars);
+    },
+    [locale]
+  );
+
+  const translateError = useCallback(
+    (message: string) => {
+      const normalized = message.trim().toLowerCase();
+
+      if (
+        normalized.includes('failed to fetch') ||
+        normalized.includes('network') ||
+        normalized.includes('cors')
+      ) {
+        return t('error.network');
+      }
+
+      if (normalized.includes('room_not_found') || normalized.includes('room not found')) {
+        return t('error.room_not_found');
+      }
+      if (normalized.includes('room_access_denied')) {
+        return t('error.room_access_denied');
+      }
+      if (normalized.includes('capacity')) {
+        return t('error.room_capacity');
+      }
+      if (normalized.includes('room is closed') || normalized.includes('room_closed')) {
+        return t('error.room_closed');
+      }
+      if (normalized.includes('no_active_match')) {
+        return t('error.no_active_match');
+      }
+      if (normalized.includes('not_a_match_player')) {
+        return t('error.not_a_match_player');
+      }
+      if (normalized.includes('game_type_mismatch')) {
+        return t('error.game_type_mismatch');
+      }
+      if (normalized.includes('invalid_move') || normalized.includes('illegal_')) {
+        return t('error.invalid_move');
+      }
+      if (normalized.includes('auth')) {
+        return t('error.auth_failed');
+      }
+
+      return locale === 'zh-CN' ? `${t('common.error_generic')}: ${message}` : message;
+    },
+    [locale, t]
+  );
+
+  const value = useMemo(
+    () => ({
+      locale,
+      setLocale,
+      t,
+      translateError
+    }),
+    [locale, setLocale, t, translateError]
+  );
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n(): I18nValue {
+  const value = useContext(I18nContext);
+  if (!value) {
+    throw new Error('useI18n must be used inside I18nProvider');
+  }
+  return value;
+}
+
+export function LanguageSwitcher() {
+  const { locale, setLocale, t } = useI18n();
+
+  return (
+    <div className="language-switcher" aria-label={t('common.language')}>
+      <span>{t('common.language')}</span>
+      <button
+        type="button"
+        className={locale === 'zh-CN' ? '' : 'secondary'}
+        onClick={() => setLocale('zh-CN')}
+      >
+        {t('common.lang.zh')}
+      </button>
+      <button
+        type="button"
+        className={locale === 'en-US' ? '' : 'secondary'}
+        onClick={() => setLocale('en-US')}
+      >
+        {t('common.lang.en')}
+      </button>
+    </div>
+  );
+}

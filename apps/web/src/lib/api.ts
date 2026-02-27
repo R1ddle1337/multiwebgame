@@ -186,6 +186,7 @@ export class ApiClient {
 export const storage = {
   tokenKey: 'mwg_token',
   reconnectKey: 'mwg_reconnect_key',
+  localeKey: 'mwg_locale',
   getToken(): string | null {
     return localStorage.getItem(this.tokenKey);
   },
@@ -205,5 +206,15 @@ export const storage = {
       return;
     }
     localStorage.setItem(this.reconnectKey, value);
+  },
+  getLocale(): string | null {
+    return localStorage.getItem(this.localeKey);
+  },
+  setLocale(locale: string | null): void {
+    if (!locale) {
+      localStorage.removeItem(this.localeKey);
+      return;
+    }
+    localStorage.setItem(this.localeKey, locale);
   }
 };

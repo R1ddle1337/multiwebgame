@@ -14,6 +14,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
+import { useI18n } from '../context/I18nContext';
 import { useRealtime } from '../context/RealtimeContext';
 import type { ApiClient } from '../lib/api';
 
@@ -31,6 +32,7 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
 }
 
 export function RoomPage({ api, user }: Props) {
+  const { t, translateError } = useI18n();
   const { roomId = '' } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,6 +43,12 @@ export function RoomPage({ api, user }: Props) {
   const [inviteUserId, setInviteUserId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [xiangqiSelection, setXiangqiSelection] = useState<{ x: number; y: number } | null>(null);
+
+  const gameLabel = (gameType: RoomDTO['gameType']) => t(`enum.game.${gameType}`);
+  const roleLabel = (role: 'player' | 'spectator') => t(`enum.role.${role}`);
+  const statusLabel = (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') =>
+    t(`enum.status.${status}`);
+  const colorLabel = (color: 'black' | 'white' | 'red') => t(`enum.color.${color}`);
 
   const watchMode = useMemo(
     () => new URLSearchParams(location.search).get('watch') === '1',
@@ -99,7 +107,7 @@ export function RoomPage({ api, user }: Props) {
         }
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to load room');
+        setError(translateError(err instanceof Error ? err.message : t('common.error_generic')));
       });
 
     return () => {
@@ -108,7 +116,16 @@ export function RoomPage({ api, user }: Props) {
         payload: { roomId }
       });
     };
-  }, [api, roomId, send, watchMode]);
+  }, [api, roomId, send, t, translateError, watchMode]);
+
+  useEffect(() => {
+    if (!realtime.lastError) {
+      return;
+    }
+
+    setError(translateError(realtime.lastError));
+    realtime.clearLastError();
+  }, [realtime, translateError]);
 
   const sendGomokuMove = (x: number, y: number) => {
     if (!canPlayGomoku) {
@@ -157,16 +174,19 @@ export function RoomPage({ api, user }: Props) {
   };
 
   if (!room) {
-    return <main className="panel">Loading room...</main>;
+    return <main className="panel">{t('room.loading')}</main>;
   }
 
   return (
     <main className="content-grid room-layout">
       <section className="panel">
-        <h2>Room {room.id.slice(0, 8)}</h2>
+        <h2>{t('room.title', { id: room.id.slice(0, 8) })}</h2>
         <p>
-          Game: <strong>{room.gameType}</strong> • Status: <strong>{room.status}</strong> • View:{' '}
-          <strong>{viewerRole}</strong>
+          {t('room.meta', {
+            game: gameLabel(room.gameType),
+            status: statusLabel(room.status),
+            role: roleLabel(viewerRole)
+          })}
         </p>
 
         <div className="button-row">
@@ -178,7 +198,7 @@ export function RoomPage({ api, user }: Props) {
               navigate('/');
             }}
           >
-            Leave Room
+            {t('room.leave')}
           </button>
           {viewerRole !== 'spectator' ? null : (
             <button
@@ -188,18 +208,21 @@ export function RoomPage({ api, user }: Props) {
                 send({ type: 'room.subscribe', payload: { roomId: room.id } });
               }}
             >
-              Try Join As Player
+              {t('room.try_join_player')}
             </button>
           )}
         </div>
 
         <h3>
-          Participants ({room.players.length}/{room.maxPlayers})
+          {t('room.participants', {
+            count: room.players.length,
+            max: room.maxPlayers
+          })}
         </h3>
         <ul className="simple-list">
           {room.players.map((player) => (
             <li key={player.id}>
-              {player.role.toUpperCase()} {player.seat ? `Seat ${player.seat}` : ''}:{' '}
+              {roleLabel(player.role).toUpperCase()} {player.seat ? `Seat ${player.seat}` : ''}:{' '}
               {player.user.displayName} {player.userId === user.id ? '(You)' : ''}
               {player.userId === user.id ? null : (
                 <button
@@ -211,18 +234,22 @@ export function RoomPage({ api, user }: Props) {
                         targetUserId: player.userId,
                         reason: 'in-room report'
                       })
-                      .then(() => setError('Report submitted.'))
-                      .catch((err) => setError(err instanceof Error ? err.message : 'Report failed'));
+                      .then(() => setError(t('lobby.report_submitted')))
+                      .catch((err) =>
+                        setError(
+                          translateError(err instanceof Error ? err.message : t('common.error_generic'))
+                        )
+                      );
                   }}
                 >
-                  Report
+                  {t('common.report')}
                 </button>
               )}
             </li>
           ))}
         </ul>
 
-        <h3>Invite User By ID</h3>
+        <h3>{t('room.invite.title')}</h3>
         <form
           className="inline-form"
           onSubmit={async (event) => {
@@ -232,29 +259,29 @@ export function RoomPage({ api, user }: Props) {
               setInviteUserId('');
               setError(null);
             } catch (err) {
-              setError(err instanceof Error ? err.message : 'Invite failed');
+              setError(translateError(err instanceof Error ? err.message : t('common.error_generic')));
             }
           }}
         >
           <input
             value={inviteUserId}
             onChange={(event) => setInviteUserId(event.target.value)}
-            placeholder="target user UUID"
+            placeholder={t('room.invite.placeholder')}
           />
-          <button type="submit">Send Invite</button>
+          <button type="submit">{t('room.invite.submit')}</button>
         </form>
 
         {error ? <p className="error-text">{error}</p> : null}
       </section>
 
       <section className="panel">
-        <h2>Game</h2>
+        <h2>{t('room.game.title')}</h2>
 
         {room.gameType === 'single_2048' ? (
           <p>
-            This room uses solo 2048 mode. Open{' '}
+            {t('room.single_2048')}{' '}
             <button type="button" onClick={() => navigate('/game/2048')}>
-              2048 page
+              {t('room.open_2048')}
             </button>
             .
           </p>
@@ -263,12 +290,18 @@ export function RoomPage({ api, user }: Props) {
         {room.gameType === 'gomoku' ? (
           <>
             <p>
-              Next turn: <strong>{gomokuState.nextPlayer}</strong> • Status:{' '}
-              <strong>{gomokuState.status}</strong>
+              {t('room.next_turn', {
+                player: colorLabel(gomokuState.nextPlayer),
+                status: statusLabel(gomokuState.status)
+              })}
             </p>
             <GomokuBoard state={gomokuState} disabled={!canPlayGomoku} onCellClick={sendGomokuMove} />
             {gomokuState.status === 'completed' || gomokuState.status === 'draw' ? (
-              <p>Result: {gomokuState.winner ? `winner ${gomokuState.winner}` : 'draw'}</p>
+              <p>
+                {gomokuState.winner
+                  ? t('room.result.winner', { winner: colorLabel(gomokuState.winner) })
+                  : t('room.result.draw')}
+              </p>
             ) : null}
           </>
         ) : null}
@@ -276,7 +309,10 @@ export function RoomPage({ api, user }: Props) {
         {room.gameType === 'go' ? (
           <>
             <p>
-              Next turn: <strong>{goState.nextPlayer}</strong> • Status: <strong>{goState.status}</strong>
+              {t('room.next_turn', {
+                player: colorLabel(goState.nextPlayer),
+                status: statusLabel(goState.status)
+              })}
             </p>
             <GoBoard
               state={goState}
@@ -289,14 +325,17 @@ export function RoomPage({ api, user }: Props) {
                 onClick={() => sendGoMove({ type: 'pass', player: 'black' })}
                 disabled={!canPlayGo}
               >
-                Pass
+                {t('room.pass')}
               </button>
             </div>
             {goState.scoring ? (
               <p>
-                Chinese score • Black: <strong>{goState.scoring.black.total}</strong> • White:{' '}
-                <strong>{goState.scoring.white.total}</strong> (komi {goState.scoring.komi}) • Winner:{' '}
-                <strong>{goState.scoring.winner ?? 'draw'}</strong>
+                {t('room.go.scoring', {
+                  black: goState.scoring.black.total,
+                  white: goState.scoring.white.total,
+                  komi: goState.scoring.komi,
+                  winner: goState.scoring.winner ? colorLabel(goState.scoring.winner) : t('room.result.draw')
+                })}
               </p>
             ) : null}
           </>
@@ -305,8 +344,10 @@ export function RoomPage({ api, user }: Props) {
         {room.gameType === 'xiangqi' ? (
           <>
             <p>
-              Next turn: <strong>{xiangqiState.nextPlayer}</strong> • Status:{' '}
-              <strong>{xiangqiState.status}</strong>
+              {t('room.next_turn', {
+                player: colorLabel(xiangqiState.nextPlayer),
+                status: statusLabel(xiangqiState.status)
+              })}
             </p>
             <XiangqiBoard
               state={xiangqiState}
@@ -340,10 +381,9 @@ export function RoomPage({ api, user }: Props) {
             />
             {xiangqiState.status === 'completed' ? (
               <p>
-                Result:{' '}
                 {xiangqiState.winner
-                  ? `winner ${xiangqiState.winner}`
-                  : `draw (${xiangqiState.outcomeReason ?? 'repetition'})`}
+                  ? t('room.result.winner', { winner: colorLabel(xiangqiState.winner) })
+                  : t('room.result.draw')}
               </p>
             ) : null}
           </>

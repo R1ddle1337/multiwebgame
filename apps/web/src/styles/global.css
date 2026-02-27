@@ -116,6 +116,22 @@ h3 {
   gap: 0.7rem;
 }
 
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.language-switcher > span {
+  color: var(--ink-muted);
+}
+
+.language-switcher button {
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+}
+
 .status-pill {
   display: inline-flex;
   margin-left: 0.6rem;
