@@ -649,7 +649,10 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
           resultPayload: completion.resultPayload
         });
       } catch (error) {
-        console.warn('stale active match recovery failed', error instanceof Error ? error.message : 'unknown_error');
+        console.warn(
+          'stale active match recovery failed',
+          error instanceof Error ? error.message : 'unknown_error'
+        );
       }
       return replayed;
     }

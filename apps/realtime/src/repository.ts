@@ -638,7 +638,11 @@ export async function completeMatch(params: {
   resultPayload?: Record<string, unknown> | null;
 }): Promise<void> {
   await withTransaction(async (client) => {
-    const matchResult = await client.query<{ game_type: GameType; status: 'active' | 'completed' | 'abandoned'; room_id: string }>(
+    const matchResult = await client.query<{
+      game_type: GameType;
+      status: 'active' | 'completed' | 'abandoned';
+      room_id: string;
+    }>(
       `
         SELECT game_type, status, room_id
         FROM matches
