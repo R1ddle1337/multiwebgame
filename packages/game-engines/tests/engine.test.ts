@@ -374,6 +374,22 @@ describe('xiangqi engine', () => {
     expect(result.reason).toBe('illegal_piece_movement');
   });
 
+  it('enforces palace constraints for generals', () => {
+    const state = createEmptyXiangqiState();
+    putPiece(state, 4, 9, 'general', 'red');
+    putPiece(state, 4, 0, 'general', 'black');
+    putPiece(state, 4, 5, 'soldier', 'red');
+
+    const result = applyXiangqiMove(state, {
+      from: { x: 4, y: 9 },
+      to: { x: 4, y: 6 },
+      player: 'red'
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('illegal_piece_movement');
+  });
+
   it('enforces elephant-eye blocking', () => {
     const state = createEmptyXiangqiState();
     putPiece(state, 4, 9, 'general', 'red');
@@ -444,7 +460,42 @@ describe('xiangqi engine', () => {
     expect(goodCapture.nextState.board[3][1]).toEqual({ type: 'cannon', color: 'red' });
   });
 
+  it('rejects cannon captures with multiple screens', () => {
+    const state = createEmptyXiangqiState();
+    putPiece(state, 4, 9, 'general', 'red');
+    putPiece(state, 4, 0, 'general', 'black');
+    putPiece(state, 1, 7, 'cannon', 'red');
+    putPiece(state, 1, 6, 'soldier', 'red');
+    putPiece(state, 1, 5, 'soldier', 'black');
+    putPiece(state, 1, 3, 'soldier', 'black');
+
+    const result = applyXiangqiMove(state, {
+      from: { x: 1, y: 7 },
+      to: { x: 1, y: 3 },
+      player: 'red'
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('illegal_piece_movement');
+  });
+
   it('rejects moves that leave own general in check', () => {
+    const state = createEmptyXiangqiState();
+    putPiece(state, 4, 9, 'general', 'red');
+    putPiece(state, 4, 0, 'general', 'black');
+    putPiece(state, 4, 5, 'chariot', 'red');
+
+    const result = applyXiangqiMove(state, {
+      from: { x: 4, y: 5 },
+      to: { x: 5, y: 5 },
+      player: 'red'
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('leaves_general_in_check');
+  });
+
+  it('rejects exposing facing generals', () => {
     const state = createEmptyXiangqiState();
     putPiece(state, 4, 9, 'general', 'red');
     putPiece(state, 4, 0, 'general', 'black');
@@ -552,6 +603,35 @@ describe('xiangqi engine', () => {
     expect(repeated.nextState.status).toBe('completed');
     expect(repeated.nextState.winner).toBeNull();
     expect(repeated.nextState.outcomeReason).toBe('draw_repetition');
+  });
+
+  it('does not adjudicate repetition before the third occurrence', () => {
+    const state = createEmptyXiangqiState('red');
+    putPiece(state, 4, 9, 'general', 'red');
+    putPiece(state, 4, 0, 'general', 'black');
+    putPiece(state, 0, 9, 'chariot', 'red');
+    putPiece(state, 4, 5, 'soldier', 'red');
+
+    const move = {
+      from: { x: 0, y: 9 },
+      to: { x: 0, y: 8 },
+      player: 'red' as const
+    };
+
+    const first = applyXiangqiMove(state, move);
+    expect(first.accepted).toBe(true);
+    expect(first.nextState.status).toBe('playing');
+
+    const nextHash = first.nextState.positionHistory[first.nextState.positionHistory.length - 1] ?? '';
+    const almostRepeatedState = {
+      ...state,
+      positionHistory: [nextHash]
+    };
+
+    const second = applyXiangqiMove(almostRepeatedState, move);
+    expect(second.accepted).toBe(true);
+    expect(second.nextState.status).toBe('playing');
+    expect(second.nextState.outcomeReason).toBeNull();
   });
 
   it('applies deterministic perpetual-check loss policy', () => {

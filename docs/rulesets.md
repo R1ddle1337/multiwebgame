@@ -34,6 +34,7 @@ Implemented movement/legality:
 - elephant-eye blocking + river restriction
 - cannon screen capture logic
 - self-check prevention for all moves
+- legal move generation is derived from piece movement + post-move check validation to prevent illegal board states
 
 End-state adjudication:
 
@@ -44,8 +45,8 @@ End-state adjudication:
 Deterministic repetition policy (v1):
 
 - position hash includes board + side-to-move
-- if a position repeats 3 times:
-  - if the repeating move gives check, repeating side loses (`perpetual_check_violation`)
+- on the 3rd occurrence of the same hash:
+  - if side-to-move is in check after the repeating move, the repeating mover loses (`perpetual_check_violation`)
   - otherwise result is draw (`draw_repetition`)
 
 This policy is an explicit deterministic v1 strategy for perpetual-check/perpetual-chase handling.

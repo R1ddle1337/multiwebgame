@@ -214,6 +214,12 @@ function isGeneralInCheck(board: XiangqiBoard, color: XiangqiColor): boolean {
 }
 
 function hasAnyLegalMove(board: XiangqiBoard, color: XiangqiColor): boolean {
+  return generateLegalMoves(board, color).length > 0;
+}
+
+function generateLegalMoves(board: XiangqiBoard, color: XiangqiColor): XiangqiMove[] {
+  const legalMoves: XiangqiMove[] = [];
+
   for (let fromY = 0; fromY < BOARD_HEIGHT; fromY += 1) {
     for (let fromX = 0; fromX < BOARD_WIDTH; fromX += 1) {
       const piece = board[fromY][fromX];
@@ -235,14 +241,18 @@ function hasAnyLegalMove(board: XiangqiBoard, color: XiangqiColor): boolean {
           next[fromY][fromX] = null;
 
           if (!isGeneralInCheck(next, color)) {
-            return true;
+            legalMoves.push({
+              from: { x: fromX, y: fromY },
+              to: { x: toX, y: toY },
+              player: color
+            });
           }
         }
       }
     }
   }
 
-  return false;
+  return legalMoves;
 }
 
 function pieceCode(piece: XiangqiPiece | null): string {
@@ -328,6 +338,50 @@ function buildCompletedState(
   };
 }
 
+function applyRepetitionPolicy(
+  state: XiangqiState,
+  board: XiangqiBoard,
+  nextPlayer: XiangqiColor
+): XiangqiState | null {
+  const nextHash = createPositionHash(board, nextPlayer);
+  const nextHistory = [...state.positionHistory, nextHash];
+
+  let repetitionCount = 0;
+  for (const hash of nextHistory) {
+    if (hash === nextHash) {
+      repetitionCount += 1;
+    }
+  }
+
+  if (repetitionCount < 3) {
+    return null;
+  }
+
+  if (isGeneralInCheck(board, nextPlayer)) {
+    return {
+      ...state,
+      board,
+      nextPlayer,
+      status: 'completed',
+      winner: nextPlayer,
+      outcomeReason: 'perpetual_check_violation',
+      moveCount: state.moveCount + 1,
+      positionHistory: nextHistory
+    };
+  }
+
+  return {
+    ...state,
+    board,
+    nextPlayer,
+    status: 'completed',
+    winner: null,
+    outcomeReason: 'draw_repetition',
+    moveCount: state.moveCount + 1,
+    positionHistory: nextHistory
+  };
+}
+
 export function applyXiangqiMove(
   state: XiangqiState,
   move: XiangqiMove
@@ -396,46 +450,16 @@ export function applyXiangqiMove(
     };
   }
 
-  const nextHash = createPositionHash(nextBoard, opponentColor);
-  const nextHistory = [...state.positionHistory, nextHash];
-  let repetitionCount = 0;
-  for (const hash of nextHistory) {
-    if (hash === nextHash) {
-      repetitionCount += 1;
-    }
-  }
-
-  if (repetitionCount >= 3) {
-    if (opponentInCheck) {
-      return {
-        accepted: true,
-        nextState: {
-          ...state,
-          board: nextBoard,
-          nextPlayer: opponentColor,
-          status: 'completed',
-          winner: opponentColor,
-          outcomeReason: 'perpetual_check_violation',
-          moveCount: state.moveCount + 1,
-          positionHistory: nextHistory
-        }
-      };
-    }
-
+  const repetitionResolved = applyRepetitionPolicy(state, nextBoard, opponentColor);
+  if (repetitionResolved) {
     return {
       accepted: true,
-      nextState: {
-        ...state,
-        board: nextBoard,
-        nextPlayer: opponentColor,
-        status: 'completed',
-        winner: null,
-        outcomeReason: 'draw_repetition',
-        moveCount: state.moveCount + 1,
-        positionHistory: nextHistory
-      }
+      nextState: repetitionResolved
     };
   }
+
+  const nextHash = createPositionHash(nextBoard, opponentColor);
+  const nextHistory = [...state.positionHistory, nextHash];
 
   return {
     accepted: true,
