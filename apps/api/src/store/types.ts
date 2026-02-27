@@ -1,0 +1,56 @@
+import type {
+  GameType,
+  InvitationDTO,
+  MatchDTO,
+  RoomDTO,
+  SessionDTO,
+  UserDTO
+} from '@multiwebgame/shared-types';
+
+export class StoreError extends Error {
+  constructor(
+    message: string,
+    readonly code:
+      | 'not_found'
+      | 'conflict'
+      | 'forbidden'
+      | 'validation_error'
+      | 'unauthorized'
+      | 'capacity_reached'
+  ) {
+    super(message);
+    this.name = 'StoreError';
+  }
+}
+
+export interface Store {
+  createGuestUser(displayName: string): Promise<UserDTO>;
+  createRegisteredUser(params: {
+    displayName: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<UserDTO>;
+  findUserByEmail(email: string): Promise<{ user: UserDTO; passwordHash: string } | null>;
+  getUserById(userId: string): Promise<UserDTO | null>;
+  createSession(userId: string): Promise<SessionDTO>;
+  getSessionById(sessionId: string): Promise<SessionDTO | null>;
+  deleteSession(sessionId: string): Promise<void>;
+  listOpenRooms(): Promise<RoomDTO[]>;
+  getRoomById(roomId: string): Promise<RoomDTO | null>;
+  createRoom(hostUserId: string, gameType: GameType): Promise<RoomDTO>;
+  joinRoom(roomId: string, userId: string): Promise<RoomDTO>;
+  leaveRoom(roomId: string, userId: string): Promise<RoomDTO | null>;
+  createInvitation(params: {
+    roomId: string;
+    fromUserId: string;
+    toUserId: string;
+  }): Promise<InvitationDTO>;
+  listInvitationsForUser(userId: string): Promise<InvitationDTO[]>;
+  respondInvitation(params: {
+    invitationId: string;
+    userId: string;
+    action: 'accept' | 'decline';
+  }): Promise<InvitationDTO>;
+  listMatchHistoryForUser(userId: string, limit: number): Promise<MatchDTO[]>;
+  getMatchById(matchId: string): Promise<MatchDTO | null>;
+}
