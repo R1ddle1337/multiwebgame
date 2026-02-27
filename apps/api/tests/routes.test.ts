@@ -34,6 +34,15 @@ class InMemoryStore implements Store {
 
   private reports = new Map<string, ReportDTO>();
 
+  setRoomStatus(roomId: string, status: RoomDTO['status']): void {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return;
+    }
+    room.status = status;
+    this.rooms.set(roomId, room);
+  }
+
   private defaultRatings(): Record<GameType, number> {
     return {
       single_2048: 1200,
@@ -206,13 +215,20 @@ class InMemoryStore implements Store {
     const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
     const activePlayers = room.players.filter((player) => player.role === 'player');
     const role = !asSpectator && activePlayers.length < playerSlots ? 'player' : 'spectator';
+    const usedSeats = new Set(
+      activePlayers.map((player) => player.seat).filter((seat): seat is number => typeof seat === 'number')
+    );
+    let nextSeat = 1;
+    while (usedSeats.has(nextSeat) && nextSeat <= playerSlots) {
+      nextSeat += 1;
+    }
 
     room.players.push({
       id: randomUUID(),
       roomId,
       userId,
       role,
-      seat: role === 'player' ? activePlayers.length + 1 : null,
+      seat: role === 'player' ? nextSeat : null,
       joinedAt: new Date().toISOString(),
       leftAt: null,
       user
@@ -235,8 +251,15 @@ class InMemoryStore implements Store {
       return null;
     }
 
+    const activePlayers = room.players.filter((player) => player.role === 'player');
+    const requiredPlayers = room.gameType === 'single_2048' ? 1 : 2;
+
+    if (activePlayers.length < requiredPlayers) {
+      room.status = 'open';
+    }
+
     if (room.hostUserId === userId) {
-      room.hostUserId = room.players[0].userId;
+      room.hostUserId = activePlayers[0]?.userId ?? room.players[0].userId;
     }
 
     this.rooms.set(roomId, room);
@@ -500,6 +523,149 @@ describe('critical API routes', () => {
       .set('Authorization', `Bearer ${overflow.body.token}`)
       .send({})
       .expect(409);
+  });
+
+  it('transfers ownership when creator leaves and keeps room interactive', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const player2 = await request(app).post('/auth/guest').send({ displayName: 'Player2' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'gomoku', maxPlayers: 4 })
+      .expect(201);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${player2.body.token}`)
+      .send({})
+      .expect(200);
+
+    const left = await request(app)
+      .post(`/rooms/${room.body.room.id}/leave`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    expect(left.body.room.hostUserId).toBe(player2.body.user.id);
+    expect(left.body.room.status).toBe('open');
+    expect(
+      left.body.room.players.some((player: { userId: string }) => player.userId === host.body.user.id)
+    ).toBe(false);
+  });
+
+  it('abandons impossible in-match room state and allows slot replacement', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const player2 = await request(app).post('/auth/guest').send({ displayName: 'Player2' }).expect(201);
+    const replacement = await request(app)
+      .post('/auth/guest')
+      .send({ displayName: 'Replacement' })
+      .expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'xiangqi', maxPlayers: 4 })
+      .expect(201);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${player2.body.token}`)
+      .send({})
+      .expect(200);
+
+    store.setRoomStatus(room.body.room.id, 'in_match');
+
+    const afterLeave = await request(app)
+      .post(`/rooms/${room.body.room.id}/leave`)
+      .set('Authorization', `Bearer ${player2.body.token}`)
+      .send({})
+      .expect(200);
+
+    expect(afterLeave.body.room.status).toBe('open');
+
+    const joinedReplacement = await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${replacement.body.token}`)
+      .send({})
+      .expect(200);
+
+    const replacementRow = joinedReplacement.body.room.players.find(
+      (player: { userId: string }) => player.userId === replacement.body.user.id
+    );
+    expect(replacementRow.role).toBe('player');
+    expect(replacementRow.seat).toBe(2);
+  });
+
+  it('restores player control when the same user re-joins after a transient leave', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const player = await request(app).post('/auth/guest').send({ displayName: 'Player' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'go', maxPlayers: 4 })
+      .expect(201);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${player.body.token}`)
+      .send({})
+      .expect(200);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/leave`)
+      .set('Authorization', `Bearer ${player.body.token}`)
+      .send({})
+      .expect(200);
+
+    const rejoined = await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${player.body.token}`)
+      .send({})
+      .expect(200);
+
+    const playerRow = rejoined.body.room.players.find(
+      (member: { userId: string }) => member.userId === player.body.user.id
+    );
+    expect(playerRow.role).toBe('player');
+    expect(playerRow.seat).toBe(2);
+  });
+
+  it('closes and cleans up empty rooms when the last participant leaves', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'gomoku', maxPlayers: 4 })
+      .expect(201);
+
+    const leave = await request(app)
+      .post(`/rooms/${room.body.room.id}/leave`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    expect(leave.body.room).toBeNull();
+
+    const list = await request(app)
+      .get('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .expect(200);
+    expect(list.body.rooms.some((entry: { id: string }) => entry.id === room.body.room.id)).toBe(false);
   });
 
   it('exposes rating formulas', async () => {

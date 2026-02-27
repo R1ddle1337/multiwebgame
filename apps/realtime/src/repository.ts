@@ -44,6 +44,87 @@ function defaultMaxPlayersForGame(gameType: GameType): number {
   return gameType === 'single_2048' ? 1 : 4;
 }
 
+async function abandonActiveMatches(
+  client: DbExecutor,
+  roomId: string,
+  reason: 'required_player_left' | 'inactive_timeout' | 'room_empty' | 'stale_match_recovery'
+): Promise<void> {
+  await client.query(
+    `
+      UPDATE matches
+      SET
+        status = 'abandoned',
+        winner_user_id = NULL,
+        result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object('abandonedReason', $2),
+        ended_at = COALESCE(ended_at, NOW())
+      WHERE room_id = $1 AND status = 'active'
+    `,
+    [roomId, reason]
+  );
+}
+
+async function reconcileRoomLifecycleTx(
+  client: DbExecutor,
+  roomId: string,
+  reason: 'required_player_left' | 'inactive_timeout' | 'room_empty' | 'stale_match_recovery'
+): Promise<RoomDTO | null> {
+  const roomResult = await client.query<{
+    id: string;
+    host_user_id: string;
+    game_type: GameType;
+  }>(
+    `
+      SELECT id, host_user_id, game_type
+      FROM rooms
+      WHERE id = $1
+      FOR UPDATE
+    `,
+    [roomId]
+  );
+
+  const room = roomResult.rows[0];
+  if (!room) {
+    return null;
+  }
+
+  const membersResult = await client.query<{
+    user_id: string;
+    role: 'player' | 'spectator';
+    seat: number | null;
+    joined_at: Date | string;
+  }>(
+    `
+      SELECT user_id, role, seat, joined_at
+      FROM room_players
+      WHERE room_id = $1 AND left_at IS NULL
+      ORDER BY CASE WHEN seat IS NULL THEN 999 ELSE seat END ASC, joined_at ASC
+    `,
+    [roomId]
+  );
+
+  if (membersResult.rows.length === 0) {
+    await abandonActiveMatches(client, roomId, 'room_empty');
+    await client.query(`UPDATE rooms SET status = 'closed' WHERE id = $1`, [roomId]);
+    return null;
+  }
+
+  const activePlayers = membersResult.rows.filter((row) => row.role === 'player');
+  const memberIds = new Set(membersResult.rows.map((row) => row.user_id));
+  const requiredPlayers = playerSlotsForGame(room.game_type);
+
+  if (!memberIds.has(room.host_user_id)) {
+    const nextHost = activePlayers[0]?.user_id ?? membersResult.rows[0].user_id;
+    await client.query(`UPDATE rooms SET host_user_id = $1 WHERE id = $2`, [nextHost, roomId]);
+  }
+
+  if (activePlayers.length < requiredPlayers) {
+    await abandonActiveMatches(client, roomId, reason);
+    await client.query(`UPDATE rooms SET status = 'open' WHERE id = $1`, [roomId]);
+  }
+
+  return fetchRoomById(client, roomId);
+}
+
 function mapUser(
   row: {
     id: string;
@@ -547,7 +628,9 @@ export async function completeMatch(params: {
       [params.status, params.winnerUserId, params.resultPayload ?? null, params.matchId]
     );
 
-    await updateRatingsForMatch(client, params.roomId, match.game_type, params.winnerUserId);
+    if (params.status === 'completed') {
+      await updateRatingsForMatch(client, params.roomId, match.game_type, params.winnerUserId);
+    }
 
     await client.query(
       `
@@ -702,6 +785,50 @@ export async function joinRoomIfPossible(
 
     return fetchRoomById(client, roomId);
   });
+}
+
+export async function leaveRoomIfPresent(
+  roomId: string,
+  userId: string,
+  reason: 'required_player_left' | 'inactive_timeout' = 'required_player_left'
+): Promise<RoomDTO | null> {
+  return withTransaction(async (client) => {
+    const roomResult = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM rooms
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [roomId]
+    );
+
+    if (!roomResult.rows[0]) {
+      return null;
+    }
+
+    await client.query(
+      `
+        UPDATE room_players
+        SET left_at = NOW()
+        WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
+      `,
+      [roomId, userId]
+    );
+
+    return reconcileRoomLifecycleTx(client, roomId, reason);
+  });
+}
+
+export async function reconcileRoomLifecycle(
+  roomId: string,
+  reason:
+    | 'required_player_left'
+    | 'inactive_timeout'
+    | 'room_empty'
+    | 'stale_match_recovery' = 'stale_match_recovery'
+): Promise<RoomDTO | null> {
+  return withTransaction((client) => reconcileRoomLifecycleTx(client, roomId, reason));
 }
 
 export async function close(): Promise<void> {

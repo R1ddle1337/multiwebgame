@@ -353,6 +353,87 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
   };
 }
 
+async function abandonActiveMatches(
+  client: DbExecutor,
+  roomId: string,
+  reason: 'required_player_left' | 'inactive_timeout' | 'room_empty' | 'stale_match_recovery'
+): Promise<void> {
+  await client.query(
+    `
+      UPDATE matches
+      SET
+        status = 'abandoned',
+        winner_user_id = NULL,
+        result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object('abandonedReason', $2),
+        ended_at = COALESCE(ended_at, NOW())
+      WHERE room_id = $1 AND status = 'active'
+    `,
+    [roomId, reason]
+  );
+}
+
+async function reconcileRoomLifecycleTx(
+  client: DbExecutor,
+  roomId: string,
+  reason: 'required_player_left' | 'inactive_timeout' | 'room_empty' | 'stale_match_recovery'
+): Promise<RoomDTO | null> {
+  const roomResult = await client.query<{
+    id: string;
+    host_user_id: string;
+    game_type: GameType;
+  }>(
+    `
+      SELECT id, host_user_id, game_type
+      FROM rooms
+      WHERE id = $1
+      FOR UPDATE
+    `,
+    [roomId]
+  );
+
+  const room = roomResult.rows[0];
+  if (!room) {
+    return null;
+  }
+
+  const members = await client.query<{
+    user_id: string;
+    role: 'player' | 'spectator';
+    seat: number | null;
+    joined_at: Date | string;
+  }>(
+    `
+      SELECT user_id, role, seat, joined_at
+      FROM room_players
+      WHERE room_id = $1 AND left_at IS NULL
+      ORDER BY CASE WHEN seat IS NULL THEN 999 ELSE seat END ASC, joined_at ASC
+    `,
+    [roomId]
+  );
+
+  if (members.rows.length === 0) {
+    await abandonActiveMatches(client, roomId, 'room_empty');
+    await client.query(`UPDATE rooms SET status = 'closed' WHERE id = $1`, [roomId]);
+    return null;
+  }
+
+  const activePlayers = members.rows.filter((row) => row.role === 'player');
+  const memberIds = new Set(members.rows.map((row) => row.user_id));
+  const requiredPlayers = playerSlotsForGame(room.game_type);
+
+  if (!memberIds.has(room.host_user_id)) {
+    const nextHost = activePlayers[0]?.user_id ?? members.rows[0].user_id;
+    await client.query(`UPDATE rooms SET host_user_id = $1 WHERE id = $2`, [nextHost, roomId]);
+  }
+
+  if (activePlayers.length < requiredPlayers) {
+    await abandonActiveMatches(client, roomId, reason);
+    await client.query(`UPDATE rooms SET status = 'open' WHERE id = $1`, [roomId]);
+  }
+
+  return fetchRoomById(client, roomId);
+}
+
 async function loadMovesForMatches(
   client: DbExecutor,
   matchIds: string[]
@@ -748,9 +829,9 @@ export function createPostgresStore(): Store {
 
     async leaveRoom(roomId: string, userId: string): Promise<RoomDTO | null> {
       return withTransaction(async (client) => {
-        const roomResult = await client.query<{ id: string; host_user_id: string }>(
+        const roomResult = await client.query<{ id: string }>(
           `
-            SELECT id, host_user_id
+            SELECT id
             FROM rooms
             WHERE id = $1
             FOR UPDATE
@@ -776,45 +857,7 @@ export function createPostgresStore(): Store {
         if (!left.rowCount) {
           throw new StoreError('User is not in room', 'not_found');
         }
-
-        const activePlayers = await client.query<{ user_id: string }>(
-          `
-            SELECT user_id
-            FROM room_players
-            WHERE room_id = $1 AND left_at IS NULL AND role = 'player'
-            ORDER BY seat ASC
-          `,
-          [roomId]
-        );
-
-        const activeAny = await client.query<{ user_id: string }>(
-          `
-            SELECT user_id
-            FROM room_players
-            WHERE room_id = $1 AND left_at IS NULL
-            ORDER BY joined_at ASC
-          `,
-          [roomId]
-        );
-
-        if (activeAny.rows.length === 0) {
-          await client.query(`UPDATE rooms SET status = 'closed' WHERE id = $1`, [roomId]);
-          return null;
-        }
-
-        if (room.host_user_id === userId) {
-          const nextHost = activePlayers.rows[0]?.user_id ?? activeAny.rows[0]?.user_id;
-          if (nextHost) {
-            await client.query(`UPDATE rooms SET host_user_id = $1 WHERE id = $2`, [nextHost, roomId]);
-          }
-        }
-
-        const updatedRoom = await fetchRoomById(client, roomId);
-        if (!updatedRoom) {
-          throw new StoreError('Room not found', 'not_found');
-        }
-
-        return updatedRoom;
+        return reconcileRoomLifecycleTx(client, roomId, 'required_player_left');
       });
     },
 

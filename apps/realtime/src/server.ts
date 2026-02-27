@@ -36,10 +36,11 @@ import {
   createMatchMove,
   createMatchmakingRoom,
   getLatestMatchForRoom,
-  getRoom,
   getUserFromSession,
   joinRoomIfPossible,
+  leaveRoomIfPresent,
   listPendingInvitationsForUser,
+  reconcileRoomLifecycle,
   respondToInvitation
 } from './repository.js';
 
@@ -196,6 +197,8 @@ const reconnectSnapshots = new Map<string, ReconnectSnapshot>();
 const inviteSeenByUser = new Map<string, Set<string>>();
 const matchmakingQueue = new MatchmakingQueue({ timeoutMs: 45_000, reconnectGraceMs: 60_000 });
 const activeRuntimes = new Map<string, ActiveRuntime>();
+const ROOM_INACTIVE_TIMEOUT_MS = 90_000;
+const pendingInactiveRoomLeaves = new Map<string, Map<string, ReturnType<typeof setTimeout>>>();
 
 function playerSlotsForGame(gameType: BoardGameType): number {
   return gameType === 'gomoku' || gameType === 'go' || gameType === 'xiangqi' ? 2 : 2;
@@ -327,6 +330,115 @@ function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
   return member?.role ?? 'spectator';
 }
 
+function runtimePlayers(runtime: ActiveRuntime): [string, string] {
+  if (runtime.gameType === 'gomoku' || runtime.gameType === 'go') {
+    return [runtime.players.black, runtime.players.white];
+  }
+
+  return [runtime.players.red, runtime.players.black];
+}
+
+function isRuntimeSyncedWithRoom(runtime: ActiveRuntime, room: RoomDTO): boolean {
+  if (runtime.gameType !== room.gameType) {
+    return false;
+  }
+
+  const players = findSeatedPlayers(room);
+  if (!players.first || !players.second) {
+    return false;
+  }
+
+  const [first, second] = runtimePlayers(runtime);
+  return first === players.first && second === players.second;
+}
+
+function clearPendingInactiveLeaves(userId: string, roomId?: string): void {
+  const byRoom = pendingInactiveRoomLeaves.get(userId);
+  if (!byRoom) {
+    return;
+  }
+
+  if (roomId) {
+    const timer = byRoom.get(roomId);
+    if (timer) {
+      clearTimeout(timer);
+      byRoom.delete(roomId);
+    }
+
+    if (byRoom.size === 0) {
+      pendingInactiveRoomLeaves.delete(userId);
+    }
+    return;
+  }
+
+  for (const timer of byRoom.values()) {
+    clearTimeout(timer);
+  }
+  pendingInactiveRoomLeaves.delete(userId);
+}
+
+async function broadcastRoomStateToSubscribers(roomId: string): Promise<void> {
+  const subscribers = roomSubscribers.get(roomId);
+  if (!subscribers || subscribers.size === 0) {
+    return;
+  }
+
+  for (const target of subscribers) {
+    await sendRoomState(target, roomId);
+  }
+}
+
+function scheduleInactiveRoomLeaves(userId: string, roomIds: string[]): void {
+  if (roomIds.length === 0) {
+    return;
+  }
+
+  const byRoom = pendingInactiveRoomLeaves.get(userId) ?? new Map<string, ReturnType<typeof setTimeout>>();
+  pendingInactiveRoomLeaves.set(userId, byRoom);
+
+  for (const roomId of roomIds) {
+    if (byRoom.has(roomId)) {
+      continue;
+    }
+
+    const timer = setTimeout(() => {
+      byRoom.delete(roomId);
+      if (byRoom.size === 0) {
+        pendingInactiveRoomLeaves.delete(userId);
+      }
+
+      if (getUserClients(userId).size > 0) {
+        return;
+      }
+
+      leaveRoomIfPresent(roomId, userId, 'inactive_timeout')
+        .then(async (room) => {
+          activeRuntimes.delete(roomId);
+          if (!room) {
+            return;
+          }
+
+          broadcast(roomSubscribers.get(roomId) ?? [], {
+            type: 'room.player_left',
+            payload: {
+              roomId,
+              userId
+            }
+          });
+          await broadcastRoomStateToSubscribers(roomId);
+        })
+        .catch((error) => {
+          console.warn(
+            'inactive room leave failed',
+            error instanceof Error ? error.message : 'unknown_error'
+          );
+        });
+    }, ROOM_INACTIVE_TIMEOUT_MS);
+
+    byRoom.set(roomId, timer);
+  }
+}
+
 function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
   const players = findSeatedPlayers(room);
   if (!players.first || !players.second) {
@@ -442,18 +554,28 @@ function replayMoves(
 }
 
 async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
+  const room = await reconcileRoomLifecycle(roomId, 'stale_match_recovery');
+  if (!room || room.gameType === 'single_2048') {
+    activeRuntimes.delete(roomId);
+    return null;
+  }
+
+  const seated = findSeatedPlayers(room);
+  if (!seated.first || !seated.second) {
+    activeRuntimes.delete(roomId);
+    return null;
+  }
+
   const existing = activeRuntimes.get(roomId);
   if (existing) {
-    return existing;
+    if (isRuntimeSyncedWithRoom(existing, room)) {
+      return existing;
+    }
+    activeRuntimes.delete(roomId);
   }
 
   const match = await getLatestMatchForRoom(roomId);
   if (!match || match.gameType === 'single_2048') {
-    return null;
-  }
-
-  const room = await getRoom(roomId);
-  if (!room) {
     return null;
   }
 
@@ -465,6 +587,11 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   const replayed = replayMoves(base, match.moves);
 
   if (match.status === 'active') {
+    if (replayed.state.status !== 'playing') {
+      activeRuntimes.delete(roomId);
+      await reconcileRoomLifecycle(roomId, 'stale_match_recovery');
+      return null;
+    }
     activeRuntimes.set(roomId, replayed);
   }
 
@@ -473,11 +600,11 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
 
 async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | null> {
   const existing = await getOrLoadRuntime(roomId);
-  if (existing) {
+  if (existing && existing.state.status === 'playing') {
     return existing;
   }
 
-  const room = await getRoom(roomId);
+  const room = await reconcileRoomLifecycle(roomId, 'stale_match_recovery');
   if (!room || room.gameType === 'single_2048') {
     return null;
   }
@@ -502,7 +629,7 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
     return;
   }
 
-  const room = await getRoom(roomId);
+  const room = await reconcileRoomLifecycle(roomId, 'stale_match_recovery');
   if (!room) {
     sendError(client, 'room_not_found');
     return;
@@ -978,6 +1105,7 @@ wss.on('connection', (socket) => {
         }
 
         attachUser(client, user, payload.sessionId);
+        clearPendingInactiveLeaves(user.id);
 
         if (msg.payload.reconnectKey) {
           const snapshot = reconnectSnapshots.get(msg.payload.reconnectKey);
@@ -1033,11 +1161,13 @@ wss.on('connection', (socket) => {
 
       if (parsed.type === 'room.subscribe') {
         const msg = roomSubscribeSchema.parse(parsed);
-        const room = await getRoom(msg.payload.roomId);
+        const room = await reconcileRoomLifecycle(msg.payload.roomId, 'stale_match_recovery');
         if (!room) {
           sendError(client, 'room_not_found');
           return;
         }
+
+        clearPendingInactiveLeaves(authedUser.id, msg.payload.roomId);
 
         const isMember = room.players.some((player) => player.userId === authedUser.id);
         if (!isMember && !msg.payload.asSpectator) {
@@ -1208,28 +1338,20 @@ wss.on('connection', (socket) => {
   });
 
   socket.on('close', () => {
-    if (client.user) {
-      matchmakingQueue.markDisconnected(client.user.id);
+    const userId = client.user?.id ?? null;
+    if (userId) {
+      matchmakingQueue.markDisconnected(userId);
     }
 
     const subscribedRoomIds = Array.from(client.subscribedRooms);
 
     for (const roomId of subscribedRoomIds) {
       removeRoomSubscription(client, roomId);
-      if (client.user && !isUserSubscribedToRoom(client.user.id, roomId)) {
-        broadcast(roomSubscribers.get(roomId) ?? [], {
-          type: 'room.player_left',
-          payload: {
-            roomId,
-            userId: client.user.id
-          }
-        });
-      }
     }
 
-    if (client.user) {
+    if (userId) {
       reconnectSnapshots.set(client.reconnectKey, {
-        userId: client.user.id,
+        userId,
         lobbySubscribed: client.lobbySubscribed,
         roomIds: subscribedRoomIds,
         expiresAt: Date.now() + 60_000
@@ -1238,6 +1360,10 @@ wss.on('connection', (socket) => {
 
     detachUser(client);
     clients.delete(client);
+
+    if (userId && getUserClients(userId).size === 0) {
+      scheduleInactiveRoomLeaves(userId, subscribedRoomIds);
+    }
   });
 });
 
@@ -1288,6 +1414,26 @@ const heartbeatSweepInterval = setInterval(() => {
   }
 }, 5_000);
 
+const roomLifecycleSweepInterval = setInterval(() => {
+  for (const roomId of activeRuntimes.keys()) {
+    reconcileRoomLifecycle(roomId, 'stale_match_recovery')
+      .then(async (room) => {
+        const runtime = activeRuntimes.get(roomId);
+        if (!runtime) {
+          return;
+        }
+
+        if (!room || !isRuntimeSyncedWithRoom(runtime, room)) {
+          activeRuntimes.delete(roomId);
+          await broadcastRoomStateToSubscribers(roomId);
+        }
+      })
+      .catch((error) => {
+        console.warn('room lifecycle sweep failed', error instanceof Error ? error.message : 'unknown_error');
+      });
+  }
+}, 7_000);
+
 redis
   .connect()
   .then(() => redis.ping())
@@ -1306,6 +1452,13 @@ const shutdown = async () => {
   clearInterval(reconnectCleanupInterval);
   clearInterval(matchmakingSweepInterval);
   clearInterval(heartbeatSweepInterval);
+  clearInterval(roomLifecycleSweepInterval);
+  for (const byRoom of pendingInactiveRoomLeaves.values()) {
+    for (const timer of byRoom.values()) {
+      clearTimeout(timer);
+    }
+  }
+  pendingInactiveRoomLeaves.clear();
 
   wss.close(async () => {
     try {
