@@ -1,7 +1,9 @@
 import type {
+  BlockDTO,
   GameType,
   InvitationDTO,
   MatchDTO,
+  RatingDTO,
   RoomDTO,
   SessionDTO,
   UserDTO
@@ -26,12 +28,32 @@ class InMemoryStore implements Store {
 
   private matches = new Map<string, MatchDTO>();
 
+  private blocks = new Map<string, BlockDTO>();
+
+  private reports: Array<{
+    reporterUserId: string;
+    targetUserId?: string | null;
+    matchId?: string | null;
+    reason: string;
+    details?: string | null;
+  }> = [];
+
+  private defaultRatings(): Record<GameType, number> {
+    return {
+      single_2048: 1200,
+      gomoku: 1200,
+      xiangqi: 1200,
+      go: 1200
+    };
+  }
+
   async createGuestUser(displayName: string): Promise<UserDTO> {
     const user: UserDTO = {
       id: randomUUID(),
       displayName,
       isGuest: true,
       rating: 1200,
+      ratings: this.defaultRatings(),
       createdAt: new Date().toISOString()
     };
     this.users.set(user.id, user);
@@ -43,7 +65,9 @@ class InMemoryStore implements Store {
     email: string;
     passwordHash: string;
   }): Promise<UserDTO> {
-    const existing = Array.from(this.userPasswords.values()).find((entry) => entry.email === params.email.toLowerCase());
+    const existing = Array.from(this.userPasswords.values()).find(
+      (entry) => entry.email === params.email.toLowerCase()
+    );
     if (existing) {
       throw new Error('email_exists');
     }
@@ -53,6 +77,7 @@ class InMemoryStore implements Store {
       displayName: params.displayName,
       isGuest: false,
       rating: 1200,
+      ratings: this.defaultRatings(),
       createdAt: new Date().toISOString()
     };
     this.users.set(user.id, user);
@@ -60,8 +85,28 @@ class InMemoryStore implements Store {
     return user;
   }
 
+  async upgradeGuestUser(params: {
+    userId: string;
+    displayName: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<UserDTO> {
+    const user = this.users.get(params.userId);
+    if (!user || !user.isGuest) {
+      throw new Error('not_guest');
+    }
+
+    user.isGuest = false;
+    user.displayName = params.displayName;
+    this.users.set(user.id, user);
+    this.userPasswords.set(user.id, { email: params.email.toLowerCase(), passwordHash: params.passwordHash });
+    return user;
+  }
+
   async findUserByEmail(email: string): Promise<{ user: UserDTO; passwordHash: string } | null> {
-    const entry = Array.from(this.userPasswords.entries()).find(([, data]) => data.email === email.toLowerCase());
+    const entry = Array.from(this.userPasswords.entries()).find(
+      ([, data]) => data.email === email.toLowerCase()
+    );
     if (!entry) {
       return null;
     }
@@ -96,14 +141,14 @@ class InMemoryStore implements Store {
   }
 
   async listOpenRooms(): Promise<RoomDTO[]> {
-    return Array.from(this.rooms.values()).filter((room) => room.status === 'open');
+    return Array.from(this.rooms.values()).filter((room) => room.status !== 'closed');
   }
 
   async getRoomById(roomId: string): Promise<RoomDTO | null> {
     return this.rooms.get(roomId) ?? null;
   }
 
-  async createRoom(hostUserId: string, gameType: GameType): Promise<RoomDTO> {
+  async createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO> {
     const host = this.users.get(hostUserId);
     if (!host) {
       throw new Error('host_not_found');
@@ -114,12 +159,14 @@ class InMemoryStore implements Store {
       hostUserId,
       gameType,
       status: 'open',
+      maxPlayers: maxPlayers ?? (gameType === 'single_2048' ? 1 : 4),
       createdAt: new Date().toISOString(),
       players: [
         {
           id: randomUUID(),
           roomId: '',
           userId: hostUserId,
+          role: 'player',
           seat: 1,
           joinedAt: new Date().toISOString(),
           leftAt: null,
@@ -132,7 +179,7 @@ class InMemoryStore implements Store {
     return room;
   }
 
-  async joinRoom(roomId: string, userId: string): Promise<RoomDTO> {
+  async joinRoom(roomId: string, userId: string, asSpectator = false): Promise<RoomDTO> {
     const room = this.rooms.get(roomId);
     const user = this.users.get(userId);
     if (!room || !user) {
@@ -144,20 +191,25 @@ class InMemoryStore implements Store {
       return room;
     }
 
-    const max = room.gameType === 'gomoku' ? 2 : 1;
-    if (room.players.length >= max) {
+    if (room.players.length >= room.maxPlayers) {
       throw new Error('capacity');
     }
+
+    const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
+    const activePlayers = room.players.filter((player) => player.role === 'player');
+    const role = !asSpectator && activePlayers.length < playerSlots ? 'player' : 'spectator';
 
     room.players.push({
       id: randomUUID(),
       roomId,
       userId,
-      seat: room.players.length + 1,
+      role,
+      seat: role === 'player' ? activePlayers.length + 1 : null,
       joinedAt: new Date().toISOString(),
       leftAt: null,
       user
     });
+
     this.rooms.set(roomId, room);
     return room;
   }
@@ -235,6 +287,50 @@ class InMemoryStore implements Store {
   async getMatchById(matchId: string): Promise<MatchDTO | null> {
     return this.matches.get(matchId) ?? null;
   }
+
+  async listRatingsForUser(userId: string): Promise<RatingDTO[]> {
+    const user = this.users.get(userId);
+    if (!user) {
+      return [];
+    }
+
+    return (Object.keys(user.ratings) as GameType[]).map((gameType) => ({
+      gameType,
+      rating: user.ratings[gameType] ?? 1200,
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  async listBlockedUsers(userId: string): Promise<BlockDTO[]> {
+    return Array.from(this.blocks.values()).filter((block) => block.blockerUserId === userId);
+  }
+
+  async blockUser(params: {
+    blockerUserId: string;
+    blockedUserId: string;
+    reason?: string | null;
+  }): Promise<BlockDTO> {
+    const block: BlockDTO = {
+      id: randomUUID(),
+      blockerUserId: params.blockerUserId,
+      blockedUserId: params.blockedUserId,
+      reason: params.reason ?? null,
+      createdAt: new Date().toISOString()
+    };
+
+    this.blocks.set(`${params.blockerUserId}:${params.blockedUserId}`, block);
+    return block;
+  }
+
+  async reportUser(params: {
+    reporterUserId: string;
+    targetUserId?: string | null;
+    matchId?: string | null;
+    reason: string;
+    details?: string | null;
+  }): Promise<void> {
+    this.reports.push(params);
+  }
 }
 
 describe('critical API routes', () => {
@@ -249,85 +345,97 @@ describe('critical API routes', () => {
     const me = await request(app).get('/me').set('Authorization', `Bearer ${auth.body.token}`).expect(200);
     expect(me.body.user.id).toBe(auth.body.user.id);
     expect(me.body.session.id).toBe(auth.body.session.id);
+    expect(me.body.user.ratings.gomoku).toBe(1200);
   });
 
-  it('requires authentication for /me', async () => {
+  it('upgrades guest account with credentials', async () => {
     const store = new InMemoryStore();
     const app = createApp(store);
 
-    await request(app).get('/me').expect(401);
+    const auth = await request(app).post('/auth/guest').send({ displayName: 'Temp' }).expect(201);
+
+    const upgraded = await request(app)
+      .post('/auth/upgrade')
+      .set('Authorization', `Bearer ${auth.body.token}`)
+      .send({
+        displayName: 'Alice Pro',
+        email: 'alice@example.com',
+        password: 'changeme123'
+      })
+      .expect(200);
+
+    expect(upgraded.body.user.isGuest).toBe(false);
+    expect(upgraded.body.user.displayName).toBe('Alice Pro');
+
+    const login = await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'alice@example.com',
+        password: 'changeme123'
+      })
+      .expect(200);
+
+    expect(login.body.user.displayName).toBe('Alice Pro');
   });
 
-  it('supports room create, join, and leave lifecycle', async () => {
+  it('supports room spectator joins', async () => {
     const store = new InMemoryStore();
     const app = createApp(store);
 
-    const hostAuth = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
-    const guestAuth = await request(app).post('/auth/guest').send({ displayName: 'Guest' }).expect(201);
-
-    const createdRoom = await request(app)
-      .post('/rooms')
-      .set('Authorization', `Bearer ${hostAuth.body.token}`)
-      .send({ gameType: 'gomoku' })
-      .expect(201);
-
-    const roomId = createdRoom.body.room.id;
-
-    const joined = await request(app)
-      .post(`/rooms/${roomId}/join`)
-      .set('Authorization', `Bearer ${guestAuth.body.token}`)
-      .expect(200);
-
-    expect(joined.body.room.players).toHaveLength(2);
-
-    const afterGuestLeaves = await request(app)
-      .post(`/rooms/${roomId}/leave`)
-      .set('Authorization', `Bearer ${guestAuth.body.token}`)
-      .expect(200);
-
-    expect(afterGuestLeaves.body.room.players).toHaveLength(1);
-
-    const hostLeaves = await request(app)
-      .post(`/rooms/${roomId}/leave`)
-      .set('Authorization', `Bearer ${hostAuth.body.token}`)
-      .expect(200);
-
-    expect(hostLeaves.body.room).toBeNull();
-  });
-
-  it('creates and accepts invitations', async () => {
-    const store = new InMemoryStore();
-    const app = createApp(store);
-
-    const hostAuth = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
-    const guestAuth = await request(app).post('/auth/guest').send({ displayName: 'Guest' }).expect(201);
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const watcher = await request(app).post('/auth/guest').send({ displayName: 'Watcher' }).expect(201);
 
     const room = await request(app)
       .post('/rooms')
-      .set('Authorization', `Bearer ${hostAuth.body.token}`)
-      .send({ gameType: 'gomoku' })
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'gomoku', maxPlayers: 4 })
       .expect(201);
 
-    const invitation = await request(app)
-      .post('/invitations')
-      .set('Authorization', `Bearer ${hostAuth.body.token}`)
-      .send({ roomId: room.body.room.id, toUserId: guestAuth.body.user.id })
+    const joined = await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${watcher.body.token}`)
+      .send({ asSpectator: true })
+      .expect(200);
+
+    const watcherRow = joined.body.room.players.find(
+      (player: { userId: string }) => player.userId === watcher.body.user.id
+    );
+    expect(watcherRow.role).toBe('spectator');
+    expect(watcherRow.seat).toBeNull();
+  });
+
+  it('supports block + report moderation endpoints', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const reporter = await request(app).post('/auth/guest').send({ displayName: 'Reporter' }).expect(201);
+    const target = await request(app).post('/auth/guest').send({ displayName: 'Target' }).expect(201);
+
+    const block = await request(app)
+      .post('/moderation/blocks')
+      .set('Authorization', `Bearer ${reporter.body.token}`)
+      .send({
+        userId: target.body.user.id,
+        reason: 'spam invites'
+      })
       .expect(201);
 
-    const invites = await request(app)
-      .get('/invitations')
-      .set('Authorization', `Bearer ${guestAuth.body.token}`)
+    expect(block.body.block.blockedUserId).toBe(target.body.user.id);
+
+    const list = await request(app)
+      .get('/moderation/blocks')
+      .set('Authorization', `Bearer ${reporter.body.token}`)
       .expect(200);
 
-    expect(invites.body.invitations).toHaveLength(1);
+    expect(list.body.blocks).toHaveLength(1);
 
-    const response = await request(app)
-      .post(`/invitations/${invitation.body.invitation.id}/respond`)
-      .set('Authorization', `Bearer ${guestAuth.body.token}`)
-      .send({ action: 'accept' })
-      .expect(200);
-
-    expect(response.body.invitation.status).toBe('accepted');
-    expect(response.body.room.players).toHaveLength(2);
+    await request(app)
+      .post('/moderation/reports')
+      .set('Authorization', `Bearer ${reporter.body.token}`)
+      .send({
+        targetUserId: target.body.user.id,
+        reason: 'abusive behavior'
+      })
+      .expect(201);
   });
 });

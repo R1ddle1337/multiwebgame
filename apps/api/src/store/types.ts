@@ -1,7 +1,9 @@
 import type {
+  BlockDTO,
   GameType,
   InvitationDTO,
   MatchDTO,
+  RatingDTO,
   RoomDTO,
   SessionDTO,
   UserDTO
@@ -30,6 +32,12 @@ export interface Store {
     email: string;
     passwordHash: string;
   }): Promise<UserDTO>;
+  upgradeGuestUser(params: {
+    userId: string;
+    displayName: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<UserDTO>;
   findUserByEmail(email: string): Promise<{ user: UserDTO; passwordHash: string } | null>;
   getUserById(userId: string): Promise<UserDTO | null>;
   createSession(userId: string): Promise<SessionDTO>;
@@ -37,14 +45,10 @@ export interface Store {
   deleteSession(sessionId: string): Promise<void>;
   listOpenRooms(): Promise<RoomDTO[]>;
   getRoomById(roomId: string): Promise<RoomDTO | null>;
-  createRoom(hostUserId: string, gameType: GameType): Promise<RoomDTO>;
-  joinRoom(roomId: string, userId: string): Promise<RoomDTO>;
+  createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO>;
+  joinRoom(roomId: string, userId: string, asSpectator?: boolean): Promise<RoomDTO>;
   leaveRoom(roomId: string, userId: string): Promise<RoomDTO | null>;
-  createInvitation(params: {
-    roomId: string;
-    fromUserId: string;
-    toUserId: string;
-  }): Promise<InvitationDTO>;
+  createInvitation(params: { roomId: string; fromUserId: string; toUserId: string }): Promise<InvitationDTO>;
   listInvitationsForUser(userId: string): Promise<InvitationDTO[]>;
   respondInvitation(params: {
     invitationId: string;
@@ -53,4 +57,18 @@ export interface Store {
   }): Promise<InvitationDTO>;
   listMatchHistoryForUser(userId: string, limit: number): Promise<MatchDTO[]>;
   getMatchById(matchId: string): Promise<MatchDTO | null>;
+  listRatingsForUser(userId: string): Promise<RatingDTO[]>;
+  listBlockedUsers(userId: string): Promise<BlockDTO[]>;
+  blockUser(params: {
+    blockerUserId: string;
+    blockedUserId: string;
+    reason?: string | null;
+  }): Promise<BlockDTO>;
+  reportUser(params: {
+    reporterUserId: string;
+    targetUserId?: string | null;
+    matchId?: string | null;
+    reason: string;
+    details?: string | null;
+  }): Promise<void>;
 }

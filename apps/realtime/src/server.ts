@@ -1,10 +1,25 @@
-import { applyGomokuMove, createGomokuState } from '@multiwebgame/game-engines';
+import {
+  applyGoMove,
+  applyGomokuMove,
+  applyXiangqiMove,
+  createGoState,
+  createGomokuState,
+  createXiangqiState
+} from '@multiwebgame/game-engines';
 import type {
+  BoardGameType,
   ClientToServerMessage,
+  GoMove,
+  GoState,
   GomokuMark,
   GomokuState,
+  RoomDTO,
+  RoomPlayerRole,
   ServerToClientMessage,
-  UserDTO
+  UserDTO,
+  XiangqiColor,
+  XiangqiMove,
+  XiangqiState
 } from '@multiwebgame/shared-types';
 import jwt from 'jsonwebtoken';
 import { Redis } from 'ioredis';
@@ -13,10 +28,11 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { z } from 'zod';
 
 import { config } from './config.js';
+import { MatchmakingQueue } from './matchmaking.js';
 import {
   close,
-  createMatchForRoom,
   completeMatch,
+  createMatchForRoom,
   createMatchMove,
   createMatchmakingRoom,
   getLatestMatchForRoom,
@@ -35,6 +51,7 @@ interface ClientContext {
   sessionId: string | null;
   subscribedRooms: Set<string>;
   lobbySubscribed: boolean;
+  lastSeenAt: number;
 }
 
 interface ReconnectSnapshot {
@@ -44,12 +61,40 @@ interface ReconnectSnapshot {
   expiresAt: number;
 }
 
-interface ActiveGomokuMatch {
+interface GomokuRuntime {
+  gameType: 'gomoku';
   roomId: string;
   matchId: string;
   state: GomokuState;
-  players: Record<GomokuMark, string>;
+  players: {
+    black: string;
+    white: string;
+  };
 }
+
+interface GoRuntime {
+  gameType: 'go';
+  roomId: string;
+  matchId: string;
+  state: GoState;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface XiangqiRuntime {
+  gameType: 'xiangqi';
+  roomId: string;
+  matchId: string;
+  state: XiangqiState;
+  players: {
+    red: string;
+    black: string;
+  };
+}
+
+type ActiveRuntime = GomokuRuntime | GoRuntime | XiangqiRuntime;
 
 const authSchema = z.object({
   type: z.literal('auth'),
@@ -61,17 +106,54 @@ const authSchema = z.object({
 
 const roomSubscribeSchema = z.object({
   type: z.literal('room.subscribe'),
-  payload: z.object({ roomId: z.string().uuid() })
-});
-
-const roomMoveSchema = z.object({
-  type: z.literal('room.move'),
   payload: z.object({
     roomId: z.string().uuid(),
-    x: z.number().int().min(0),
-    y: z.number().int().min(0)
+    asSpectator: z.boolean().optional()
   })
 });
+
+const roomMoveSchema = z.union([
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('gomoku'),
+      x: z.number().int().min(0),
+      y: z.number().int().min(0)
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('go'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('place'),
+          x: z.number().int().min(0),
+          y: z.number().int().min(0),
+          player: z.enum(['black', 'white'])
+        }),
+        z.object({
+          type: z.literal('pass'),
+          player: z.enum(['black', 'white'])
+        })
+      ])
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('xiangqi'),
+      move: z.object({
+        from: z.object({ x: z.number().int().min(0).max(8), y: z.number().int().min(0).max(9) }),
+        to: z.object({ x: z.number().int().min(0).max(8), y: z.number().int().min(0).max(9) }),
+        player: z.enum(['red', 'black'])
+      })
+    })
+  })
+]);
 
 const inviteRespondSchema = z.object({
   type: z.literal('invite.respond'),
@@ -83,7 +165,7 @@ const inviteRespondSchema = z.object({
 
 const matchmakingJoinSchema = z.object({
   type: z.literal('matchmaking.join'),
-  payload: z.object({ gameType: z.literal('gomoku') })
+  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi']) })
 });
 
 const pingSchema = z.object({
@@ -105,8 +187,12 @@ const clientsByUserId = new Map<string, Set<ClientContext>>();
 const roomSubscribers = new Map<string, Set<ClientContext>>();
 const reconnectSnapshots = new Map<string, ReconnectSnapshot>();
 const inviteSeenByUser = new Map<string, Set<string>>();
-const matchmakingQueue: string[] = [];
-const activeGomokuMatches = new Map<string, ActiveGomokuMatch>();
+const matchmakingQueue = new MatchmakingQueue({ timeoutMs: 45_000, reconnectGraceMs: 60_000 });
+const activeRuntimes = new Map<string, ActiveRuntime>();
+
+function playerSlotsForGame(gameType: BoardGameType): number {
+  return gameType === 'gomoku' || gameType === 'go' || gameType === 'xiangqi' ? 2 : 2;
+}
 
 function send(client: ClientContext, message: ServerToClientMessage): void {
   if (client.socket.readyState === WebSocket.OPEN) {
@@ -130,14 +216,6 @@ function getUserClients(userId: string): Set<ClientContext> {
 
 function sendToUser(userId: string, message: ServerToClientMessage): void {
   broadcast(getUserClients(userId), message);
-}
-
-function removeFromQueue(userId: string): void {
-  let index = matchmakingQueue.indexOf(userId);
-  while (index !== -1) {
-    matchmakingQueue.splice(index, 1);
-    index = matchmakingQueue.indexOf(userId);
-  }
 }
 
 function getOnlineUsers(): Array<{ userId: string; displayName: string }> {
@@ -226,14 +304,134 @@ function isUserSubscribedToRoom(userId: string, roomId: string): boolean {
   return Array.from(set).some((client) => client.user?.id === userId);
 }
 
-async function getOrLoadRuntime(roomId: string): Promise<ActiveGomokuMatch | null> {
-  const existing = activeGomokuMatches.get(roomId);
+function findSeatedPlayers(room: RoomDTO): { first: string | null; second: string | null } {
+  const players = room.players
+    .filter((player) => player.role === 'player' && player.seat !== null)
+    .sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
+
+  return {
+    first: players[0]?.userId ?? null,
+    second: players[1]?.userId ?? null
+  };
+}
+
+function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
+  const member = room.players.find((player) => player.userId === userId);
+  return member?.role ?? 'spectator';
+}
+
+function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
+  const players = findSeatedPlayers(room);
+  if (!players.first || !players.second) {
+    return null;
+  }
+
+  if (room.gameType === 'gomoku') {
+    return {
+      gameType: 'gomoku',
+      roomId: room.id,
+      matchId,
+      state: createGomokuState(15),
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
+  if (room.gameType === 'go') {
+    return {
+      gameType: 'go',
+      roomId: room.id,
+      matchId,
+      state: createGoState(9),
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
+  if (room.gameType === 'xiangqi') {
+    return {
+      gameType: 'xiangqi',
+      roomId: room.id,
+      matchId,
+      state: createXiangqiState(),
+      players: {
+        red: players.first,
+        black: players.second
+      }
+    };
+  }
+
+  return null;
+}
+
+function replayMoves(
+  runtime: ActiveRuntime,
+  moves: Array<{ payload: Record<string, unknown> }>
+): ActiveRuntime {
+  let current = runtime;
+
+  for (const move of moves) {
+    if (current.gameType === 'gomoku') {
+      const payload = move.payload as { x?: number; y?: number; player?: GomokuMark };
+      if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
+        continue;
+      }
+
+      const player = payload.player ?? current.state.nextPlayer;
+      const applied = applyGomokuMove(current.state, {
+        x: payload.x,
+        y: payload.y,
+        player
+      });
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'go') {
+      const payload = move.payload as GoMove;
+      if (!payload || typeof payload !== 'object' || !('type' in payload)) {
+        continue;
+      }
+
+      const applied = applyGoMove(current.state, payload);
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    const payload = move.payload as unknown as Partial<XiangqiMove>;
+    if (!payload?.from || !payload?.to || !payload?.player) {
+      continue;
+    }
+
+    const applied = applyXiangqiMove(current.state, payload as XiangqiMove);
+    current = {
+      ...current,
+      state: applied.nextState
+    };
+  }
+
+  return current;
+}
+
+async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
+  const existing = activeRuntimes.get(roomId);
   if (existing) {
     return existing;
   }
 
   const match = await getLatestMatchForRoom(roomId);
-  if (!match || match.gameType !== 'gomoku') {
+  if (!match || match.gameType === 'single_2048') {
     return null;
   }
 
@@ -242,44 +440,51 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveGomokuMatch | nul
     return null;
   }
 
-  const black = room.players.find((player) => player.seat === 1)?.userId;
-  const white = room.players.find((player) => player.seat === 2)?.userId;
-  if (!black || !white) {
+  const base = createRuntime(room, match.id);
+  if (!base) {
     return null;
   }
 
-  let state = createGomokuState(15);
-  for (const move of match.moves) {
-    const payload = move.payload as { x?: number; y?: number; player?: GomokuMark };
-    if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
-      continue;
-    }
-
-    const player = payload.player ?? state.nextPlayer;
-    const applied = applyGomokuMove(state, { x: payload.x, y: payload.y, player });
-    state = applied.nextState;
-  }
+  const replayed = replayMoves(base, match.moves);
 
   if (match.status === 'active') {
-    const runtime: ActiveGomokuMatch = {
-      roomId,
-      matchId: match.id,
-      state,
-      players: { black, white }
-    };
-    activeGomokuMatches.set(roomId, runtime);
-    return runtime;
+    activeRuntimes.set(roomId, replayed);
   }
 
-  return {
-    roomId,
-    matchId: match.id,
-    state,
-    players: { black, white }
-  };
+  return replayed;
+}
+
+async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | null> {
+  const existing = await getOrLoadRuntime(roomId);
+  if (existing) {
+    return existing;
+  }
+
+  const room = await getRoom(roomId);
+  if (!room || room.gameType === 'single_2048') {
+    return null;
+  }
+
+  const players = room.players.filter((player) => player.role === 'player');
+  if (players.length < playerSlotsForGame(room.gameType)) {
+    return null;
+  }
+
+  const matchId = await createMatchForRoom(room.id);
+  const runtime = createRuntime(room, matchId);
+  if (!runtime) {
+    return null;
+  }
+
+  activeRuntimes.set(room.id, runtime);
+  return runtime;
 }
 
 async function sendRoomState(client: ClientContext, roomId: string): Promise<void> {
+  if (!client.user) {
+    return;
+  }
+
   const room = await getRoom(roomId);
   if (!room) {
     sendError(client, 'room_not_found');
@@ -287,41 +492,73 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
   }
 
   const runtime = await getOrLoadRuntime(roomId);
+  const viewerRole = getViewerRole(room, client.user.id);
+
+  if (room.gameType === 'gomoku') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'gomoku',
+        state: runtime?.gameType === 'gomoku' ? runtime.state : createGomokuState(15),
+        viewerRole
+      }
+    });
+    return;
+  }
+
+  if (room.gameType === 'go') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'go',
+        state: runtime?.gameType === 'go' ? runtime.state : createGoState(9),
+        viewerRole
+      }
+    });
+    return;
+  }
+
+  if (room.gameType === 'xiangqi') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'xiangqi',
+        state: runtime?.gameType === 'xiangqi' ? runtime.state : createXiangqiState(),
+        viewerRole
+      }
+    });
+    return;
+  }
+
   send(client, {
     type: 'room.state',
     payload: {
       room,
-      gomokuState: room.gameType === 'gomoku' ? runtime?.state ?? createGomokuState(15) : null
+      gameType: 'single_2048',
+      state: null,
+      viewerRole
     }
   });
 }
 
-async function tryMatchmakingPair(): Promise<void> {
-  if (matchmakingQueue.length < 2) {
+async function tryMatchmakingPair(gameType: BoardGameType): Promise<void> {
+  const pair = matchmakingQueue.popPair(gameType);
+  if (!pair) {
     return;
   }
 
-  const first = matchmakingQueue.shift();
-  const second = matchmakingQueue.shift();
+  const [first, second] = pair;
 
-  if (!first || !second || first === second) {
-    return;
+  const paired = await createMatchmakingRoom(first.userId, second.userId, gameType);
+  const runtime = createRuntime(paired.room, paired.matchId);
+  if (runtime) {
+    activeRuntimes.set(paired.room.id, runtime);
   }
 
-  const paired = await createMatchmakingRoom(first, second);
-  const runtime: ActiveGomokuMatch = {
-    roomId: paired.room.id,
-    matchId: paired.matchId,
-    state: createGomokuState(15),
-    players: {
-      black: first,
-      white: second
-    }
-  };
-
-  activeGomokuMatches.set(paired.room.id, runtime);
-
-  sendToUser(first, {
+  sendToUser(first.userId, {
     type: 'matchmaking.matched',
     payload: {
       room: paired.room,
@@ -329,7 +566,7 @@ async function tryMatchmakingPair(): Promise<void> {
     }
   });
 
-  sendToUser(second, {
+  sendToUser(second.userId, {
     type: 'matchmaking.matched',
     payload: {
       room: paired.room,
@@ -337,7 +574,7 @@ async function tryMatchmakingPair(): Promise<void> {
     }
   });
 
-  for (const userId of [first, second]) {
+  for (const userId of [first.userId, second.userId]) {
     for (const client of getUserClients(userId)) {
       addRoomSubscription(client, paired.room.id);
       await sendRoomState(client, paired.room.id);
@@ -345,20 +582,15 @@ async function tryMatchmakingPair(): Promise<void> {
   }
 }
 
-async function handleMove(client: ClientContext, roomId: string, x: number, y: number): Promise<void> {
-  if (!client.user) {
-    sendError(client, 'not_authenticated');
-    return;
-  }
-
-  const runtime = await getOrLoadRuntime(roomId);
-  if (!runtime) {
-    sendError(client, 'no_active_match');
-    return;
-  }
-
+async function handleGomokuMove(
+  client: ClientContext,
+  runtime: GomokuRuntime,
+  x: number,
+  y: number
+): Promise<void> {
+  const userId = client.user!.id;
   const playerMark: GomokuMark | null =
-    runtime.players.black === client.user.id ? 'black' : runtime.players.white === client.user.id ? 'white' : null;
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
 
   if (!playerMark) {
     sendError(client, 'not_a_match_player');
@@ -377,13 +609,13 @@ async function handleMove(client: ClientContext, roomId: string, x: number, y: n
   }
 
   runtime.state = applied.nextState;
-  activeGomokuMatches.set(roomId, runtime);
+  activeRuntimes.set(runtime.roomId, runtime);
 
   await createMatchMove({
     matchId: runtime.matchId,
-    actorUserId: client.user.id,
+    actorUserId: userId,
     moveIndex: runtime.state.moveCount,
-    moveType: 'place_stone',
+    moveType: 'gomoku.place_stone',
     payload: {
       x,
       y,
@@ -391,11 +623,12 @@ async function handleMove(client: ClientContext, roomId: string, x: number, y: n
     }
   });
 
-  const targets = roomSubscribers.get(roomId) ?? new Set<ClientContext>();
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
   broadcast(targets, {
     type: 'match.move_applied',
     payload: {
-      roomId,
+      roomId: runtime.roomId,
+      gameType: 'gomoku',
       state: runtime.state,
       lastMove: {
         x,
@@ -415,13 +648,203 @@ async function handleMove(client: ClientContext, roomId: string, x: number, y: n
 
     await completeMatch({
       matchId: runtime.matchId,
-      roomId,
+      roomId: runtime.roomId,
       winnerUserId,
       status: 'completed'
     });
 
-    activeGomokuMatches.delete(roomId);
+    activeRuntimes.delete(runtime.roomId);
+    broadcast(targets, {
+      type: 'match.completed',
+      payload: {
+        roomId: runtime.roomId,
+        matchId: runtime.matchId,
+        winnerUserId
+      }
+    });
   }
+}
+
+async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoMove): Promise<void> {
+  const userId = client.user!.id;
+  const playerStone =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!playerStone) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove: GoMove =
+    move.type === 'pass'
+      ? {
+          type: 'pass',
+          player: playerStone
+        }
+      : {
+          type: 'place',
+          x: move.x,
+          y: move.y,
+          player: playerStone
+        };
+
+  const applied = applyGoMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: normalizedMove.type === 'pass' ? 'go.pass' : 'go.place_stone',
+    payload: normalizedMove as unknown as Record<string, unknown>
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'go',
+      state: runtime.state,
+      lastMove: normalizedMove
+    }
+  });
+
+  if (runtime.state.status === 'completed') {
+    await completeMatch({
+      matchId: runtime.matchId,
+      roomId: runtime.roomId,
+      winnerUserId: null,
+      status: 'completed'
+    });
+
+    activeRuntimes.delete(runtime.roomId);
+    broadcast(targets, {
+      type: 'match.completed',
+      payload: {
+        roomId: runtime.roomId,
+        matchId: runtime.matchId,
+        winnerUserId: null
+      }
+    });
+  }
+}
+
+async function handleXiangqiMove(
+  client: ClientContext,
+  runtime: XiangqiRuntime,
+  move: XiangqiMove
+): Promise<void> {
+  const userId = client.user!.id;
+  const playerColor: XiangqiColor | null =
+    runtime.players.red === userId ? 'red' : runtime.players.black === userId ? 'black' : null;
+
+  if (!playerColor) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove: XiangqiMove = {
+    from: move.from,
+    to: move.to,
+    player: playerColor
+  };
+
+  const applied = applyXiangqiMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'xiangqi.move_piece',
+    payload: normalizedMove as unknown as Record<string, unknown>
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'xiangqi',
+      state: runtime.state,
+      lastMove: normalizedMove
+    }
+  });
+
+  if (runtime.state.status === 'completed') {
+    const winnerUserId = runtime.state.winner === 'red' ? runtime.players.red : runtime.players.black;
+
+    await completeMatch({
+      matchId: runtime.matchId,
+      roomId: runtime.roomId,
+      winnerUserId,
+      status: 'completed'
+    });
+
+    activeRuntimes.delete(runtime.roomId);
+    broadcast(targets, {
+      type: 'match.completed',
+      payload: {
+        roomId: runtime.roomId,
+        matchId: runtime.matchId,
+        winnerUserId
+      }
+    });
+  }
+}
+
+async function handleMove(
+  client: ClientContext,
+  message:
+    | { roomId: string; gameType: 'gomoku'; x: number; y: number }
+    | { roomId: string; gameType: 'go'; move: GoMove }
+    | { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }
+): Promise<void> {
+  if (!client.user) {
+    sendError(client, 'not_authenticated');
+    return;
+  }
+
+  const runtime = await getOrLoadRuntime(message.roomId);
+  if (!runtime) {
+    sendError(client, 'no_active_match');
+    return;
+  }
+
+  if (runtime.gameType !== message.gameType) {
+    sendError(client, 'game_type_mismatch');
+    return;
+  }
+
+  if (message.gameType === 'gomoku' && runtime.gameType === 'gomoku') {
+    await handleGomokuMove(client, runtime, message.x, message.y);
+    return;
+  }
+
+  if (message.gameType === 'go' && runtime.gameType === 'go') {
+    await handleGoMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'xiangqi' && runtime.gameType === 'xiangqi') {
+    await handleXiangqiMove(client, runtime, message.move);
+    return;
+  }
+
+  sendError(client, 'game_type_mismatch');
 }
 
 async function handleInvitePoll(): Promise<void> {
@@ -465,12 +888,15 @@ wss.on('connection', (socket) => {
     user: null,
     sessionId: null,
     subscribedRooms: new Set(),
-    lobbySubscribed: false
+    lobbySubscribed: false,
+    lastSeenAt: Date.now()
   };
 
   clients.add(client);
 
   socket.on('message', async (buffer) => {
+    client.lastSeenAt = Date.now();
+
     const parsed = parseMessage(buffer.toString());
     if (!parsed) {
       sendError(client, 'invalid_json');
@@ -480,7 +906,10 @@ wss.on('connection', (socket) => {
     try {
       if (parsed.type === 'auth') {
         const msg = authSchema.parse(parsed);
-        const payload = jwt.verify(msg.payload.token, config.jwtSecret) as { sessionId?: string; userId?: string };
+        const payload = jwt.verify(msg.payload.token, config.jwtSecret) as {
+          sessionId?: string;
+          userId?: string;
+        };
         if (!payload.sessionId || !payload.userId) {
           send(client, { type: 'auth.error', payload: { reason: 'invalid_token_payload' } });
           return;
@@ -508,6 +937,9 @@ wss.on('connection', (socket) => {
           }
         }
 
+        matchmakingQueue.markReconnected(user.id);
+        const queueEntry = matchmakingQueue.getEntry(user.id);
+
         send(client, {
           type: 'auth.ok',
           payload: {
@@ -516,6 +948,16 @@ wss.on('connection', (socket) => {
             user
           }
         });
+
+        if (queueEntry) {
+          send(client, {
+            type: 'matchmaking.queued',
+            payload: {
+              gameType: queueEntry.gameType,
+              queueSize: matchmakingQueue.getQueueSize(queueEntry.gameType)
+            }
+          });
+        }
 
         broadcastLobbyPresence();
         return;
@@ -540,62 +982,94 @@ wss.on('connection', (socket) => {
           sendError(client, 'room_not_found');
           return;
         }
-        if (!room.players.some((player) => player.userId === authedUser.id)) {
+
+        const isMember = room.players.some((player) => player.userId === authedUser.id);
+        if (!isMember && !msg.payload.asSpectator) {
           sendError(client, 'room_access_denied');
           return;
         }
 
         if (!isUserSubscribedToRoom(authedUser.id, msg.payload.roomId)) {
+          const role = getViewerRole(room, authedUser.id);
           broadcast(roomSubscribers.get(msg.payload.roomId) ?? [], {
             type: 'room.player_joined',
             payload: {
               roomId: msg.payload.roomId,
-              user: authedUser
+              user: authedUser,
+              role
             }
           });
         }
 
         addRoomSubscription(client, msg.payload.roomId);
+
+        if (!isMember && msg.payload.asSpectator) {
+          await joinRoomIfPossible(msg.payload.roomId, authedUser.id, true);
+        }
+
+        await ensureRoomMatchIfReady(msg.payload.roomId);
         await sendRoomState(client, msg.payload.roomId);
         return;
       }
 
       if (parsed.type === 'room.move') {
         const msg = roomMoveSchema.parse(parsed);
-        await handleMove(client, msg.payload.roomId, msg.payload.x, msg.payload.y);
+
+        if (msg.payload.gameType === 'gomoku') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'gomoku',
+            x: msg.payload.x,
+            y: msg.payload.y
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'go') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'go',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        await handleMove(client, {
+          roomId: msg.payload.roomId,
+          gameType: 'xiangqi',
+          move: msg.payload.move
+        });
         return;
       }
 
       if (parsed.type === 'matchmaking.join') {
         const msg = matchmakingJoinSchema.parse(parsed);
-        if (msg.payload.gameType !== 'gomoku') {
-          sendError(client, 'unsupported_matchmaking_game');
-          return;
-        }
 
-        if (!matchmakingQueue.includes(authedUser.id)) {
-          matchmakingQueue.push(authedUser.id);
-        }
+        matchmakingQueue.join(authedUser.id, msg.payload.gameType);
 
         send(client, {
           type: 'matchmaking.queued',
           payload: {
-            queueSize: matchmakingQueue.length
+            gameType: msg.payload.gameType,
+            queueSize: matchmakingQueue.getQueueSize(msg.payload.gameType)
           }
         });
 
-        await tryMatchmakingPair();
+        await tryMatchmakingPair(msg.payload.gameType);
         return;
       }
 
       if (parsed.type === 'matchmaking.leave') {
-        removeFromQueue(authedUser.id);
-        send(client, {
-          type: 'matchmaking.queued',
-          payload: {
-            queueSize: matchmakingQueue.length
-          }
-        });
+        const removed = matchmakingQueue.leave(authedUser.id);
+        if (removed) {
+          send(client, {
+            type: 'matchmaking.queued',
+            payload: {
+              gameType: removed.gameType,
+              queueSize: matchmakingQueue.getQueueSize(removed.gameType)
+            }
+          });
+        }
         return;
       }
 
@@ -629,29 +1103,14 @@ wss.on('connection', (socket) => {
         });
 
         if (invitation.status === 'accepted') {
-          const room = await joinRoomIfPossible(invitation.roomId, authedUser.id);
+          const room = await joinRoomIfPossible(invitation.roomId, authedUser.id, false);
           if (room) {
             for (const roomClient of getUserClients(authedUser.id)) {
               addRoomSubscription(roomClient, room.id);
               await sendRoomState(roomClient, room.id);
             }
 
-            if (room.players.length === 2 && room.gameType === 'gomoku') {
-              await getOrLoadRuntime(room.id);
-              if (!activeGomokuMatches.has(room.id)) {
-                const black = room.players.find((player) => player.seat === 1)?.userId;
-                const white = room.players.find((player) => player.seat === 2)?.userId;
-                if (black && white) {
-                  const matchId = await createMatchForRoom(room.id);
-                  activeGomokuMatches.set(room.id, {
-                    roomId: room.id,
-                    matchId,
-                    state: createGomokuState(15),
-                    players: { black, white }
-                  });
-                }
-              }
-            }
+            await ensureRoomMatchIfReady(room.id);
           }
         }
 
@@ -676,7 +1135,9 @@ wss.on('connection', (socket) => {
   });
 
   socket.on('close', () => {
-    removeFromQueue(client.user?.id ?? '');
+    if (client.user) {
+      matchmakingQueue.markDisconnected(client.user.id);
+    }
 
     for (const roomId of client.subscribedRooms) {
       removeRoomSubscription(client, roomId);
@@ -720,6 +1181,38 @@ const reconnectCleanupInterval = setInterval(() => {
   }
 }, 10_000);
 
+const matchmakingSweepInterval = setInterval(() => {
+  const events = matchmakingQueue.sweep();
+
+  for (const event of events) {
+    if (event.type === 'timed_out') {
+      sendToUser(event.userId, {
+        type: 'matchmaking.timeout',
+        payload: {
+          gameType: event.gameType
+        }
+      });
+
+      sendToUser(event.userId, {
+        type: 'matchmaking.queued',
+        payload: {
+          gameType: event.gameType,
+          queueSize: matchmakingQueue.getQueueSize(event.gameType)
+        }
+      });
+    }
+  }
+}, 2_000);
+
+const heartbeatSweepInterval = setInterval(() => {
+  const now = Date.now();
+  for (const client of clients) {
+    if (now - client.lastSeenAt > 55_000) {
+      client.socket.close(4000, 'heartbeat_timeout');
+    }
+  }
+}, 5_000);
+
 redis
   .connect()
   .then(() => redis.ping())
@@ -736,6 +1229,8 @@ console.log(`Realtime WS listening on :${config.realtimePort}`);
 const shutdown = async () => {
   clearInterval(invitePollInterval);
   clearInterval(reconnectCleanupInterval);
+  clearInterval(matchmakingSweepInterval);
+  clearInterval(heartbeatSweepInterval);
 
   wss.close(async () => {
     try {

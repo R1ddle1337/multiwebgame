@@ -1,8 +1,10 @@
 import type {
+  BlockDTO,
   GameType,
   InvitationDTO,
   MatchDTO,
   MatchMoveDTO,
+  RatingDTO,
   RoomDTO,
   RoomPlayerDTO,
   SessionDTO,
@@ -15,23 +17,64 @@ import { pool, withTransaction } from '../db.js';
 import { StoreError, type Store } from './types.js';
 
 type DbExecutor = Pick<PoolClient, 'query'>;
+type RatingMap = Partial<Record<GameType, number>>;
+
+const ALL_GAME_TYPES: GameType[] = ['single_2048', 'gomoku', 'xiangqi', 'go'];
+
+function playerSlotsForGame(gameType: GameType): number {
+  return gameType === 'single_2048' ? 1 : 2;
+}
+
+function defaultMaxPlayersForGame(gameType: GameType): number {
+  return gameType === 'single_2048' ? 1 : 4;
+}
+
+function normalizeMaxPlayers(gameType: GameType, requested?: number): number {
+  const slots = playerSlotsForGame(gameType);
+  const fallback = defaultMaxPlayersForGame(gameType);
+  const maxPlayers = requested ?? fallback;
+
+  if (!Number.isInteger(maxPlayers) || maxPlayers < slots || maxPlayers > 8) {
+    throw new StoreError(`maxPlayers must be between ${slots} and 8 for ${gameType}`, 'validation_error');
+  }
+
+  return maxPlayers;
+}
 
 function toIso(value: Date | string): string {
   return new Date(value).toISOString();
 }
 
-function mapUser(row: {
-  id: string;
-  display_name: string;
-  is_guest: boolean;
-  rating: number | null;
-  created_at: Date | string;
-}): UserDTO {
+function createDefaultRatings(): RatingMap {
+  return {
+    single_2048: 1200,
+    gomoku: 1200,
+    xiangqi: 1200,
+    go: 1200
+  };
+}
+
+function mapUser(
+  row: {
+    id: string;
+    display_name: string;
+    is_guest: boolean;
+    created_at: Date | string;
+    rating?: number | null;
+  },
+  ratings: RatingMap
+): UserDTO {
+  const merged = {
+    ...createDefaultRatings(),
+    ...ratings
+  };
+
   return {
     id: row.id,
     displayName: row.display_name,
     isGuest: row.is_guest,
-    rating: row.rating ?? 1200,
+    rating: merged.gomoku ?? row.rating ?? 1200,
+    ratings: merged,
     createdAt: toIso(row.created_at)
   };
 }
@@ -111,15 +154,73 @@ function mapMatchMove(row: {
   };
 }
 
-async function ensureRating(client: DbExecutor, userId: string, gameType = 'gomoku'): Promise<void> {
+function mapRating(row: { game_type: GameType; rating: number; updated_at: Date | string }): RatingDTO {
+  return {
+    gameType: row.game_type,
+    rating: row.rating,
+    updatedAt: toIso(row.updated_at)
+  };
+}
+
+function mapBlock(row: {
+  id: string;
+  blocker_user_id: string;
+  blocked_user_id: string;
+  reason: string | null;
+  created_at: Date | string;
+}): BlockDTO {
+  return {
+    id: row.id,
+    blockerUserId: row.blocker_user_id,
+    blockedUserId: row.blocked_user_id,
+    reason: row.reason,
+    createdAt: toIso(row.created_at)
+  };
+}
+
+async function ensureAllRatings(client: DbExecutor, userId: string): Promise<void> {
   await client.query(
     `
       INSERT INTO ratings (user_id, game_type, rating)
-      VALUES ($1, $2, 1200)
+      SELECT $1, game_type, 1200
+      FROM UNNEST($2::text[]) AS game_type
       ON CONFLICT (user_id, game_type) DO NOTHING
     `,
-    [userId, gameType]
+    [userId, ALL_GAME_TYPES]
   );
+}
+
+async function fetchRatingsByUserId(client: DbExecutor, userIds: string[]): Promise<Map<string, RatingMap>> {
+  const map = new Map<string, RatingMap>();
+
+  for (const userId of userIds) {
+    map.set(userId, createDefaultRatings());
+  }
+
+  if (userIds.length === 0) {
+    return map;
+  }
+
+  const result = await client.query<{
+    user_id: string;
+    game_type: GameType;
+    rating: number;
+  }>(
+    `
+      SELECT user_id, game_type, rating
+      FROM ratings
+      WHERE user_id = ANY($1::uuid[])
+    `,
+    [userIds]
+  );
+
+  for (const row of result.rows) {
+    const existing = map.get(row.user_id) ?? createDefaultRatings();
+    existing[row.game_type] = row.rating;
+    map.set(row.user_id, existing);
+  }
+
+  return map;
 }
 
 async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDTO | null> {
@@ -128,10 +229,11 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     host_user_id: string;
     game_type: GameType;
     status: 'open' | 'in_match' | 'closed';
+    max_players: number;
     created_at: Date | string;
   }>(
     `
-      SELECT id, host_user_id, game_type, status, created_at
+      SELECT id, host_user_id, game_type, status, max_players, created_at
       FROM rooms
       WHERE id = $1
     `,
@@ -147,12 +249,12 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     id: string;
     room_id: string;
     user_id: string;
-    seat: number;
+    role: 'player' | 'spectator';
+    seat: number | null;
     joined_at: Date | string;
     left_at: Date | string | null;
     display_name: string;
     is_guest: boolean;
-    rating: number | null;
     created_at: Date | string;
   }>(
     `
@@ -160,30 +262,35 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
         rp.id,
         rp.room_id,
         rp.user_id,
+        rp.role,
         rp.seat,
         rp.joined_at,
         rp.left_at,
         u.display_name,
         u.is_guest,
-        u.created_at,
-        rt.rating
+        u.created_at
       FROM room_players rp
       JOIN users u ON u.id = rp.user_id
-      LEFT JOIN ratings rt ON rt.user_id = u.id AND rt.game_type = 'gomoku'
       WHERE rp.room_id = $1 AND rp.left_at IS NULL
-      ORDER BY rp.seat ASC
+      ORDER BY CASE WHEN rp.seat IS NULL THEN 999 ELSE rp.seat END ASC, rp.joined_at ASC
     `,
     [roomId]
+  );
+
+  const ratingsByUserId = await fetchRatingsByUserId(
+    client,
+    playersResult.rows.map((row) => row.user_id)
   );
 
   const players: RoomPlayerDTO[] = playersResult.rows.map((row) => ({
     id: row.id,
     roomId: row.room_id,
     userId: row.user_id,
+    role: row.role,
     seat: row.seat,
     joinedAt: toIso(row.joined_at),
     leftAt: row.left_at ? toIso(row.left_at) : null,
-    user: mapUser(row)
+    user: mapUser(row, ratingsByUserId.get(row.user_id) ?? createDefaultRatings())
   }));
 
   return {
@@ -191,12 +298,16 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     hostUserId: roomRow.host_user_id,
     gameType: roomRow.game_type,
     status: roomRow.status,
+    maxPlayers: roomRow.max_players,
     createdAt: toIso(roomRow.created_at),
     players
   };
 }
 
-async function loadMovesForMatches(client: DbExecutor, matchIds: string[]): Promise<Map<string, MatchMoveDTO[]>> {
+async function loadMovesForMatches(
+  client: DbExecutor,
+  matchIds: string[]
+): Promise<Map<string, MatchMoveDTO[]>> {
   if (matchIds.length === 0) {
     return new Map();
   }
@@ -249,8 +360,9 @@ export function createPostgresStore(): Store {
         );
 
         const row = created.rows[0];
-        await ensureRating(client, row.id, 'gomoku');
-        return mapUser({ ...row, rating: 1200 });
+        await ensureAllRatings(client, row.id);
+        const ratings = (await fetchRatingsByUserId(client, [row.id])).get(row.id) ?? createDefaultRatings();
+        return mapUser(row, ratings);
       });
     },
 
@@ -271,8 +383,47 @@ export function createPostgresStore(): Store {
         );
 
         const row = created.rows[0];
-        await ensureRating(client, row.id, 'gomoku');
-        return mapUser({ ...row, rating: 1200 });
+        await ensureAllRatings(client, row.id);
+        const ratings = (await fetchRatingsByUserId(client, [row.id])).get(row.id) ?? createDefaultRatings();
+        return mapUser(row, ratings);
+      }).catch((error: unknown) => {
+        if (
+          typeof error === 'object' &&
+          error !== null &&
+          'code' in error &&
+          (error as { code: string }).code === '23505'
+        ) {
+          throw new StoreError('Email already registered', 'conflict');
+        }
+        throw error;
+      });
+    },
+
+    async upgradeGuestUser(params): Promise<UserDTO> {
+      return withTransaction(async (client) => {
+        const result = await client.query<{
+          id: string;
+          display_name: string;
+          is_guest: boolean;
+          created_at: Date | string;
+        }>(
+          `
+            UPDATE users
+            SET display_name = $2, email = $3, password_hash = $4, is_guest = FALSE
+            WHERE id = $1 AND is_guest = TRUE
+            RETURNING id, display_name, is_guest, created_at
+          `,
+          [params.userId, params.displayName, params.email.toLowerCase(), params.passwordHash]
+        );
+
+        const row = result.rows[0];
+        if (!row) {
+          throw new StoreError('Guest account not found or already upgraded', 'conflict');
+        }
+
+        await ensureAllRatings(client, row.id);
+        const ratings = (await fetchRatingsByUserId(client, [row.id])).get(row.id) ?? createDefaultRatings();
+        return mapUser(row, ratings);
       }).catch((error: unknown) => {
         if (
           typeof error === 'object' &&
@@ -293,19 +444,11 @@ export function createPostgresStore(): Store {
         password_hash: string | null;
         is_guest: boolean;
         created_at: Date | string;
-        rating: number | null;
       }>(
         `
-          SELECT
-            u.id,
-            u.display_name,
-            u.password_hash,
-            u.is_guest,
-            u.created_at,
-            rt.rating
-          FROM users u
-          LEFT JOIN ratings rt ON rt.user_id = u.id AND rt.game_type = 'gomoku'
-          WHERE u.email = $1
+          SELECT id, display_name, password_hash, is_guest, created_at
+          FROM users
+          WHERE email = $1
           LIMIT 1
         `,
         [email.toLowerCase()]
@@ -316,8 +459,10 @@ export function createPostgresStore(): Store {
         return null;
       }
 
+      const ratings = (await fetchRatingsByUserId(pool, [row.id])).get(row.id) ?? createDefaultRatings();
+
       return {
-        user: mapUser(row),
+        user: mapUser(row, ratings),
         passwordHash: row.password_hash
       };
     },
@@ -328,25 +473,23 @@ export function createPostgresStore(): Store {
         display_name: string;
         is_guest: boolean;
         created_at: Date | string;
-        rating: number | null;
       }>(
         `
-          SELECT
-            u.id,
-            u.display_name,
-            u.is_guest,
-            u.created_at,
-            rt.rating
-          FROM users u
-          LEFT JOIN ratings rt ON rt.user_id = u.id AND rt.game_type = 'gomoku'
-          WHERE u.id = $1
+          SELECT id, display_name, is_guest, created_at
+          FROM users
+          WHERE id = $1
           LIMIT 1
         `,
         [userId]
       );
 
       const row = result.rows[0];
-      return row ? mapUser(row) : null;
+      if (!row) {
+        return null;
+      }
+
+      const ratings = (await fetchRatingsByUserId(pool, [row.id])).get(row.id) ?? createDefaultRatings();
+      return mapUser(row, ratings);
     },
 
     async createSession(userId: string): Promise<SessionDTO> {
@@ -396,7 +539,7 @@ export function createPostgresStore(): Store {
         `
           SELECT id
           FROM rooms
-          WHERE status = 'open'
+          WHERE status <> 'closed'
           ORDER BY created_at DESC
           LIMIT 100
         `
@@ -417,22 +560,24 @@ export function createPostgresStore(): Store {
       return fetchRoomById(pool, roomId);
     },
 
-    async createRoom(hostUserId: string, gameType: GameType): Promise<RoomDTO> {
+    async createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO> {
       return withTransaction(async (client) => {
+        const normalizedMaxPlayers = normalizeMaxPlayers(gameType, maxPlayers);
+
         const roomResult = await client.query<{ id: string }>(
           `
-            INSERT INTO rooms (host_user_id, game_type, status)
-            VALUES ($1, $2, 'open')
+            INSERT INTO rooms (host_user_id, game_type, status, max_players)
+            VALUES ($1, $2, 'open', $3)
             RETURNING id
           `,
-          [hostUserId, gameType]
+          [hostUserId, gameType, normalizedMaxPlayers]
         );
 
         const roomId = roomResult.rows[0].id;
         await client.query(
           `
-            INSERT INTO room_players (room_id, user_id, seat)
-            VALUES ($1, $2, 1)
+            INSERT INTO room_players (room_id, user_id, role, seat)
+            VALUES ($1, $2, 'player', 1)
           `,
           [roomId, hostUserId]
         );
@@ -446,15 +591,16 @@ export function createPostgresStore(): Store {
       });
     },
 
-    async joinRoom(roomId: string, userId: string): Promise<RoomDTO> {
+    async joinRoom(roomId: string, userId: string, asSpectator = false): Promise<RoomDTO> {
       return withTransaction(async (client) => {
         const roomResult = await client.query<{
           id: string;
           game_type: GameType;
           status: 'open' | 'in_match' | 'closed';
+          max_players: number;
         }>(
           `
-            SELECT id, game_type, status
+            SELECT id, game_type, status, max_players
             FROM rooms
             WHERE id = $1
             FOR UPDATE
@@ -467,11 +613,13 @@ export function createPostgresStore(): Store {
           throw new StoreError('Room not found', 'not_found');
         }
 
-        if (room.status !== 'open') {
-          throw new StoreError('Room is not open', 'forbidden');
+        if (room.status === 'closed') {
+          throw new StoreError('Room is closed', 'forbidden');
         }
 
-        const existing = await client.query(
+        const existing = await client.query<{
+          id: string;
+        }>(
           `
             SELECT id
             FROM room_players
@@ -489,34 +637,46 @@ export function createPostgresStore(): Store {
           return current;
         }
 
-        const maxPlayers = room.game_type === 'gomoku' ? 2 : 1;
-
-        const activePlayers = await client.query<{ seat: number }>(
+        const activeMembers = await client.query<{
+          role: 'player' | 'spectator';
+          seat: number | null;
+        }>(
           `
-            SELECT seat
+            SELECT role, seat
             FROM room_players
             WHERE room_id = $1 AND left_at IS NULL
-            ORDER BY seat ASC
           `,
           [roomId]
         );
 
-        if (activePlayers.rows.length >= maxPlayers) {
+        if (activeMembers.rows.length >= room.max_players) {
           throw new StoreError('Room capacity reached', 'capacity_reached');
         }
 
-        const usedSeats = new Set(activePlayers.rows.map((row) => row.seat));
-        let nextSeat = 1;
-        while (usedSeats.has(nextSeat) && nextSeat <= maxPlayers) {
-          nextSeat += 1;
+        const maxPlayersForMode = playerSlotsForGame(room.game_type);
+        const activePlayers = activeMembers.rows.filter((member) => member.role === 'player');
+
+        let role: 'player' | 'spectator' = 'spectator';
+        let seat: number | null = null;
+
+        if (!asSpectator && activePlayers.length < maxPlayersForMode) {
+          role = 'player';
+          const usedSeats = new Set(
+            activePlayers.map((member) => member.seat).filter((value): value is number => value !== null)
+          );
+          let nextSeat = 1;
+          while (usedSeats.has(nextSeat) && nextSeat <= maxPlayersForMode) {
+            nextSeat += 1;
+          }
+          seat = nextSeat;
         }
 
         await client.query(
           `
-            INSERT INTO room_players (room_id, user_id, seat)
-            VALUES ($1, $2, $3)
+            INSERT INTO room_players (room_id, user_id, role, seat)
+            VALUES ($1, $2, $3, $4)
           `,
-          [roomId, userId, nextSeat]
+          [roomId, userId, role, seat]
         );
 
         const updatedRoom = await fetchRoomById(client, roomId);
@@ -559,23 +719,36 @@ export function createPostgresStore(): Store {
           throw new StoreError('User is not in room', 'not_found');
         }
 
-        const activePlayers = await client.query<{ user_id: string; seat: number }>(
+        const activePlayers = await client.query<{ user_id: string }>(
           `
-            SELECT user_id, seat
+            SELECT user_id
             FROM room_players
-            WHERE room_id = $1 AND left_at IS NULL
+            WHERE room_id = $1 AND left_at IS NULL AND role = 'player'
             ORDER BY seat ASC
           `,
           [roomId]
         );
 
-        if (activePlayers.rows.length === 0) {
+        const activeAny = await client.query<{ user_id: string }>(
+          `
+            SELECT user_id
+            FROM room_players
+            WHERE room_id = $1 AND left_at IS NULL
+            ORDER BY joined_at ASC
+          `,
+          [roomId]
+        );
+
+        if (activeAny.rows.length === 0) {
           await client.query(`UPDATE rooms SET status = 'closed' WHERE id = $1`, [roomId]);
           return null;
         }
 
         if (room.host_user_id === userId) {
-          await client.query(`UPDATE rooms SET host_user_id = $1 WHERE id = $2`, [activePlayers.rows[0].user_id, roomId]);
+          const nextHost = activePlayers.rows[0]?.user_id ?? activeAny.rows[0]?.user_id;
+          if (nextHost) {
+            await client.query(`UPDATE rooms SET host_user_id = $1 WHERE id = $2`, [nextHost, roomId]);
+          }
         }
 
         const updatedRoom = await fetchRoomById(client, roomId);
@@ -593,14 +766,47 @@ export function createPostgresStore(): Store {
       }
 
       return withTransaction(async (client) => {
-        const roomResult = await client.query<{ id: string }>('SELECT id FROM rooms WHERE id = $1', [params.roomId]);
+        const roomResult = await client.query<{ id: string }>('SELECT id FROM rooms WHERE id = $1', [
+          params.roomId
+        ]);
         if (roomResult.rows.length === 0) {
           throw new StoreError('Room not found', 'not_found');
         }
 
-        const targetUser = await client.query<{ id: string }>('SELECT id FROM users WHERE id = $1', [params.toUserId]);
+        const inviterInRoom = await client.query<{ id: string }>(
+          `
+            SELECT id
+            FROM room_players
+            WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
+            LIMIT 1
+          `,
+          [params.roomId, params.fromUserId]
+        );
+
+        if (!inviterInRoom.rows[0]) {
+          throw new StoreError('Only room participants can invite users', 'forbidden');
+        }
+
+        const targetUser = await client.query<{ id: string }>('SELECT id FROM users WHERE id = $1', [
+          params.toUserId
+        ]);
         if (targetUser.rows.length === 0) {
           throw new StoreError('Invite target user not found', 'not_found');
+        }
+
+        const blocked = await client.query<{ id: string }>(
+          `
+            SELECT id
+            FROM user_blocks
+            WHERE (blocker_user_id = $1 AND blocked_user_id = $2)
+              OR (blocker_user_id = $2 AND blocked_user_id = $1)
+            LIMIT 1
+          `,
+          [params.fromUserId, params.toUserId]
+        );
+
+        if (blocked.rows[0]) {
+          throw new StoreError('Invite blocked due to moderation settings', 'forbidden');
         }
 
         const insert = await client.query<{
@@ -705,7 +911,10 @@ export function createPostgresStore(): Store {
       );
 
       const matches = result.rows.map(mapMatch);
-      const movesByMatch = await loadMovesForMatches(pool, matches.map((match) => match.id));
+      const movesByMatch = await loadMovesForMatches(
+        pool,
+        matches.map((match) => match.id)
+      );
 
       for (const match of matches) {
         match.moves = movesByMatch.get(match.id) ?? [];
@@ -742,6 +951,89 @@ export function createPostgresStore(): Store {
       const moves = await loadMovesForMatches(pool, [match.id]);
       match.moves = moves.get(match.id) ?? [];
       return match;
+    },
+
+    async listRatingsForUser(userId: string): Promise<RatingDTO[]> {
+      const result = await pool.query<{
+        game_type: GameType;
+        rating: number;
+        updated_at: Date | string;
+      }>(
+        `
+          SELECT game_type, rating, updated_at
+          FROM ratings
+          WHERE user_id = $1
+          ORDER BY game_type ASC
+        `,
+        [userId]
+      );
+
+      return result.rows.map(mapRating);
+    },
+
+    async listBlockedUsers(userId: string): Promise<BlockDTO[]> {
+      const result = await pool.query<{
+        id: string;
+        blocker_user_id: string;
+        blocked_user_id: string;
+        reason: string | null;
+        created_at: Date | string;
+      }>(
+        `
+          SELECT id, blocker_user_id, blocked_user_id, reason, created_at
+          FROM user_blocks
+          WHERE blocker_user_id = $1
+          ORDER BY created_at DESC
+        `,
+        [userId]
+      );
+
+      return result.rows.map(mapBlock);
+    },
+
+    async blockUser(params): Promise<BlockDTO> {
+      if (params.blockerUserId === params.blockedUserId) {
+        throw new StoreError('Cannot block yourself', 'validation_error');
+      }
+
+      const result = await pool.query<{
+        id: string;
+        blocker_user_id: string;
+        blocked_user_id: string;
+        reason: string | null;
+        created_at: Date | string;
+      }>(
+        `
+          INSERT INTO user_blocks (blocker_user_id, blocked_user_id, reason)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (blocker_user_id, blocked_user_id)
+          DO UPDATE SET reason = COALESCE(EXCLUDED.reason, user_blocks.reason)
+          RETURNING id, blocker_user_id, blocked_user_id, reason, created_at
+        `,
+        [params.blockerUserId, params.blockedUserId, params.reason ?? null]
+      );
+
+      return mapBlock(result.rows[0]);
+    },
+
+    async reportUser(params): Promise<void> {
+      if (!params.targetUserId && !params.matchId) {
+        throw new StoreError('Report requires targetUserId or matchId', 'validation_error');
+      }
+
+      await pool.query(
+        `
+          INSERT INTO user_reports (reporter_user_id, target_user_id, match_id, reason, details)
+          VALUES ($1, $2, $3, $4, $5)
+        `,
+        [
+          params.reporterUserId,
+          params.targetUserId ?? null,
+          params.matchId ?? null,
+          params.reason,
+          params.details ?? null
+        ]
+      );
     }
   };
 }

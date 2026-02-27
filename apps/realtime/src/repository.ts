@@ -12,23 +12,52 @@ import type { PoolClient } from 'pg';
 import { pool, withTransaction } from './db.js';
 
 type DbExecutor = Pick<PoolClient, 'query'>;
+type RatingMap = Partial<Record<GameType, number>>;
+
+const ALL_GAME_TYPES: GameType[] = ['single_2048', 'gomoku', 'xiangqi', 'go'];
 
 function toIso(value: Date | string): string {
   return new Date(value).toISOString();
 }
 
-function mapUser(row: {
-  id: string;
-  display_name: string;
-  is_guest: boolean;
-  rating: number | null;
-  created_at: Date | string;
-}): UserDTO {
+function createDefaultRatings(): RatingMap {
+  return {
+    single_2048: 1200,
+    gomoku: 1200,
+    xiangqi: 1200,
+    go: 1200
+  };
+}
+
+function playerSlotsForGame(gameType: GameType): number {
+  return gameType === 'single_2048' ? 1 : 2;
+}
+
+function defaultMaxPlayersForGame(gameType: GameType): number {
+  return gameType === 'single_2048' ? 1 : 4;
+}
+
+function mapUser(
+  row: {
+    id: string;
+    display_name: string;
+    is_guest: boolean;
+    created_at: Date | string;
+    rating?: number | null;
+  },
+  ratings: RatingMap
+): UserDTO {
+  const merged = {
+    ...createDefaultRatings(),
+    ...ratings
+  };
+
   return {
     id: row.id,
     displayName: row.display_name,
     isGuest: row.is_guest,
-    rating: row.rating ?? 1200,
+    rating: merged.gomoku ?? row.rating ?? 1200,
+    ratings: merged,
     createdAt: toIso(row.created_at)
   };
 }
@@ -94,16 +123,62 @@ function mapMatch(row: {
   };
 }
 
+async function ensureAllRatings(client: DbExecutor, userId: string): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO ratings (user_id, game_type, rating)
+      SELECT $1, game_type, 1200
+      FROM UNNEST($2::text[]) AS game_type
+      ON CONFLICT (user_id, game_type) DO NOTHING
+    `,
+    [userId, ALL_GAME_TYPES]
+  );
+}
+
+async function fetchRatingsByUserId(client: DbExecutor, userIds: string[]): Promise<Map<string, RatingMap>> {
+  const map = new Map<string, RatingMap>();
+
+  for (const userId of userIds) {
+    map.set(userId, createDefaultRatings());
+  }
+
+  if (userIds.length === 0) {
+    return map;
+  }
+
+  const result = await client.query<{
+    user_id: string;
+    game_type: GameType;
+    rating: number;
+  }>(
+    `
+      SELECT user_id, game_type, rating
+      FROM ratings
+      WHERE user_id = ANY($1::uuid[])
+    `,
+    [userIds]
+  );
+
+  for (const row of result.rows) {
+    const existing = map.get(row.user_id) ?? createDefaultRatings();
+    existing[row.game_type] = row.rating;
+    map.set(row.user_id, existing);
+  }
+
+  return map;
+}
+
 async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDTO | null> {
   const roomResult = await client.query<{
     id: string;
     host_user_id: string;
     game_type: GameType;
     status: 'open' | 'in_match' | 'closed';
+    max_players: number;
     created_at: Date | string;
   }>(
     `
-      SELECT id, host_user_id, game_type, status, created_at
+      SELECT id, host_user_id, game_type, status, max_players, created_at
       FROM rooms
       WHERE id = $1
       LIMIT 1
@@ -120,12 +195,12 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     id: string;
     room_id: string;
     user_id: string;
-    seat: number;
+    role: 'player' | 'spectator';
+    seat: number | null;
     joined_at: Date | string;
     left_at: Date | string | null;
     display_name: string;
     is_guest: boolean;
-    rating: number | null;
     created_at: Date | string;
   }>(
     `
@@ -133,30 +208,35 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
         rp.id,
         rp.room_id,
         rp.user_id,
+        rp.role,
         rp.seat,
         rp.joined_at,
         rp.left_at,
         u.display_name,
         u.is_guest,
-        u.created_at,
-        rt.rating
+        u.created_at
       FROM room_players rp
       JOIN users u ON u.id = rp.user_id
-      LEFT JOIN ratings rt ON rt.user_id = u.id AND rt.game_type = 'gomoku'
       WHERE rp.room_id = $1 AND rp.left_at IS NULL
-      ORDER BY rp.seat ASC
+      ORDER BY CASE WHEN rp.seat IS NULL THEN 999 ELSE rp.seat END ASC, rp.joined_at ASC
     `,
     [roomId]
+  );
+
+  const ratingsByUser = await fetchRatingsByUserId(
+    client,
+    players.rows.map((row) => row.user_id)
   );
 
   const mappedPlayers: RoomPlayerDTO[] = players.rows.map((row) => ({
     id: row.id,
     roomId: row.room_id,
     userId: row.user_id,
+    role: row.role,
     seat: row.seat,
     joinedAt: toIso(row.joined_at),
     leftAt: row.left_at ? toIso(row.left_at) : null,
-    user: mapUser(row)
+    user: mapUser(row, ratingsByUser.get(row.user_id) ?? createDefaultRatings())
   }));
 
   return {
@@ -164,9 +244,96 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     hostUserId: room.host_user_id,
     gameType: room.game_type,
     status: room.status,
+    maxPlayers: room.max_players,
     createdAt: toIso(room.created_at),
     players: mappedPlayers
   };
+}
+
+async function updateRatingsForMatch(
+  client: DbExecutor,
+  roomId: string,
+  gameType: GameType,
+  winnerUserId: string | null
+): Promise<void> {
+  if (gameType === 'single_2048') {
+    return;
+  }
+
+  const playersResult = await client.query<{ user_id: string }>(
+    `
+      SELECT user_id
+      FROM room_players
+      WHERE room_id = $1 AND role = 'player'
+      ORDER BY seat ASC
+      LIMIT 2
+    `,
+    [roomId]
+  );
+
+  if (playersResult.rows.length < 2) {
+    return;
+  }
+
+  const [a, b] = playersResult.rows.map((row) => row.user_id);
+
+  await ensureAllRatings(client, a);
+  await ensureAllRatings(client, b);
+
+  const current = await client.query<{
+    user_id: string;
+    rating: number;
+  }>(
+    `
+      SELECT user_id, rating
+      FROM ratings
+      WHERE game_type = $1 AND user_id = ANY($2::uuid[])
+    `,
+    [gameType, [a, b]]
+  );
+
+  const currentByUser = new Map<string, number>();
+  for (const row of current.rows) {
+    currentByUser.set(row.user_id, row.rating);
+  }
+
+  const ratingA = currentByUser.get(a) ?? 1200;
+  const ratingB = currentByUser.get(b) ?? 1200;
+
+  const expectedA = 1 / (1 + 10 ** ((ratingB - ratingA) / 400));
+  const expectedB = 1 - expectedA;
+
+  let scoreA = 0.5;
+  let scoreB = 0.5;
+  if (winnerUserId === a) {
+    scoreA = 1;
+    scoreB = 0;
+  } else if (winnerUserId === b) {
+    scoreA = 0;
+    scoreB = 1;
+  }
+
+  const k = 24;
+  const newA = Math.round(ratingA + k * (scoreA - expectedA));
+  const newB = Math.round(ratingB + k * (scoreB - expectedB));
+
+  await client.query(
+    `
+      UPDATE ratings
+      SET rating = $3, updated_at = NOW()
+      WHERE user_id = $1 AND game_type = $2
+    `,
+    [a, gameType, newA]
+  );
+
+  await client.query(
+    `
+      UPDATE ratings
+      SET rating = $3, updated_at = NOW()
+      WHERE user_id = $1 AND game_type = $2
+    `,
+    [b, gameType, newB]
+  );
 }
 
 export async function getUserFromSession(sessionId: string, userId: string): Promise<UserDTO | null> {
@@ -174,19 +341,12 @@ export async function getUserFromSession(sessionId: string, userId: string): Pro
     id: string;
     display_name: string;
     is_guest: boolean;
-    rating: number | null;
     created_at: Date | string;
   }>(
     `
-      SELECT
-        u.id,
-        u.display_name,
-        u.is_guest,
-        u.created_at,
-        rt.rating
+      SELECT u.id, u.display_name, u.is_guest, u.created_at
       FROM sessions s
       JOIN users u ON u.id = s.user_id
-      LEFT JOIN ratings rt ON rt.user_id = u.id AND rt.game_type = 'gomoku'
       WHERE s.id = $1 AND s.user_id = $2 AND s.expires_at > NOW()
       LIMIT 1
     `,
@@ -194,32 +354,41 @@ export async function getUserFromSession(sessionId: string, userId: string): Pro
   );
 
   const row = result.rows[0];
-  return row ? mapUser(row) : null;
+  if (!row) {
+    return null;
+  }
+
+  const ratings = (await fetchRatingsByUserId(pool, [row.id])).get(row.id) ?? createDefaultRatings();
+  return mapUser(row, ratings);
 }
 
 export async function getRoom(roomId: string): Promise<RoomDTO | null> {
   return fetchRoomById(pool, roomId);
 }
 
-export async function createMatchmakingRoom(userAId: string, userBId: string): Promise<{ room: RoomDTO; matchId: string }> {
+export async function createMatchmakingRoom(
+  userAId: string,
+  userBId: string,
+  gameType: Extract<GameType, 'gomoku' | 'xiangqi' | 'go'>
+): Promise<{ room: RoomDTO; matchId: string }> {
   return withTransaction(async (client) => {
     const roomResult = await client.query<{ id: string }>(
       `
-        INSERT INTO rooms (host_user_id, game_type, status)
-        VALUES ($1, 'gomoku', 'in_match')
+        INSERT INTO rooms (host_user_id, game_type, status, max_players)
+        VALUES ($1, $2, 'in_match', $3)
         RETURNING id
       `,
-      [userAId]
+      [userAId, gameType, defaultMaxPlayersForGame(gameType)]
     );
 
     const roomId = roomResult.rows[0].id;
 
     await client.query(
       `
-        INSERT INTO room_players (room_id, user_id, seat)
+        INSERT INTO room_players (room_id, user_id, role, seat)
         VALUES
-          ($1, $2, 1),
-          ($1, $3, 2)
+          ($1, $2, 'player', 1),
+          ($1, $3, 'player', 2)
       `,
       [roomId, userAId, userBId]
     );
@@ -227,10 +396,10 @@ export async function createMatchmakingRoom(userAId: string, userBId: string): P
     const matchResult = await client.query<{ id: string }>(
       `
         INSERT INTO matches (room_id, game_type, status)
-        VALUES ($1, 'gomoku', 'active')
+        VALUES ($1, $2, 'active')
         RETURNING id
       `,
-      [roomId]
+      [roomId, gameType]
     );
 
     const room = await fetchRoomById(client, roomId);
@@ -244,15 +413,32 @@ export async function createMatchmakingRoom(userAId: string, userBId: string): P
 
 export async function createMatchForRoom(roomId: string): Promise<string> {
   return withTransaction(async (client) => {
-    await client.query(`UPDATE rooms SET status = 'in_match' WHERE id = $1`, [roomId]);
-    const result = await client.query<{ id: string }>(
+    const roomResult = await client.query<{ game_type: GameType }>(
       `
-        INSERT INTO matches (room_id, game_type, status)
-        VALUES ($1, 'gomoku', 'active')
-        RETURNING id
+        SELECT game_type
+        FROM rooms
+        WHERE id = $1
+        FOR UPDATE
       `,
       [roomId]
     );
+
+    const room = roomResult.rows[0];
+    if (!room) {
+      throw new Error('room_not_found');
+    }
+
+    await client.query(`UPDATE rooms SET status = 'in_match' WHERE id = $1`, [roomId]);
+
+    const result = await client.query<{ id: string }>(
+      `
+        INSERT INTO matches (room_id, game_type, status)
+        VALUES ($1, $2, 'active')
+        RETURNING id
+      `,
+      [roomId, room.game_type]
+    );
+
     return result.rows[0].id;
   });
 }
@@ -321,6 +507,21 @@ export async function completeMatch(params: {
   status: 'completed' | 'abandoned';
 }): Promise<void> {
   await withTransaction(async (client) => {
+    const matchResult = await client.query<{ game_type: GameType }>(
+      `
+        SELECT game_type
+        FROM matches
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [params.matchId]
+    );
+
+    const match = matchResult.rows[0];
+    if (!match) {
+      throw new Error('match_not_found');
+    }
+
     await client.query(
       `
         UPDATE matches
@@ -329,6 +530,8 @@ export async function completeMatch(params: {
       `,
       [params.status, params.winnerUserId, params.matchId]
     );
+
+    await updateRatingsForMatch(client, params.roomId, match.game_type, params.winnerUserId);
 
     await client.query(
       `
@@ -415,14 +618,24 @@ export async function respondToInvitation(params: {
   return row ? mapInvitation(row) : null;
 }
 
-export async function joinRoomIfPossible(roomId: string, userId: string): Promise<RoomDTO | null> {
+export async function joinRoomIfPossible(
+  roomId: string,
+  userId: string,
+  asSpectator = false
+): Promise<RoomDTO | null> {
   return withTransaction(async (client) => {
     const roomResult = await client.query<{
       id: string;
       game_type: GameType;
       status: 'open' | 'in_match' | 'closed';
+      max_players: number;
     }>(
-      'SELECT id, game_type, status FROM rooms WHERE id = $1 FOR UPDATE',
+      `
+        SELECT id, game_type, status, max_players
+        FROM rooms
+        WHERE id = $1
+        FOR UPDATE
+      `,
       [roomId]
     );
 
@@ -431,29 +644,44 @@ export async function joinRoomIfPossible(roomId: string, userId: string): Promis
       return null;
     }
 
-    const existing = await client.query('SELECT id FROM room_players WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL', [
-      roomId,
-      userId
-    ]);
+    const existing = await client.query<{ id: string }>(
+      'SELECT id FROM room_players WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL',
+      [roomId, userId]
+    );
 
     if (existing.rowCount === 0) {
-      const maxPlayers = room.game_type === 'gomoku' ? 2 : 1;
-      const seats = await client.query<{ seat: number }>(
-        'SELECT seat FROM room_players WHERE room_id = $1 AND left_at IS NULL ORDER BY seat ASC',
+      const members = await client.query<{ role: 'player' | 'spectator'; seat: number | null }>(
+        'SELECT role, seat FROM room_players WHERE room_id = $1 AND left_at IS NULL',
         [roomId]
       );
 
-      if (seats.rows.length >= maxPlayers) {
+      if (members.rows.length >= room.max_players) {
         return null;
       }
 
-      const used = new Set(seats.rows.map((row) => row.seat));
-      let seat = 1;
-      while (used.has(seat) && seat <= maxPlayers) {
-        seat += 1;
+      const maxPlayerSlots = playerSlotsForGame(room.game_type);
+      const activePlayers = members.rows.filter((row) => row.role === 'player');
+
+      let role: 'player' | 'spectator' = 'spectator';
+      let seat: number | null = null;
+
+      if (!asSpectator && activePlayers.length < maxPlayerSlots) {
+        role = 'player';
+        const used = new Set(
+          activePlayers.map((row) => row.seat).filter((value): value is number => value !== null)
+        );
+        seat = 1;
+        while (used.has(seat) && seat <= maxPlayerSlots) {
+          seat += 1;
+        }
       }
 
-      await client.query('INSERT INTO room_players (room_id, user_id, seat) VALUES ($1, $2, $3)', [roomId, userId, seat]);
+      await client.query('INSERT INTO room_players (room_id, user_id, role, seat) VALUES ($1, $2, $3, $4)', [
+        roomId,
+        userId,
+        role,
+        seat
+      ]);
     }
 
     return fetchRoomById(client, roomId);
