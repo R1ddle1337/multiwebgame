@@ -37,7 +37,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/multiwebgame
       REDIS_URL: redis://redis:6379
       API_PORT: 4000
-      WEB_ORIGIN: http://localhost:5173
+      WEB_ORIGIN: https://game.lyxnb.de5.net
     ports:
       - '4000:4000'
     depends_on:

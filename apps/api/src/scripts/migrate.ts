@@ -1,10 +1,14 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 import { pool } from '../db.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 async function run(): Promise<void> {
-  const migrationDir = path.resolve(process.cwd(), 'infra/db/migrations');
+  const migrationDir = path.resolve(__dirname, '../../../../infra/db/migrations');
   const files = (await fs.readdir(migrationDir)).filter((name) => name.endsWith('.sql')).sort();
 
   await pool.query(`
