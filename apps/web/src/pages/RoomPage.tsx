@@ -43,6 +43,7 @@ export function RoomPage({ api, user }: Props) {
   const [inviteUserId, setInviteUserId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [xiangqiSelection, setXiangqiSelection] = useState<{ x: number; y: number } | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   const gameLabel = (gameType: RoomDTO['gameType']) => t(`enum.game.${gameType}`);
   const roleLabel = (role: 'player' | 'spectator') => t(`enum.role.${role}`);
@@ -90,6 +91,9 @@ export function RoomPage({ api, user }: Props) {
     if (!roomId) {
       return;
     }
+    let active = true;
+    setError(null);
+    setFallbackRoom(null);
 
     send({
       type: 'room.subscribe',
@@ -99,6 +103,9 @@ export function RoomPage({ api, user }: Props) {
     api
       .getRoom(roomId)
       .then((result) => {
+        if (!active) {
+          return;
+        }
         setFallbackRoom(result.room);
         if (watchMode) {
           api.joinRoom(roomId, true).catch(() => {
@@ -107,16 +114,20 @@ export function RoomPage({ api, user }: Props) {
         }
       })
       .catch((err) => {
+        if (!active) {
+          return;
+        }
         setError(translateError(err instanceof Error ? err.message : t('common.error_generic')));
       });
 
     return () => {
+      active = false;
       send({
         type: 'room.unsubscribe',
         payload: { roomId }
       });
     };
-  }, [api, roomId, send, t, translateError, watchMode]);
+  }, [api, loadAttempt, roomId, send, t, translateError, watchMode]);
 
   useEffect(() => {
     if (!realtime.lastError) {
@@ -174,7 +185,21 @@ export function RoomPage({ api, user }: Props) {
   };
 
   if (!room) {
-    return <main className="panel">{t('room.loading')}</main>;
+    return (
+      <main className="panel">
+        <p className={error ? 'error-text' : undefined}>{error ?? t('room.loading')}</p>
+        {error ? (
+          <div className="button-row">
+            <button type="button" onClick={() => setLoadAttempt((current) => current + 1)}>
+              {t('common.retry')}
+            </button>
+            <button type="button" className="secondary" onClick={() => navigate('/')}>
+              {t('shell.nav.lobby')}
+            </button>
+          </div>
+        ) : null}
+      </main>
+    );
   }
 
   return (

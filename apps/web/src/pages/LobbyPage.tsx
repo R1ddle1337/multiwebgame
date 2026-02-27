@@ -82,6 +82,9 @@ export function LobbyPage({ api, user }: Props) {
           setHistory(result.matches);
         }
       })
+      .catch(() => {
+        // Match history is non-blocking for lobby usage.
+      })
       .finally(() => {
         if (active) {
           setLoadingHistory(false);
@@ -94,6 +97,9 @@ export function LobbyPage({ api, user }: Props) {
         if (active) {
           setRatings(result.ratings);
         }
+      })
+      .catch(() => {
+        // Ratings panel is best effort and should not block lobby render.
       })
       .finally(() => {
         if (active) {

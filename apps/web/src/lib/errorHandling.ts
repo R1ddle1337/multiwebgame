@@ -4,6 +4,8 @@ const AUTH_INVALID_SIGNALS = [
   'missing bearer token',
   'invalid token payload',
   'invalid token',
+  'invalid_token_payload',
+  'invalid_or_expired_session',
   'session expired or invalid',
   'session not found',
   'session invalid',
@@ -25,6 +27,9 @@ const NETWORK_PATTERNS = [
   /network request failed/i,
   /the network connection was lost/i,
   /load failed/i,
+  /request timeout/i,
+  /timed out/i,
+  /aborterror/i,
   /err_network/i,
   /econnrefused/i
 ];
@@ -82,16 +87,20 @@ export function classifyTransportError(error: unknown): TransportErrorKind | nul
   return classifyTransportErrorMessage(getMessage(error));
 }
 
+export function isAuthInvalidMessage(message: string): boolean {
+  const normalized = normalizeMessage(message);
+  if (!normalized) {
+    return false;
+  }
+
+  return AUTH_INVALID_SIGNALS.some((signal) => normalized.includes(signal));
+}
+
 export function isExplicitAuthInvalidError(error: unknown): boolean {
   const status = getStatus(error);
   if (status !== 401 && status !== 403) {
     return false;
   }
 
-  const normalized = normalizeMessage(getMessage(error));
-  if (!normalized) {
-    return false;
-  }
-
-  return AUTH_INVALID_SIGNALS.some((signal) => normalized.includes(signal));
+  return isAuthInvalidMessage(getMessage(error));
 }

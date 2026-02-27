@@ -11,6 +11,8 @@ import type {
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { storage } from '../lib/api';
+import { resolveWsUrl } from '../lib/endpoints';
+import { isAuthInvalidMessage } from '../lib/errorHandling';
 
 interface RoomSnapshot {
   room: RoomDTO;
@@ -37,18 +39,22 @@ interface RealtimeValue {
 
 const RealtimeContext = createContext<RealtimeValue | null>(null);
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:4001';
+const WS_URL = resolveWsUrl();
 
 interface Props {
   token: string;
   user: UserDTO;
   children: React.ReactNode;
+  onAuthInvalid?: (reason: string) => void;
 }
 
-export function RealtimeProvider({ token, user, children }: Props) {
+export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<number | null>(null);
-  const pingTimerRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isAuthedRef = useRef(false);
+  const shouldReconnectRef = useRef(true);
+  const pendingMessagesRef = useRef<ClientToServerMessage[]>([]);
 
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected'>('connecting');
   const [onlineUsers, setOnlineUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
@@ -65,8 +71,12 @@ export function RealtimeProvider({ token, user, children }: Props) {
 
   useEffect(() => {
     let isMounted = true;
+    pendingMessagesRef.current = [];
+    isAuthedRef.current = false;
+    shouldReconnectRef.current = true;
 
     const connect = () => {
+      shouldReconnectRef.current = true;
       setStatus('connecting');
       const socket = new WebSocket(WS_URL);
       socketRef.current = socket;
@@ -85,19 +95,38 @@ export function RealtimeProvider({ token, user, children }: Props) {
       });
 
       socket.addEventListener('message', (event) => {
-        const message = JSON.parse(event.data) as ServerToClientMessage;
+        let message: ServerToClientMessage;
+        try {
+          message = JSON.parse(String(event.data)) as ServerToClientMessage;
+        } catch {
+          return;
+        }
 
         switch (message.type) {
           case 'auth.ok': {
             setStatus('connected');
+            setLastError(null);
+            isAuthedRef.current = true;
             storage.setReconnectKey(message.payload.reconnectKey);
             socket.send(JSON.stringify({ type: 'lobby.subscribe', payload: {} }));
+
+            if (pendingMessagesRef.current.length > 0) {
+              const queued = [...pendingMessagesRef.current];
+              pendingMessagesRef.current = [];
+              for (const queuedMessage of queued) {
+                if (socket.readyState !== WebSocket.OPEN) {
+                  pendingMessagesRef.current.unshift(queuedMessage);
+                  break;
+                }
+                socket.send(JSON.stringify(queuedMessage));
+              }
+            }
 
             if (pingTimerRef.current !== null) {
               clearInterval(pingTimerRef.current);
             }
 
-            pingTimerRef.current = window.setInterval(() => {
+            pingTimerRef.current = globalThis.setInterval(() => {
               if (socket.readyState !== WebSocket.OPEN) {
                 return;
               }
@@ -114,8 +143,16 @@ export function RealtimeProvider({ token, user, children }: Props) {
           case 'auth.error': {
             // Fallback: stale reconnect key/session can cause auth loop after deployments.
             storage.setReconnectKey(null);
+            isAuthedRef.current = false;
             setStatus('disconnected');
-            setLastError(message.payload.reason);
+
+            if (isAuthInvalidMessage(message.payload.reason)) {
+              shouldReconnectRef.current = false;
+              pendingMessagesRef.current = [];
+              onAuthInvalid?.(message.payload.reason);
+            } else {
+              setLastError(message.payload.reason);
+            }
             socket.close();
             break;
           }
@@ -201,16 +238,17 @@ export function RealtimeProvider({ token, user, children }: Props) {
 
       socket.addEventListener('close', () => {
         setStatus('disconnected');
+        isAuthedRef.current = false;
         if (pingTimerRef.current !== null) {
           clearInterval(pingTimerRef.current);
           pingTimerRef.current = null;
         }
 
-        if (!isMounted) {
+        if (!isMounted || !shouldReconnectRef.current) {
           return;
         }
 
-        reconnectTimerRef.current = window.setTimeout(connect, 1500);
+        reconnectTimerRef.current = globalThis.setTimeout(connect, 1500);
       });
     };
 
@@ -224,14 +262,16 @@ export function RealtimeProvider({ token, user, children }: Props) {
       if (pingTimerRef.current !== null) {
         clearInterval(pingTimerRef.current);
       }
+      pendingMessagesRef.current = [];
       socketRef.current?.close();
       socketRef.current = null;
     };
-  }, [token, user.id]);
+  }, [onAuthInvalid, token, user.id]);
 
   const send = useCallback((message: ClientToServerMessage) => {
     const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    if (!socket || socket.readyState !== WebSocket.OPEN || !isAuthedRef.current) {
+      pendingMessagesRef.current.push(message);
       return;
     }
     socket.send(JSON.stringify(message));

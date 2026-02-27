@@ -1,5 +1,5 @@
 import type { UserDTO } from '@multiwebgame/shared-types';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 
 import { LanguageSwitcher, useI18n } from './context/I18nContext';
@@ -323,6 +323,15 @@ export function App() {
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [showSessionResetAction, setShowSessionResetAction] = useState(false);
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
+  const clearSession = useCallback(() => {
+    storage.setToken(null);
+    storage.setReconnectKey(null);
+    setToken(null);
+    setUser(null);
+    setSessionError(null);
+    setShowSessionResetAction(false);
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (!token) {
@@ -352,10 +361,7 @@ export function App() {
           return;
         }
         if (isExplicitAuthInvalidError(error)) {
-          storage.setToken(null);
-          storage.setReconnectKey(null);
-          setToken(null);
-          setUser(null);
+          clearSession();
           return;
         }
 
@@ -383,7 +389,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [token, sessionCheckAttempt, t, translateError]);
+  }, [clearSession, token, sessionCheckAttempt, t, translateError]);
 
   if (!token) {
     if (loading) {
@@ -413,32 +419,18 @@ export function App() {
         error={sessionError ?? t('auth.session_restore_failed')}
         showManualReset={showSessionResetAction}
         onRetry={() => setSessionCheckAttempt((current) => current + 1)}
-        onResetSession={() => {
-          storage.setToken(null);
-          storage.setReconnectKey(null);
-          setToken(null);
-          setUser(null);
-          setSessionError(null);
-          setShowSessionResetAction(false);
-        }}
+        onResetSession={clearSession}
       />
     );
   }
 
   return (
-    <RealtimeProvider token={token} user={user}>
+    <RealtimeProvider token={token} user={user} onAuthInvalid={clearSession}>
       <Shell
         user={user}
         token={token}
         onUserUpdate={(nextUser) => setUser(nextUser)}
-        onLogout={() => {
-          storage.setToken(null);
-          storage.setReconnectKey(null);
-          setToken(null);
-          setUser(null);
-          setSessionError(null);
-          setShowSessionResetAction(false);
-        }}
+        onLogout={clearSession}
       />
     </RealtimeProvider>
   );

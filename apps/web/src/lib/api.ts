@@ -10,8 +10,11 @@ import type {
   RoomDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
+import { resolveApiBaseUrl } from './endpoints';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
+const API_BASE = resolveApiBaseUrl();
+const parsedTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS ?? 12_000);
+const REQUEST_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0 ? parsedTimeoutMs : 12_000;
 
 export class ApiClientError extends Error {
   readonly status: number | null;
@@ -33,15 +36,26 @@ export class ApiClient {
       headers.set('Authorization', `Bearer ${this.token}`);
     }
 
+    const controller = new AbortController();
+    const timeoutId = globalThis.setTimeout(() => {
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
+
     let response: Response;
     try {
       response = await fetch(`${API_BASE}${path}`, {
         ...init,
+        signal: controller.signal,
         headers
       });
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new ApiClientError('Request timeout', { cause: error });
+      }
       const message = error instanceof Error ? error.message : 'Failed to fetch';
       throw new ApiClientError(message, { cause: error });
+    } finally {
+      globalThis.clearTimeout(timeoutId);
     }
 
     if (!response.ok) {

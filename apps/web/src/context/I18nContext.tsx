@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import { storage } from '../lib/api';
-import { classifyTransportErrorMessage } from '../lib/errorHandling';
+import { classifyTransportErrorMessage, isAuthInvalidMessage } from '../lib/errorHandling';
 
 export type AppLocale = 'zh-CN' | 'en-US';
 
@@ -309,7 +309,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
   }
 };
 
-function normalizeLocale(input: string | null | undefined): AppLocale {
+const AUTH_ERROR_SIGNALS = ['invalid credentials', 'authenticate_first', 'authentication failed'];
+
+export function normalizeLocale(input: string | null | undefined): AppLocale {
   if (!input) {
     return 'zh-CN';
   }
@@ -329,21 +331,29 @@ function interpolate(template: string, vars?: Vars): string {
   return template.replace(/\{(\w+)\}/g, (_match, key: string) => String(vars[key] ?? ''));
 }
 
-function detectDefaultLocale(): AppLocale {
-  const saved = storage.getLocale();
-  if (saved) {
-    return normalizeLocale(saved);
+export function resolveInitialLocale(params?: {
+  savedLocale?: string | null;
+  navigatorLanguage?: string | null;
+}): AppLocale {
+  if (params?.savedLocale) {
+    return normalizeLocale(params.savedLocale);
   }
 
-  if (typeof navigator !== 'undefined') {
-    const browser = normalizeLocale(navigator.language);
+  if (params?.navigatorLanguage) {
+    const browser = normalizeLocale(params.navigatorLanguage);
     if (browser === 'zh-CN') {
       return browser;
     }
   }
 
-  // v1 policy: default to Simplified Chinese unless user explicitly selects English.
   return 'zh-CN';
+}
+
+function detectDefaultLocale(): AppLocale {
+  return resolveInitialLocale({
+    savedLocale: storage.getLocale(),
+    navigatorLanguage: typeof navigator !== 'undefined' ? navigator.language : null
+  });
 }
 
 interface I18nValue {
@@ -408,14 +418,8 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
         return t('error.invalid_move');
       }
       if (
-        normalized.includes('auth') ||
-        normalized.includes('invalid credentials') ||
-        normalized.includes('invalid token') ||
-        normalized.includes('missing bearer token') ||
-        normalized.includes('session expired') ||
-        normalized.includes('session invalid') ||
-        normalized.includes('session not found') ||
-        normalized.includes('unauthorized')
+        isAuthInvalidMessage(normalized) ||
+        AUTH_ERROR_SIGNALS.some((signal) => normalized.includes(signal))
       ) {
         return t('error.auth_failed');
       }
