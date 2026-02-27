@@ -2,6 +2,12 @@ import type { Direction2048, Game2048State } from '@multiwebgame/shared-types';
 
 const BOARD_SIZE = 4;
 
+export interface TileSpawn {
+  row: number;
+  col: number;
+  value: number;
+}
+
 function createEmptyBoard(): number[][] {
   return Array.from({ length: BOARD_SIZE }, () => Array.from({ length: BOARD_SIZE }, () => 0));
 }
@@ -21,19 +27,48 @@ function randomEmptyCell(board: number[][], random: () => number): [number, numb
   }
 
   const idx = Math.floor(random() * cells.length);
-  return cells[idx];
+  return cells[idx] ?? null;
 }
 
-function spawnTile(board: number[][], random: () => number): number[][] {
+function spawnTile(
+  board: number[][],
+  random: () => number,
+  forcedSpawn?: TileSpawn | null
+): { board: number[][]; spawnedTile: TileSpawn | null } {
   const result = board.map((row) => [...row]);
+
+  if (forcedSpawn) {
+    if (
+      forcedSpawn.row >= 0 &&
+      forcedSpawn.row < BOARD_SIZE &&
+      forcedSpawn.col >= 0 &&
+      forcedSpawn.col < BOARD_SIZE &&
+      result[forcedSpawn.row][forcedSpawn.col] === 0
+    ) {
+      result[forcedSpawn.row][forcedSpawn.col] = forcedSpawn.value;
+      return { board: result, spawnedTile: forcedSpawn };
+    }
+
+    return { board: result, spawnedTile: null };
+  }
+
   const target = randomEmptyCell(result, random);
   if (!target) {
-    return result;
+    return { board: result, spawnedTile: null };
   }
 
   const [row, col] = target;
-  result[row][col] = random() < 0.9 ? 2 : 4;
-  return result;
+  const value = random() < 0.9 ? 2 : 4;
+  result[row][col] = value;
+
+  return {
+    board: result,
+    spawnedTile: {
+      row,
+      col,
+      value
+    }
+  };
 }
 
 function compressLine(line: number[]): { line: number[]; scoreGain: number; moved: boolean } {
@@ -113,27 +148,38 @@ function denormalizeDirectionBoard(board: number[][], direction: Direction2048):
   return transpose(reverseRows(board));
 }
 
+function inferStatus(board: number[][]): Game2048State['status'] {
+  const bestTile = Math.max(...board.flat());
+  if (bestTile >= 2048) {
+    return 'won';
+  }
+
+  return canMove(board) ? 'playing' : 'lost';
+}
+
 export function create2048State(random: () => number = Math.random): Game2048State {
   let board = createEmptyBoard();
-  board = spawnTile(board, random);
-  board = spawnTile(board, random);
+  board = spawnTile(board, random).board;
+  board = spawnTile(board, random).board;
   return {
     board,
     score: 0,
-    status: 'playing'
+    status: inferStatus(board)
   };
 }
 
 export function apply2048Move(
   state: Game2048State,
   direction: Direction2048,
-  random: () => number = Math.random
-): { state: Game2048State; moved: boolean; scoreGain: number } {
+  random: () => number = Math.random,
+  forcedSpawn?: TileSpawn | null
+): { state: Game2048State; moved: boolean; scoreGain: number; spawnedTile: TileSpawn | null } {
   if (state.status !== 'playing') {
     return {
       state,
       moved: false,
-      scoreGain: 0
+      scoreGain: 0,
+      spawnedTile: null
     };
   }
 
@@ -150,16 +196,20 @@ export function apply2048Move(
   }
 
   let denormalized = denormalizeDirectionBoard(nextBoard, direction);
+  let spawnedTile: TileSpawn | null = null;
+
   if (moved) {
-    denormalized = spawnTile(denormalized, random);
+    const spawned = spawnTile(denormalized, random, forcedSpawn);
+    denormalized = spawned.board;
+    spawnedTile = spawned.spawnedTile;
   }
 
-  const bestTile = Math.max(...denormalized.flat());
-  const status = canMove(denormalized) ? (bestTile >= 2048 ? 'won' : 'playing') : 'lost';
+  const status = inferStatus(denormalized);
 
   return {
     moved,
     scoreGain,
+    spawnedTile,
     state: {
       board: denormalized,
       score: state.score + scoreGain,

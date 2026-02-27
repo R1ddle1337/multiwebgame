@@ -1,6 +1,7 @@
 import type {
   XiangqiColor,
   XiangqiMove,
+  XiangqiOutcomeReason,
   XiangqiPiece,
   XiangqiPieceType,
   XiangqiPosition,
@@ -212,6 +213,67 @@ function isGeneralInCheck(board: XiangqiBoard, color: XiangqiColor): boolean {
   return false;
 }
 
+function hasAnyLegalMove(board: XiangqiBoard, color: XiangqiColor): boolean {
+  for (let fromY = 0; fromY < BOARD_HEIGHT; fromY += 1) {
+    for (let fromX = 0; fromX < BOARD_WIDTH; fromX += 1) {
+      const piece = board[fromY][fromX];
+      if (!piece || piece.color !== color) {
+        continue;
+      }
+
+      for (let toY = 0; toY < BOARD_HEIGHT; toY += 1) {
+        for (let toX = 0; toX < BOARD_WIDTH; toX += 1) {
+          const from = { x: fromX, y: fromY };
+          const to = { x: toX, y: toY };
+
+          if (!isLegalPieceMovement(board, from, to, piece)) {
+            continue;
+          }
+
+          const next = cloneBoard(board);
+          next[toY][toX] = piece;
+          next[fromY][fromX] = null;
+
+          if (!isGeneralInCheck(next, color)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function pieceCode(piece: XiangqiPiece | null): string {
+  if (!piece) {
+    return '.';
+  }
+
+  const color = piece.color === 'red' ? 'r' : 'b';
+  const type =
+    piece.type === 'general'
+      ? 'g'
+      : piece.type === 'advisor'
+        ? 'a'
+        : piece.type === 'elephant'
+          ? 'e'
+          : piece.type === 'horse'
+            ? 'h'
+            : piece.type === 'chariot'
+              ? 'r'
+              : piece.type === 'cannon'
+                ? 'c'
+                : 's';
+
+  return `${color}${type}`;
+}
+
+function createPositionHash(board: XiangqiBoard, nextPlayer: XiangqiColor): string {
+  const rows = board.map((row) => row.map((cell) => pieceCode(cell)).join(''));
+  return `${nextPlayer}|${rows.join('/')}`;
+}
+
 function createInitialBoard(): XiangqiBoard {
   const board = createEmptyBoard();
 
@@ -234,12 +296,35 @@ function createInitialBoard(): XiangqiBoard {
 }
 
 export function createXiangqiState(): XiangqiState {
+  const board = createInitialBoard();
   return {
-    board: createInitialBoard(),
+    board,
     nextPlayer: 'red',
     status: 'playing',
     winner: null,
-    moveCount: 0
+    outcomeReason: null,
+    moveCount: 0,
+    positionHistory: [createPositionHash(board, 'red')]
+  };
+}
+
+function buildCompletedState(
+  state: XiangqiState,
+  board: XiangqiBoard,
+  nextPlayer: XiangqiColor,
+  winner: XiangqiColor | null,
+  outcomeReason: XiangqiOutcomeReason
+): XiangqiState {
+  const hash = createPositionHash(board, nextPlayer);
+  return {
+    ...state,
+    board,
+    nextPlayer,
+    status: 'completed',
+    winner,
+    outcomeReason,
+    moveCount: state.moveCount + 1,
+    positionHistory: [...state.positionHistory, hash]
   };
 }
 
@@ -286,7 +371,71 @@ export function applyXiangqiMove(
   }
 
   const opponentColor = oppositeColor(move.player);
-  const winner = findGeneral(nextBoard, opponentColor) ? null : move.player;
+  const opponentGeneral = findGeneral(nextBoard, opponentColor);
+
+  if (!opponentGeneral) {
+    return {
+      accepted: true,
+      nextState: buildCompletedState(state, nextBoard, opponentColor, move.player, 'capture_general')
+    };
+  }
+
+  const opponentInCheck = isGeneralInCheck(nextBoard, opponentColor);
+  const opponentHasMove = hasAnyLegalMove(nextBoard, opponentColor);
+
+  if (!opponentHasMove) {
+    return {
+      accepted: true,
+      nextState: buildCompletedState(
+        state,
+        nextBoard,
+        opponentColor,
+        move.player,
+        opponentInCheck ? 'checkmate' : 'stalemate'
+      )
+    };
+  }
+
+  const nextHash = createPositionHash(nextBoard, opponentColor);
+  const nextHistory = [...state.positionHistory, nextHash];
+  let repetitionCount = 0;
+  for (const hash of nextHistory) {
+    if (hash === nextHash) {
+      repetitionCount += 1;
+    }
+  }
+
+  if (repetitionCount >= 3) {
+    if (opponentInCheck) {
+      return {
+        accepted: true,
+        nextState: {
+          ...state,
+          board: nextBoard,
+          nextPlayer: opponentColor,
+          status: 'completed',
+          winner: opponentColor,
+          outcomeReason: 'perpetual_check_violation',
+          moveCount: state.moveCount + 1,
+          positionHistory: nextHistory
+        }
+      };
+    }
+
+    return {
+      accepted: true,
+      nextState: {
+        ...state,
+        board: nextBoard,
+        nextPlayer: opponentColor,
+        status: 'completed',
+        winner: null,
+        outcomeReason: 'draw_repetition',
+        moveCount: state.moveCount + 1,
+        positionHistory: nextHistory
+      }
+    };
+  }
 
   return {
     accepted: true,
@@ -295,8 +444,10 @@ export function applyXiangqiMove(
       board: nextBoard,
       moveCount: state.moveCount + 1,
       nextPlayer: opponentColor,
-      status: winner ? 'completed' : 'playing',
-      winner
+      status: 'playing',
+      winner: null,
+      outcomeReason: null,
+      positionHistory: nextHistory
     }
   };
 }

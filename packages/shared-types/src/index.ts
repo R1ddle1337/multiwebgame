@@ -5,6 +5,7 @@ export interface UserDTO {
   id: string;
   displayName: string;
   isGuest: boolean;
+  isAdmin: boolean;
   rating: number;
   ratings: Partial<Record<GameType, number>>;
   createdAt: string;
@@ -66,6 +67,7 @@ export interface MatchDTO {
   gameType: GameType;
   status: 'active' | 'completed' | 'abandoned';
   winnerUserId: string | null;
+  resultPayload: Record<string, unknown> | null;
   startedAt: string;
   endedAt: string | null;
   moves: MatchMoveDTO[];
@@ -75,6 +77,14 @@ export interface RatingDTO {
   gameType: GameType;
   rating: number;
   updatedAt: string;
+}
+
+export interface RatingFormulaDTO {
+  gameType: GameType;
+  system: 'elo';
+  initialRating: number;
+  kFactor: number;
+  expectedScore: '1 / (1 + 10^((opponent - player) / 400))';
 }
 
 export interface BlockDTO {
@@ -108,6 +118,8 @@ export interface AuthResponse {
 }
 
 export type GomokuMark = 'black' | 'white';
+export type GomokuRuleset = 'freestyle' | 'renju';
+export type GomokuForbiddenMoveReason = 'overline' | 'double_three' | 'double_four';
 
 export interface GomokuMove {
   x: number;
@@ -122,9 +134,12 @@ export interface GomokuState {
   winner: GomokuMark | null;
   status: 'playing' | 'draw' | 'completed';
   moveCount: number;
+  ruleset: GomokuRuleset;
+  forbiddenMove: GomokuForbiddenMoveReason | null;
 }
 
 export type GoStone = 'black' | 'white';
+export type GoRuleset = 'chinese';
 
 export interface GoPoint {
   x: number;
@@ -143,14 +158,42 @@ export type GoMove =
       player: GoStone;
     };
 
+export interface GoScoreBreakdown {
+  ruleset: GoRuleset;
+  komi: number;
+  black: {
+    stones: number;
+    territory: number;
+    captures: number;
+    total: number;
+  };
+  white: {
+    stones: number;
+    territory: number;
+    captures: number;
+    komi: number;
+    total: number;
+  };
+  winner: GoStone | null;
+  margin: number;
+}
+
 export interface GoState {
   boardSize: number;
   board: (GoStone | null)[][];
   nextPlayer: GoStone;
   status: 'playing' | 'completed';
+  winner: GoStone | null;
   moveCount: number;
   consecutivePasses: number;
   koPoint: GoPoint | null;
+  ruleset: GoRuleset;
+  komi: number;
+  captures: {
+    black: number;
+    white: number;
+  };
+  scoring: GoScoreBreakdown | null;
 }
 
 export type XiangqiColor = 'red' | 'black';
@@ -180,12 +223,21 @@ export interface XiangqiMove {
   player: XiangqiColor;
 }
 
+export type XiangqiOutcomeReason =
+  | 'capture_general'
+  | 'checkmate'
+  | 'stalemate'
+  | 'perpetual_check_violation'
+  | 'draw_repetition';
+
 export interface XiangqiState {
   board: (XiangqiPiece | null)[][];
   nextPlayer: XiangqiColor;
   status: 'playing' | 'completed';
   winner: XiangqiColor | null;
+  outcomeReason: XiangqiOutcomeReason | null;
   moveCount: number;
+  positionHistory: string[];
 }
 
 export type Direction2048 = 'up' | 'down' | 'left' | 'right';
@@ -251,6 +303,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'auth', { token: string; reconnectKey?: string }>
   | WsEnvelope<'lobby.subscribe', Record<string, never>>
   | WsEnvelope<'room.subscribe', { roomId: string; asSpectator?: boolean }>
+  | WsEnvelope<'room.unsubscribe', { roomId: string }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'go'; move: GoMove }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }>
@@ -272,6 +325,14 @@ export type ServerToClientMessage =
   | WsEnvelope<'matchmaking.timeout', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.matched', { room: RoomDTO; matchId: string }>
   | WsEnvelope<'match.move_applied', MatchMoveAppliedPayload>
-  | WsEnvelope<'match.completed', { roomId: string; matchId: string; winnerUserId: string | null }>
+  | WsEnvelope<
+      'match.completed',
+      {
+        roomId: string;
+        matchId: string;
+        winnerUserId: string | null;
+        resultPayload?: Record<string, unknown> | null;
+      }
+    >
   | WsEnvelope<'error', { reason: string }>
   | WsEnvelope<'pong', { ts: number }>;
