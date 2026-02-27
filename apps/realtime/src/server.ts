@@ -29,6 +29,7 @@ import { z } from 'zod';
 
 import { config } from './config.js';
 import { MatchmakingQueue } from './matchmaking.js';
+import { aggregateReconnectState } from './reconnect-state.js';
 import {
   close,
   completeMatch,
@@ -43,6 +44,7 @@ import {
   reconcileRoomLifecycle,
   respondToInvitation
 } from './repository.js';
+import { deriveRuntimeCompletion } from './runtime-completion.js';
 
 interface ClientContext {
   socket: WebSocket;
@@ -377,6 +379,54 @@ function clearPendingInactiveLeaves(userId: string, roomId?: string): void {
   pendingInactiveRoomLeaves.delete(userId);
 }
 
+function collectUserConnectionState(userId: string): ReturnType<typeof aggregateReconnectState> {
+  const contexts = Array.from(getUserClients(userId));
+  return aggregateReconnectState(
+    contexts.map((context) => ({
+      reconnectKey: context.reconnectKey,
+      lobbySubscribed: context.lobbySubscribed,
+      roomIds: context.subscribedRooms
+    }))
+  );
+}
+
+function clearReconnectSnapshotsForUser(userId: string): void {
+  for (const [key, snapshot] of reconnectSnapshots) {
+    if (snapshot.userId === userId) {
+      reconnectSnapshots.delete(key);
+    }
+  }
+}
+
+async function finishMatchIfCompleted(runtime: ActiveRuntime, targets: Set<ClientContext>): Promise<boolean> {
+  const completion = deriveRuntimeCompletion(runtime);
+  if (!completion) {
+    return false;
+  }
+
+  await completeMatch({
+    matchId: runtime.matchId,
+    roomId: runtime.roomId,
+    winnerUserId: completion.winnerUserId,
+    status: completion.status,
+    resultPayload: completion.resultPayload
+  });
+
+  activeRuntimes.delete(runtime.roomId);
+  broadcast(targets, {
+    type: 'match.completed',
+    payload: {
+      roomId: runtime.roomId,
+      matchId: runtime.matchId,
+      winnerUserId: completion.winnerUserId,
+      resultPayload: completion.resultPayload
+    }
+  });
+
+  await broadcastRoomStateToSubscribers(runtime.roomId);
+  return true;
+}
+
 async function broadcastRoomStateToSubscribers(roomId: string): Promise<void> {
   const subscribers = roomSubscribers.get(roomId);
   if (!subscribers || subscribers.size === 0) {
@@ -587,10 +637,21 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   const replayed = replayMoves(base, match.moves);
 
   if (match.status === 'active') {
-    if (replayed.state.status !== 'playing') {
+    const completion = deriveRuntimeCompletion(replayed);
+    if (completion) {
       activeRuntimes.delete(roomId);
-      await reconcileRoomLifecycle(roomId, 'stale_match_recovery');
-      return null;
+      try {
+        await completeMatch({
+          matchId: match.id,
+          roomId,
+          winnerUserId: completion.winnerUserId,
+          status: completion.status,
+          resultPayload: completion.resultPayload
+        });
+      } catch (error) {
+        console.warn('stale active match recovery failed', error instanceof Error ? error.message : 'unknown_error');
+      }
+      return replayed;
     }
     activeRuntimes.set(roomId, replayed);
   }
@@ -614,7 +675,19 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
     return null;
   }
 
-  const matchId = await createMatchForRoom(room.id);
+  let matchId: string;
+  try {
+    matchId = await createMatchForRoom(room.id);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message === 'room_not_found' || error.message === 'not_enough_players')
+    ) {
+      return null;
+    }
+    throw error;
+  }
+
   const runtime = createRuntime(room, matchId);
   if (!runtime) {
     return null;
@@ -629,13 +702,13 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
     return;
   }
 
+  const runtime = await getOrLoadRuntime(roomId);
   const room = await reconcileRoomLifecycle(roomId, 'stale_match_recovery');
   if (!room) {
     sendError(client, 'room_not_found');
     return;
   }
 
-  const runtime = await getOrLoadRuntime(roomId);
   const viewerRole = getViewerRole(room, client.user.id);
 
   if (room.gameType === 'gomoku') {
@@ -782,41 +855,7 @@ async function handleGomokuMove(
     }
   });
 
-  if (runtime.state.status === 'completed' || runtime.state.status === 'draw') {
-    const winnerUserId =
-      runtime.state.winner === 'black'
-        ? runtime.players.black
-        : runtime.state.winner === 'white'
-          ? runtime.players.white
-          : null;
-    const resultPayload: Record<string, unknown> = {
-      gomoku: {
-        ruleset: runtime.state.ruleset,
-        winner: runtime.state.winner,
-        status: runtime.state.status,
-        moveCount: runtime.state.moveCount
-      }
-    };
-
-    await completeMatch({
-      matchId: runtime.matchId,
-      roomId: runtime.roomId,
-      winnerUserId,
-      status: 'completed',
-      resultPayload
-    });
-
-    activeRuntimes.delete(runtime.roomId);
-    broadcast(targets, {
-      type: 'match.completed',
-      payload: {
-        roomId: runtime.roomId,
-        matchId: runtime.matchId,
-        winnerUserId,
-        resultPayload
-      }
-    });
-  }
+  await finishMatchIfCompleted(runtime, targets);
 }
 
 async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoMove): Promise<void> {
@@ -870,34 +909,7 @@ async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoM
     }
   });
 
-  if (runtime.state.status === 'completed') {
-    const winnerUserId =
-      runtime.state.winner === 'black'
-        ? runtime.players.black
-        : runtime.state.winner === 'white'
-          ? runtime.players.white
-          : null;
-    const resultPayload = runtime.state.scoring ? { go: runtime.state.scoring } : null;
-
-    await completeMatch({
-      matchId: runtime.matchId,
-      roomId: runtime.roomId,
-      winnerUserId,
-      status: 'completed',
-      resultPayload
-    });
-
-    activeRuntimes.delete(runtime.roomId);
-    broadcast(targets, {
-      type: 'match.completed',
-      payload: {
-        roomId: runtime.roomId,
-        matchId: runtime.matchId,
-        winnerUserId,
-        resultPayload
-      }
-    });
-  }
+  await finishMatchIfCompleted(runtime, targets);
 }
 
 async function handleXiangqiMove(
@@ -948,40 +960,7 @@ async function handleXiangqiMove(
     }
   });
 
-  if (runtime.state.status === 'completed') {
-    const winnerUserId =
-      runtime.state.winner === 'red'
-        ? runtime.players.red
-        : runtime.state.winner === 'black'
-          ? runtime.players.black
-          : null;
-    const resultPayload: Record<string, unknown> = {
-      xiangqi: {
-        winner: runtime.state.winner,
-        outcomeReason: runtime.state.outcomeReason,
-        moveCount: runtime.state.moveCount
-      }
-    };
-
-    await completeMatch({
-      matchId: runtime.matchId,
-      roomId: runtime.roomId,
-      winnerUserId,
-      status: 'completed',
-      resultPayload
-    });
-
-    activeRuntimes.delete(runtime.roomId);
-    broadcast(targets, {
-      type: 'match.completed',
-      payload: {
-        roomId: runtime.roomId,
-        matchId: runtime.matchId,
-        winnerUserId,
-        resultPayload
-      }
-    });
-  }
+  await finishMatchIfCompleted(runtime, targets);
 }
 
 async function handleMove(
@@ -1112,7 +1091,7 @@ wss.on('connection', (socket) => {
           if (snapshot && snapshot.userId === user.id && snapshot.expiresAt > Date.now()) {
             client.reconnectKey = msg.payload.reconnectKey;
             client.lobbySubscribed = snapshot.lobbySubscribed;
-            reconnectSnapshots.delete(msg.payload.reconnectKey);
+            clearReconnectSnapshotsForUser(user.id);
 
             for (const roomId of snapshot.roomIds) {
               addRoomSubscription(client, roomId);
@@ -1161,7 +1140,7 @@ wss.on('connection', (socket) => {
 
       if (parsed.type === 'room.subscribe') {
         const msg = roomSubscribeSchema.parse(parsed);
-        const room = await reconcileRoomLifecycle(msg.payload.roomId, 'stale_match_recovery');
+        let room = await reconcileRoomLifecycle(msg.payload.roomId, 'stale_match_recovery');
         if (!room) {
           sendError(client, 'room_not_found');
           return;
@@ -1175,7 +1154,17 @@ wss.on('connection', (socket) => {
           return;
         }
 
-        if (!isUserSubscribedToRoom(authedUser.id, msg.payload.roomId)) {
+        if (!isMember && msg.payload.asSpectator) {
+          const joined = await joinRoomIfPossible(msg.payload.roomId, authedUser.id, true);
+          if (!joined) {
+            sendError(client, 'room_join_failed');
+            return;
+          }
+          room = joined;
+        }
+
+        const firstSubscriptionForUser = !isUserSubscribedToRoom(authedUser.id, msg.payload.roomId);
+        if (firstSubscriptionForUser) {
           const role = getViewerRole(room, authedUser.id);
           broadcast(roomSubscribers.get(msg.payload.roomId) ?? [], {
             type: 'room.player_joined',
@@ -1189,12 +1178,8 @@ wss.on('connection', (socket) => {
 
         addRoomSubscription(client, msg.payload.roomId);
 
-        if (!isMember && msg.payload.asSpectator) {
-          await joinRoomIfPossible(msg.payload.roomId, authedUser.id, true);
-        }
-
         await ensureRoomMatchIfReady(msg.payload.roomId);
-        await sendRoomState(client, msg.payload.roomId);
+        await broadcastRoomStateToSubscribers(msg.payload.roomId);
         return;
       }
 
@@ -1310,10 +1295,10 @@ wss.on('connection', (socket) => {
           if (room) {
             for (const roomClient of getUserClients(authedUser.id)) {
               addRoomSubscription(roomClient, room.id);
-              await sendRoomState(roomClient, room.id);
             }
 
             await ensureRoomMatchIfReady(room.id);
+            await broadcastRoomStateToSubscribers(room.id);
           }
         }
 
@@ -1339,30 +1324,45 @@ wss.on('connection', (socket) => {
 
   socket.on('close', () => {
     const userId = client.user?.id ?? null;
-    if (userId) {
-      matchmakingQueue.markDisconnected(userId);
-    }
+    const connectionState = userId ? collectUserConnectionState(userId) : null;
 
     const subscribedRoomIds = Array.from(client.subscribedRooms);
 
     for (const roomId of subscribedRoomIds) {
       removeRoomSubscription(client, roomId);
-    }
-
-    if (userId) {
-      reconnectSnapshots.set(client.reconnectKey, {
-        userId,
-        lobbySubscribed: client.lobbySubscribed,
-        roomIds: subscribedRoomIds,
-        expiresAt: Date.now() + 60_000
-      });
+      if (userId && !isUserSubscribedToRoom(userId, roomId)) {
+        broadcast(roomSubscribers.get(roomId) ?? [], {
+          type: 'room.player_left',
+          payload: {
+            roomId,
+            userId
+          }
+        });
+      }
     }
 
     detachUser(client);
     clients.delete(client);
 
     if (userId && getUserClients(userId).size === 0) {
-      scheduleInactiveRoomLeaves(userId, subscribedRoomIds);
+      matchmakingQueue.markDisconnected(userId);
+
+      const snapshotState = connectionState ?? {
+        reconnectKeys: [client.reconnectKey],
+        lobbySubscribed: client.lobbySubscribed,
+        roomIds: subscribedRoomIds
+      };
+
+      for (const reconnectKey of snapshotState.reconnectKeys) {
+        reconnectSnapshots.set(reconnectKey, {
+          userId,
+          lobbySubscribed: snapshotState.lobbySubscribed,
+          roomIds: snapshotState.roomIds,
+          expiresAt: Date.now() + 60_000
+        });
+      }
+
+      scheduleInactiveRoomLeaves(userId, snapshotState.roomIds);
     }
   });
 });

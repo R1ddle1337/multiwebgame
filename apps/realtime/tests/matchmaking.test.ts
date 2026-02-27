@@ -85,4 +85,19 @@ describe('MatchmakingQueue', () => {
     const pair = queue.popPair('go');
     expect(pair?.map((entry) => entry.userId)).toEqual(['u1', 'u2']);
   });
+
+  it('re-joining refreshes timeout window', () => {
+    const queue = new MatchmakingQueue({ timeoutMs: 10_000 });
+    queue.join('u1', 'gomoku', 0);
+    queue.join('u1', 'gomoku', 9_500);
+
+    expect(queue.sweep(10_001)).toEqual([]);
+    expect(queue.sweep(19_501)).toEqual([
+      {
+        type: 'timed_out',
+        userId: 'u1',
+        gameType: 'gomoku'
+      }
+    ]);
+  });
 });

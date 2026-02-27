@@ -47,10 +47,13 @@ export class MatchmakingQueue {
       const updated: QueueEntry = {
         ...existing,
         gameType,
+        joinedAt: now,
         connected: true,
         disconnectedAt: null
       };
       this.byUserId.set(userId, updated);
+      this.removeFromOrder(userId);
+      this.order.push(userId);
       return updated;
     }
 

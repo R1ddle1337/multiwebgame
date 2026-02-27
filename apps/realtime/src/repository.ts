@@ -508,9 +508,9 @@ export async function createMatchmakingRoom(
 
 export async function createMatchForRoom(roomId: string): Promise<string> {
   return withTransaction(async (client) => {
-    const roomResult = await client.query<{ game_type: GameType }>(
+    const roomResult = await client.query<{ game_type: GameType; status: 'open' | 'in_match' | 'closed' }>(
       `
-        SELECT game_type
+        SELECT game_type, status
         FROM rooms
         WHERE id = $1
         FOR UPDATE
@@ -521,6 +521,40 @@ export async function createMatchForRoom(roomId: string): Promise<string> {
     const room = roomResult.rows[0];
     if (!room) {
       throw new Error('room_not_found');
+    }
+
+    const existingActive = await client.query<{ id: string }>(
+      `
+        SELECT id
+        FROM matches
+        WHERE room_id = $1 AND status = 'active'
+        ORDER BY started_at DESC
+        LIMIT 1
+      `,
+      [roomId]
+    );
+
+    const existingMatch = existingActive.rows[0];
+    if (existingMatch) {
+      if (room.status !== 'in_match') {
+        await client.query(`UPDATE rooms SET status = 'in_match' WHERE id = $1`, [roomId]);
+      }
+      return existingMatch.id;
+    }
+
+    const playersResult = await client.query<{ player_count: number }>(
+      `
+        SELECT COUNT(*)::int AS player_count
+        FROM room_players
+        WHERE room_id = $1 AND role = 'player' AND left_at IS NULL
+      `,
+      [roomId]
+    );
+
+    const requiredPlayers = playerSlotsForGame(room.game_type);
+    const playerCount = playersResult.rows[0]?.player_count ?? 0;
+    if (playerCount < requiredPlayers) {
+      throw new Error('not_enough_players');
     }
 
     await client.query(`UPDATE rooms SET status = 'in_match' WHERE id = $1`, [roomId]);
@@ -604,11 +638,12 @@ export async function completeMatch(params: {
   resultPayload?: Record<string, unknown> | null;
 }): Promise<void> {
   await withTransaction(async (client) => {
-    const matchResult = await client.query<{ game_type: GameType }>(
+    const matchResult = await client.query<{ game_type: GameType; status: 'active' | 'completed' | 'abandoned'; room_id: string }>(
       `
-        SELECT game_type
+        SELECT game_type, status, room_id
         FROM matches
         WHERE id = $1
+        FOR UPDATE
         LIMIT 1
       `,
       [params.matchId]
@@ -619,11 +654,19 @@ export async function completeMatch(params: {
       throw new Error('match_not_found');
     }
 
+    if (match.room_id !== params.roomId) {
+      throw new Error('room_match_mismatch');
+    }
+
+    if (match.status !== 'active') {
+      return;
+    }
+
     await client.query(
       `
         UPDATE matches
         SET status = $1, winner_user_id = $2, result_payload = $3, ended_at = NOW()
-        WHERE id = $4
+        WHERE id = $4 AND status = 'active'
       `,
       [params.status, params.winnerUserId, params.resultPayload ?? null, params.matchId]
     );
