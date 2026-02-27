@@ -5,6 +5,7 @@ import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { LanguageSwitcher, useI18n } from './context/I18nContext';
 import { RealtimeProvider, useRealtime } from './context/RealtimeContext';
 import { ApiClient, storage } from './lib/api';
+import { classifyTransportError, isExplicitAuthInvalidError } from './lib/errorHandling';
 import { Game2048Page } from './pages/Game2048Page';
 import { LobbyPage } from './pages/LobbyPage';
 import { ReplayPage } from './pages/ReplayPage';
@@ -18,12 +19,20 @@ function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [showManualReset, setShowManualReset] = useState(false);
 
   const api = useMemo(() => new ApiClient(null), []);
+  const resetSession = () => {
+    storage.setToken(null);
+    storage.setReconnectKey(null);
+    setShowManualReset(false);
+    setError(t('auth.session_reset_done'));
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
+    setShowManualReset(false);
 
     try {
       if (mode === 'guest') {
@@ -48,14 +57,19 @@ function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }
       });
       onAuth(result.token, result.user);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('error.auth_failed');
-      if (message.includes('Failed to fetch') || message.includes('Network') || message.includes('CORS')) {
-        storage.setToken(null);
-        storage.setReconnectKey(null);
-        setError(t('auth.network_reset'));
-      } else {
-        setError(translateError(message));
+      const transport = classifyTransportError(err);
+      if (transport === 'network') {
+        setShowManualReset(true);
+        setError(t('auth.network_retry'));
+        return;
       }
+      if (transport === 'cors') {
+        setShowManualReset(true);
+        setError(t('auth.cors_retry'));
+        return;
+      }
+      const message = err instanceof Error ? err.message : t('error.auth_failed');
+      setError(translateError(message));
     }
   };
 
@@ -133,6 +147,47 @@ function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }
           </button>
         </form>
         {error ? <p className="error-text">{error}</p> : null}
+        {showManualReset ? (
+          <div className="button-row">
+            <button type="button" className="secondary" onClick={resetSession}>
+              {t('auth.reset_session')}
+            </button>
+          </div>
+        ) : null}
+      </section>
+    </main>
+  );
+}
+
+function SessionRecoveryGate({
+  error,
+  showManualReset,
+  onRetry,
+  onResetSession
+}: {
+  error: string;
+  showManualReset: boolean;
+  onRetry: () => void;
+  onResetSession: () => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <main className="auth-gate">
+      <section className="panel auth-panel">
+        <LanguageSwitcher />
+        <h1>{t('auth.title')}</h1>
+        <p className="error-text">{error}</p>
+        <div className="button-row">
+          <button type="button" onClick={onRetry}>
+            {t('auth.retry_restore_session')}
+          </button>
+          {showManualReset ? (
+            <button type="button" className="secondary" onClick={onResetSession}>
+              {t('auth.reset_session')}
+            </button>
+          ) : null}
+        </div>
       </section>
     </main>
   );
@@ -261,20 +316,28 @@ function Shell({
 }
 
 export function App() {
-  const { t } = useI18n();
+  const { t, translateError } = useI18n();
   const [token, setToken] = useState<string | null>(() => storage.getToken());
   const [user, setUser] = useState<UserDTO | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [showSessionResetAction, setShowSessionResetAction] = useState(false);
+  const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
 
   useEffect(() => {
     if (!token) {
       setUser(null);
+      setSessionError(null);
+      setShowSessionResetAction(false);
       setLoading(false);
       return;
     }
 
     let active = true;
     const api = new ApiClient(token);
+    setLoading(true);
+    setSessionError(null);
+    setShowSessionResetAction(false);
 
     api
       .me()
@@ -284,13 +347,32 @@ export function App() {
         }
         setUser(result.user);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!active) {
           return;
         }
-        storage.setToken(null);
-        setToken(null);
-        setUser(null);
+        if (isExplicitAuthInvalidError(error)) {
+          storage.setToken(null);
+          storage.setReconnectKey(null);
+          setToken(null);
+          setUser(null);
+          return;
+        }
+
+        const transport = classifyTransportError(error);
+        if (transport === 'network') {
+          setSessionError(t('auth.session_restore_network'));
+          setShowSessionResetAction(true);
+          return;
+        }
+        if (transport === 'cors') {
+          setSessionError(t('auth.session_restore_cors'));
+          setShowSessionResetAction(true);
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : t('common.error_generic');
+        setSessionError(translateError(message));
       })
       .finally(() => {
         if (active) {
@@ -301,9 +383,9 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [token]);
+  }, [token, sessionCheckAttempt, t, translateError]);
 
-  if (!token || !user) {
+  if (!token) {
     if (loading) {
       return <main className="auth-gate">{t('auth.loading_session')}</main>;
     }
@@ -314,6 +396,30 @@ export function App() {
           storage.setToken(nextToken);
           setToken(nextToken);
           setUser(nextUser);
+          setSessionError(null);
+          setShowSessionResetAction(false);
+        }}
+      />
+    );
+  }
+
+  if (!user) {
+    if (loading) {
+      return <main className="auth-gate">{t('auth.loading_session')}</main>;
+    }
+
+    return (
+      <SessionRecoveryGate
+        error={sessionError ?? t('auth.session_restore_failed')}
+        showManualReset={showSessionResetAction}
+        onRetry={() => setSessionCheckAttempt((current) => current + 1)}
+        onResetSession={() => {
+          storage.setToken(null);
+          storage.setReconnectKey(null);
+          setToken(null);
+          setUser(null);
+          setSessionError(null);
+          setShowSessionResetAction(false);
         }}
       />
     );
@@ -330,6 +436,8 @@ export function App() {
           storage.setReconnectKey(null);
           setToken(null);
           setUser(null);
+          setSessionError(null);
+          setShowSessionResetAction(false);
         }}
       />
     </RealtimeProvider>

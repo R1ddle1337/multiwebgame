@@ -13,6 +13,16 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
 
+export class ApiClientError extends Error {
+  readonly status: number | null;
+
+  constructor(message: string, options?: { status?: number | null; cause?: unknown }) {
+    super(message, options?.cause ? { cause: options.cause } : undefined);
+    this.name = 'ApiClientError';
+    this.status = options?.status ?? null;
+  }
+}
+
 export class ApiClient {
   constructor(private readonly token: string | null) {}
 
@@ -23,14 +33,22 @@ export class ApiClient {
       headers.set('Authorization', `Bearer ${this.token}`);
     }
 
-    const response = await fetch(`${API_BASE}${path}`, {
-      ...init,
-      headers
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${path}`, {
+        ...init,
+        headers
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch';
+      throw new ApiClientError(message, { cause: error });
+    }
 
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? `Request failed: ${response.status}`);
+      throw new ApiClientError(body.error ?? `Request failed: ${response.status}`, {
+        status: response.status
+      });
     }
 
     if (response.status === 204) {

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import { storage } from '../lib/api';
+import { classifyTransportErrorMessage } from '../lib/errorHandling';
 
 export type AppLocale = 'zh-CN' | 'en-US';
 
@@ -18,6 +19,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'common.decline': '拒绝',
     'common.replay': '回放',
     'common.report': '举报',
+    'common.retry': '重试',
     'common.error_generic': '操作失败，请重试',
     'common.status.connected': '已连接',
     'common.status.connecting': '连接中',
@@ -37,7 +39,15 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'auth.submit.login': '登录',
     'auth.submit.register': '创建账号',
     'auth.loading_session': '正在恢复会话...',
-    'auth.network_reset': '网络异常（可能是缓存/CORS旧状态），会话已重置，请重试',
+    'auth.network_retry': '网络请求失败，请稍后重试。若持续失败，可手动重置会话。',
+    'auth.cors_retry': '请求被浏览器跨域策略拦截（CORS）。请刷新后重试；若持续失败可手动重置会话。',
+    'auth.retry_restore_session': '重试恢复会话',
+    'auth.reset_session': '重置会话',
+    'auth.session_reset_done': '会话已重置，请重试。',
+    'auth.session_restore_failed': '无法恢复会话，请重试。',
+    'auth.session_restore_network': '无法恢复会话：网络请求失败。请重试；若持续失败可手动重置会话。',
+    'auth.session_restore_cors':
+      '无法恢复会话：请求被跨域策略拦截（CORS）。请刷新后重试；若持续失败可手动重置会话。',
     'shell.nav.lobby': '大厅',
     'shell.nav.training': '训练',
     'shell.nav.2048': '2048',
@@ -142,7 +152,8 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.not_a_match_player': '你不是当前对局玩家',
     'error.game_type_mismatch': '游戏类型不匹配',
     'error.invalid_move': '非法落子',
-    'error.network': '网络连接异常，请稍后重试',
+    'error.network': '网络请求失败，请稍后重试',
+    'error.cors': '请求被浏览器跨域策略拦截（CORS），请刷新后重试',
     'error.auth_failed': '认证失败'
   },
   'en-US': {
@@ -156,6 +167,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'common.decline': 'Decline',
     'common.replay': 'Replay',
     'common.report': 'Report',
+    'common.retry': 'Retry',
     'common.error_generic': 'Operation failed. Please try again.',
     'common.status.connected': 'connected',
     'common.status.connecting': 'connecting',
@@ -175,7 +187,18 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'auth.submit.login': 'Sign In',
     'auth.submit.register': 'Create Account',
     'auth.loading_session': 'Loading session...',
-    'auth.network_reset': 'Network issue detected (cache/CORS stale state). Session reset, please retry.',
+    'auth.network_retry':
+      'Network request failed. Please retry. If it keeps failing, reset session manually.',
+    'auth.cors_retry':
+      'Request blocked by browser CORS policy. Refresh and retry. If it keeps failing, reset session manually.',
+    'auth.retry_restore_session': 'Retry session restore',
+    'auth.reset_session': 'Reset session',
+    'auth.session_reset_done': 'Session has been reset. Please retry.',
+    'auth.session_restore_failed': 'Unable to restore session. Please retry.',
+    'auth.session_restore_network':
+      'Unable to restore session: network request failed. Retry, or reset session if this persists.',
+    'auth.session_restore_cors':
+      'Unable to restore session: blocked by browser CORS policy. Refresh and retry, or reset session if this persists.',
     'shell.nav.lobby': 'Lobby',
     'shell.nav.training': 'Training',
     'shell.nav.2048': '2048',
@@ -280,7 +303,8 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.not_a_match_player': 'Not a match player',
     'error.game_type_mismatch': 'Game type mismatch',
     'error.invalid_move': 'Invalid move',
-    'error.network': 'Network error, please retry',
+    'error.network': 'Network request failed. Please retry.',
+    'error.cors': 'Request blocked by browser CORS policy. Please refresh and retry.',
     'error.auth_failed': 'Authentication failed'
   }
 };
@@ -351,11 +375,11 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     (message: string) => {
       const normalized = message.trim().toLowerCase();
 
-      if (
-        normalized.includes('failed to fetch') ||
-        normalized.includes('network') ||
-        normalized.includes('cors')
-      ) {
+      const transport = classifyTransportErrorMessage(normalized);
+      if (transport === 'cors') {
+        return t('error.cors');
+      }
+      if (transport === 'network') {
         return t('error.network');
       }
 
@@ -383,7 +407,16 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       if (normalized.includes('invalid_move') || normalized.includes('illegal_')) {
         return t('error.invalid_move');
       }
-      if (normalized.includes('auth')) {
+      if (
+        normalized.includes('auth') ||
+        normalized.includes('invalid credentials') ||
+        normalized.includes('invalid token') ||
+        normalized.includes('missing bearer token') ||
+        normalized.includes('session expired') ||
+        normalized.includes('session invalid') ||
+        normalized.includes('session not found') ||
+        normalized.includes('unauthorized')
+      ) {
         return t('error.auth_failed');
       }
 
