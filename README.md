@@ -2,4 +2,9 @@
 
 Production-ready v1 MVP monorepo for lobby, matchmaking, invites, and web games.
 
-See `docs/startup.md` for local setup and runtime instructions.
+## Quick Links
+
+- Setup and run: `docs/startup.md`
+- HTTP API: `docs/api.md`
+- Realtime protocol: `docs/realtime-protocol.md`
+- Architecture: `docs/architecture.md`

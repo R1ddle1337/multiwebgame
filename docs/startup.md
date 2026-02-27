@@ -9,12 +9,31 @@
 ## Environment
 
 1. Copy `.env.example` to `.env`.
-2. Update `JWT_SECRET` before production use.
+2. Set a strong `JWT_SECRET`.
 
-## Run With Docker Compose
+## Install
 
 ```bash
-docker compose up --build
+npm install
+```
+
+## Start Datastores
+
+```bash
+docker compose up -d postgres redis
+```
+
+## Apply Database Migrations
+
+```bash
+npm run db:migrate
+npm run db:seed
+```
+
+## Run Services (dev)
+
+```bash
+npm run dev
 ```
 
 Services:
@@ -22,17 +41,17 @@ Services:
 - API: `http://localhost:4000`
 - Realtime WS: `ws://localhost:4001`
 - Web: `http://localhost:5173`
-- Postgres: `localhost:5432`
-- Redis: `localhost:6379`
 
-## Run Without Docker (recommended for development)
+## Full Docker Stack
 
 ```bash
-npm install
-docker compose up -d postgres redis
-npm run db:migrate
-npm run db:seed
-npm run dev
+docker compose up --build
+```
+
+## Build
+
+```bash
+npm run build
 ```
 
 ## Test
