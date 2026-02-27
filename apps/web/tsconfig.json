@@ -6,6 +6,11 @@
     "jsx": "react-jsx",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": "../..",
+    "paths": {
+      "@multiwebgame/shared-types": ["packages/shared-types/src/index.ts"],
+      "@multiwebgame/game-engines": ["packages/game-engines/src/index.ts"]
+    },
     "noEmit": true,
     "types": ["node", "vite/client"]
   },
