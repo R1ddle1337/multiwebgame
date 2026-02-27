@@ -1,6 +1,6 @@
 import type { ApiError } from '@multiwebgame/shared-types';
 import bcrypt from 'bcryptjs';
-import cors from 'cors';
+import cors, { type CorsOptions } from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { ZodError, z } from 'zod';
@@ -81,12 +81,79 @@ const resolveReportSchema = z.object({
   status: z.enum(['reviewed', 'resolved', 'dismissed'])
 });
 
+interface ParsedCorsOrigins {
+  allowAny: boolean;
+  allowed: Set<string>;
+}
+
+export interface CreateAppOptions {
+  webOrigin?: string;
+}
+
 function randomGuestName(): string {
   return `Guest-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function firstParam(value: string | string[]): string {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function firstHeader(value: string | string[] | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeOrigin(origin: string): string {
+  const trimmed = origin.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return trimmed.replace(/\/+$/, '');
+  }
+}
+
+function parseCorsOrigins(value: string): ParsedCorsOrigins {
+  const candidates = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  const allowAny = candidates.includes('*');
+  const allowed = new Set(
+    candidates
+      .filter((entry) => entry !== '*')
+      .map((entry) => normalizeOrigin(entry))
+      .filter(Boolean)
+  );
+
+  return { allowAny, allowed };
+}
+
+function isOriginAllowed(origin: string, parsed: ParsedCorsOrigins): boolean {
+  if (parsed.allowAny) {
+    return true;
+  }
+
+  return parsed.allowed.has(normalizeOrigin(origin));
+}
+
+function isInvalidJsonBodyError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const typed = error as { body?: unknown; name?: string; status?: number; type?: string };
+  if (typed.type === 'entity.parse.failed') {
+    return true;
+  }
+
+  return typed.status === 400 && typed.name === 'SyntaxError' && 'body' in typed;
 }
 
 function mapStoreError(error: StoreError): { status: number; body: ApiError } {
@@ -107,16 +174,32 @@ function mapStoreError(error: StoreError): { status: number; body: ApiError } {
   }
 }
 
-export function createApp(store: Store) {
+export function createApp(store: Store, options: CreateAppOptions = {}) {
   const app = express();
+  const parsedCors = parseCorsOrigins(options.webOrigin ?? config.webOrigin);
+  const corsOptions: CorsOptions = {
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, isOriginAllowed(origin, parsedCors));
+    },
+    credentials: false
+  };
 
   app.use(helmet());
-  app.use(
-    cors({
-      origin: config.webOrigin,
-      credentials: false
-    })
-  );
+  app.use((req, res, next) => {
+    const origin = firstHeader(req.headers.origin);
+    if (!origin || isOriginAllowed(origin, parsedCors)) {
+      next();
+      return;
+    }
+
+    res.status(403).json({ error: 'CORS origin denied' });
+  });
+  app.use(cors(corsOptions));
   app.use(express.json());
 
   app.get('/health', (_req, res) => {
@@ -208,7 +291,7 @@ export function createApp(store: Store) {
         return;
       }
 
-      const session = await store.getSessionById(req.auth!.sessionId);
+      const session = req.auth!.session ?? (await store.getSessionById(req.auth!.sessionId));
       if (!session) {
         res.status(401).json({ error: 'Session not found' });
         return;
@@ -240,7 +323,9 @@ export function createApp(store: Store) {
 
   app.get('/rooms', requireAuth(store), async (_req, res, next) => {
     try {
-      const rooms = await store.listOpenRooms();
+      const rooms = (await store.listOpenRooms()).filter(
+        (room) => room.status !== 'closed' && room.players.length > 0
+      );
       res.json({ rooms });
     } catch (error) {
       next(error);
@@ -260,7 +345,7 @@ export function createApp(store: Store) {
   app.get('/rooms/:roomId', requireAuth(store), async (req, res, next) => {
     try {
       const room = await store.getRoomById(firstParam(req.params.roomId));
-      if (!room) {
+      if (!room || room.status === 'closed' || room.players.length === 0) {
         res.status(404).json({ error: 'Room not found' });
         return;
       }
@@ -439,8 +524,17 @@ export function createApp(store: Store) {
     }
   });
 
+  app.use((_req, res: express.Response<ApiError>) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+
   app.use(
     (error: unknown, _req: express.Request, res: express.Response<ApiError>, _next: express.NextFunction) => {
+      if (isInvalidJsonBodyError(error)) {
+        res.status(400).json({ error: 'Invalid JSON body' });
+        return;
+      }
+
       if (error instanceof StoreError) {
         const mapped = mapStoreError(error);
         res.status(mapped.status).json(mapped.body);

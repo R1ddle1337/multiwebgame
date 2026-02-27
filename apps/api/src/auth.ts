@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import type { SessionDTO } from '@multiwebgame/shared-types';
 
 import { config } from './config.js';
 import type { Store } from './store/types.js';
@@ -14,6 +15,7 @@ interface AuthTokenPayload {
 export interface AuthContext {
   sessionId: string;
   userId: string;
+  session?: SessionDTO;
 }
 
 export interface AuthedRequest extends Request {
@@ -29,12 +31,28 @@ function parseBearerToken(value?: string): string | null {
     return null;
   }
 
-  const [scheme, token] = value.split(' ');
-  if (!scheme || !token || scheme.toLowerCase() !== 'bearer') {
+  const parts = value.trim().split(/\s+/);
+  if (parts.length !== 2 || parts[0].toLowerCase() !== 'bearer') {
     return null;
   }
 
-  return token;
+  return parts[1];
+}
+
+function isJwtVerificationError(error: unknown): boolean {
+  if (error instanceof jwt.JsonWebTokenError) {
+    return true;
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.name === 'TokenExpiredError' ||
+    error.name === 'JsonWebTokenError' ||
+    error.name === 'NotBeforeError'
+  );
 }
 
 export function requireAuth(store: Store) {
@@ -59,12 +77,18 @@ export function requireAuth(store: Store) {
       }
 
       req.auth = {
-        sessionId: payload.sessionId,
-        userId: payload.userId
+        sessionId: session.id,
+        userId: session.userId,
+        session
       };
       next();
-    } catch {
-      res.status(401).json({ error: 'Invalid token' });
+    } catch (error) {
+      if (isJwtVerificationError(error)) {
+        res.status(401).json({ error: 'Invalid token' });
+        return;
+      }
+
+      next(error);
     }
   };
 }

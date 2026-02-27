@@ -43,6 +43,15 @@ class InMemoryStore implements Store {
     this.rooms.set(roomId, room);
   }
 
+  setRoomPlayers(roomId: string, players: RoomDTO['players']): void {
+    const room = this.rooms.get(roomId);
+    if (!room) {
+      return;
+    }
+    room.players = players;
+    this.rooms.set(roomId, room);
+  }
+
   private defaultRatings(): Record<GameType, number> {
     return {
       single_2048: 1200,
@@ -394,6 +403,12 @@ class InMemoryStore implements Store {
     report.updatedAt = new Date().toISOString();
     this.reports.set(report.id, report);
     return report;
+  }
+}
+
+class SessionLookupFailingStore extends InMemoryStore {
+  async getSessionById(_sessionId: string): Promise<SessionDTO | null> {
+    throw new Error('session_lookup_failure');
   }
 }
 
@@ -750,5 +765,82 @@ describe('critical API routes', () => {
       .expect(200);
 
     expect(resolved.body.report.status).toBe('resolved');
+  });
+
+  it('accepts bearer token with flexible whitespace', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+    const auth = await request(app).post('/auth/guest').send({ displayName: 'Alice' }).expect(201);
+
+    await request(app).get('/me').set('Authorization', `Bearer    ${auth.body.token}`).expect(200);
+  });
+
+  it('returns 500 for internal session lookup failures instead of masking as auth errors', async () => {
+    const store = new SessionLookupFailingStore();
+    const app = createApp(store);
+    const auth = await request(app).post('/auth/guest').send({ displayName: 'Alice' }).expect(201);
+
+    const me = await request(app).get('/me').set('Authorization', `Bearer ${auth.body.token}`).expect(500);
+    expect(me.body.error).toBe('Internal server error');
+  });
+
+  it('returns JSON error for malformed JSON payloads', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const response = await request(app)
+      .post('/auth/guest')
+      .set('Content-Type', 'application/json')
+      .send('{"displayName":')
+      .expect(400);
+
+    expect(response.body.error).toBe('Invalid JSON body');
+  });
+
+  it('returns JSON 404 payload for unknown routes', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const response = await request(app).get('/unknown/route').expect(404);
+    expect(response.body.error).toBe('Not found');
+  });
+
+  it('enforces explicit CORS allow-list', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store, { webOrigin: 'http://allowed.local, http://other.local' });
+
+    await request(app)
+      .get('/health')
+      .set('Origin', 'http://allowed.local')
+      .expect('Access-Control-Allow-Origin', 'http://allowed.local')
+      .expect(200);
+
+    const blocked = await request(app).get('/health').set('Origin', 'http://blocked.local').expect(403);
+    expect(blocked.body.error).toBe('CORS origin denied');
+  });
+
+  it('filters stale rooms with empty player rosters from lobby payloads', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'gomoku', maxPlayers: 4 })
+      .expect(201);
+
+    store.setRoomPlayers(room.body.room.id, []);
+
+    const list = await request(app)
+      .get('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .expect(200);
+    expect(list.body.rooms).toEqual([]);
+
+    await request(app)
+      .get(`/rooms/${room.body.room.id}`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .expect(404);
   });
 });
