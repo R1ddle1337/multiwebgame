@@ -37,11 +37,17 @@ Auth uses `Authorization: Bearer <jwt>`.
 - `GET /me`
   - Auth required
   - Returns: `{ user, session }`
-  - `user` includes `ratings` map by game mode.
+  - `user` includes:
+    - `ratings` map by game mode
+    - `isAdmin` flag
 
 - `GET /ratings/me`
   - Auth required
   - Returns: `{ ratings: RatingDTO[] }`
+
+- `GET /ratings/formula`
+  - Returns ELO configuration by game mode.
+  - Returns: `{ formulas: RatingFormulaDTO[] }`
 
 ## Rooms
 
@@ -92,8 +98,12 @@ Auth uses `Authorization: Bearer <jwt>`.
 - `GET /matches/:matchId`
   - Auth required
   - Returns: `{ match: MatchDTO }`
+  - `match.resultPayload` includes adjudication/scoring payload when available.
+    - Go: Chinese area score breakdown + komi + winner.
+    - Xiangqi: outcome reason (checkmate/stalemate/repetition policy).
+    - Gomoku: ruleset and final status metadata.
 
-## Moderation Foundation
+## Moderation
 
 - `GET /moderation/blocks`
   - Auth required
@@ -108,6 +118,17 @@ Auth uses `Authorization: Bearer <jwt>`.
   - Auth required
   - Body: `{ "targetUserId"?: string, "matchId"?: string, "reason": string, "details"?: string }`
   - Returns: `{ ok: true }`
+
+- `GET /moderation/reports?status=open&limit=50`
+  - Auth required
+  - Admin required
+  - Returns: `{ reports: ReportDTO[] }`
+
+- `PATCH /moderation/reports/:reportId`
+  - Auth required
+  - Admin required
+  - Body: `{ "status": "reviewed" | "resolved" | "dismissed" }`
+  - Returns: `{ report: ReportDTO }`
 
 ## Errors
 

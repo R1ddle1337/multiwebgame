@@ -30,6 +30,14 @@ npm run db:migrate
 npm run db:seed
 ```
 
+## Optional: Grant Admin Role
+
+Use this once for a user that should access admin moderation APIs:
+
+```sql
+UPDATE users SET is_admin = TRUE WHERE email = 'your-admin@example.com';
+```
+
 ## Run Services (dev)
 
 ```bash

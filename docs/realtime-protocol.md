@@ -22,6 +22,9 @@ Message shape:
 - `room.subscribe`
   - `{ roomId: string, asSpectator?: boolean }`
 
+- `room.unsubscribe`
+  - `{ roomId: string }`
+
 - `room.move` (Gomoku)
   - `{ roomId: string, gameType: "gomoku", x: number, y: number }`
 
@@ -85,7 +88,7 @@ Message shape:
   - Game-specific payload including `{ roomId, gameType, state, lastMove }`
 
 - `match.completed`
-  - `{ roomId, matchId, winnerUserId }`
+  - `{ roomId, matchId, winnerUserId, resultPayload? }`
 
 - `pong`
   - `{ ts }`
@@ -93,11 +96,26 @@ Message shape:
 - `error`
   - `{ reason }`
 
-## Reconnect, Timeout, Heartbeat
+## Enforcement and Lifecycle
 
-- Client stores `reconnectKey` from `auth.ok`.
-- On reconnect, client sends `auth` with prior `reconnectKey`.
-- Server restores lobby + room subscriptions for a short reconnect window.
-- Matchmaking entries keep a reconnect grace period; stale disconnected entries are dropped.
-- Matchmaking queue entries time out automatically if unmatched.
-- Client sends periodic `ping`; server tracks last activity and closes stale sockets.
+- Server-authoritative move handling:
+  - Room move attempts from non-seated users are rejected (`not_a_match_player`).
+  - Move attempts for non-subscribed rooms are rejected (`room_not_subscribed`).
+
+- Spectators:
+  - Stable room subscription/unsubscription is supported via `room.subscribe`/`room.unsubscribe`.
+  - Spectators are read-only at protocol level.
+
+- Reconnect:
+  - Client stores `reconnectKey` from `auth.ok`.
+  - On reconnect, client sends `auth` with prior `reconnectKey`.
+  - Server restores prior lobby + room subscriptions inside reconnect grace window.
+
+- Matchmaking queue:
+  - `matchmaking.leave` cancels queue membership.
+  - Timed-out entries receive `matchmaking.timeout`.
+  - Disconnected entries get reconnect grace handling before drop.
+
+- Heartbeat:
+  - Client sends periodic `ping`; server emits `pong`.
+  - Server closes stale sockets that miss heartbeat window.
