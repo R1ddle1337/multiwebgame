@@ -1,8 +1,14 @@
-import type { GoMove, GomokuMove, XiangqiMove, XiangqiPosition } from '@multiwebgame/shared-types';
+import type {
+  Connect4Move,
+  GoMove,
+  GomokuMove,
+  XiangqiMove,
+  XiangqiPosition
+} from '@multiwebgame/shared-types';
 
 export type XiangqiPerspective = 'red' | 'black';
 
-export type LastMoveActor = 'black' | 'white' | 'red';
+export type LastMoveActor = 'black' | 'white' | 'red' | 'yellow';
 
 export type LastMoveAction =
   | {
@@ -56,6 +62,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'connect4',
+  move: Connect4Move,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'go',
   move: GoMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -66,8 +77,8 @@ export function describeLastMove(
   xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
-  gameType: 'gomoku' | 'go' | 'xiangqi',
-  move: GomokuMove | GoMove | XiangqiMove,
+  gameType: 'gomoku' | 'connect4' | 'go' | 'xiangqi',
+  move: GomokuMove | Connect4Move | GoMove | XiangqiMove,
   xiangqiPerspective: XiangqiPerspective = 'red'
 ): LastMoveSummary {
   if (gameType === 'gomoku') {
@@ -77,6 +88,17 @@ export function describeLastMove(
       action: {
         kind: 'place',
         point: formatBoardPoint(gomokuMove.x, gomokuMove.y)
+      }
+    };
+  }
+
+  if (gameType === 'connect4') {
+    const connect4Move = move as Connect4Move;
+    return {
+      actor: connect4Move.player,
+      action: {
+        kind: 'place',
+        point: `C${connect4Move.column + 1}`
       }
     };
   }

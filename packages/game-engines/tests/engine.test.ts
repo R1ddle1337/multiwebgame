@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   apply2048Move,
+  applyConnect4Move,
   applyGoMove,
   applyGomokuMove,
   applyXiangqiMove,
   create2048State,
+  createConnect4State,
   createGoState,
   createGomokuState,
   createXiangqiState
@@ -220,6 +222,72 @@ describe('gomoku engine', () => {
     expect(result.accepted).toBe(true);
     expect(result.nextState.winner).toBe('white');
     expect(result.nextState.status).toBe('completed');
+  });
+});
+
+describe('connect4 engine', () => {
+  it('rejects out-of-turn moves', () => {
+    const state = createConnect4State();
+    const result = applyConnect4Move(state, { column: 0, player: 'yellow' });
+
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('out_of_turn');
+  });
+
+  it('rejects full-column moves', () => {
+    let state = createConnect4State({ rows: 4, columns: 4 });
+    const sequence = [
+      { column: 0, player: 'red' as const },
+      { column: 0, player: 'yellow' as const },
+      { column: 0, player: 'red' as const },
+      { column: 0, player: 'yellow' as const }
+    ];
+
+    for (const move of sequence) {
+      const next = applyConnect4Move(state, move);
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    const result = applyConnect4Move(state, { column: 0, player: 'red' });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('column_full');
+  });
+
+  it('detects horizontal four-in-a-row', () => {
+    let state = createConnect4State();
+    const sequence = [
+      { column: 0, player: 'red' as const },
+      { column: 0, player: 'yellow' as const },
+      { column: 1, player: 'red' as const },
+      { column: 1, player: 'yellow' as const },
+      { column: 2, player: 'red' as const },
+      { column: 2, player: 'yellow' as const },
+      { column: 3, player: 'red' as const }
+    ];
+
+    for (const move of sequence) {
+      const next = applyConnect4Move(state, move);
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    expect(state.status).toBe('completed');
+    expect(state.winner).toBe('red');
+  });
+
+  it('marks draw when board is full without winner', () => {
+    let state = createConnect4State({ rows: 4, columns: 4 });
+    const sequence = [0, 1, 2, 3, 0, 1, 2, 3, 1, 0, 3, 2, 1, 0, 3, 2];
+
+    for (const column of sequence) {
+      const next = applyConnect4Move(state, { column, player: state.nextPlayer });
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    expect(state.status).toBe('draw');
+    expect(state.winner).toBeNull();
   });
 });
 

@@ -236,6 +236,17 @@ h3 {
   margin-inline: auto;
 }
 
+.connect4-grid {
+  display: grid;
+  gap: 6px;
+  background: #2566b0;
+  border: 2px solid #184e8b;
+  border-radius: 14px;
+  padding: 8px;
+  max-width: min(100%, 560px);
+  margin-inline: auto;
+}
+
 .go-cell {
   aspect-ratio: 1;
   min-width: 22px;
@@ -357,9 +368,19 @@ h3 {
   padding: 0;
 }
 
+.connect4-cell {
+  aspect-ratio: 1;
+  min-width: 24px;
+  border: none;
+  border-radius: 999px;
+  background: #dce5f6;
+  padding: 0;
+}
+
 .gomoku-cell,
 .go-cell,
-.xiangqi-cell {
+.xiangqi-cell,
+.connect4-cell {
   transition:
     transform 120ms ease,
     background-color 120ms ease;
@@ -367,7 +388,8 @@ h3 {
 
 .gomoku-cell:active,
 .go-cell:active,
-.xiangqi-cell:active {
+.xiangqi-cell:active,
+.connect4-cell:active {
   transform: scale(0.96);
 }
 
@@ -386,6 +408,23 @@ h3 {
 
 .stone.white {
   background: radial-gradient(circle at 30% 30%, #ffffff, #d5dbde 80%);
+}
+
+.connect4-disc {
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  display: block;
+  margin: auto;
+  animation: pop-in 160ms ease;
+}
+
+.connect4-disc.red {
+  background: radial-gradient(circle at 30% 30%, #ff9c8f, #dc3827 72%);
+}
+
+.connect4-disc.yellow {
+  background: radial-gradient(circle at 30% 30%, #fff5b2, #efc126 72%);
 }
 
 .game-2048 {
@@ -619,6 +658,7 @@ button.xiangqi-move-chip:hover {
 
   .gomoku-grid,
   .go-grid,
+  .connect4-grid,
   .xiangqi-board {
     max-width: 100%;
   }

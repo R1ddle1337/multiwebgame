@@ -1,7 +1,9 @@
 import {
+  applyConnect4Move,
   applyGoMove,
   applyGomokuMove,
   applyXiangqiMove,
+  createConnect4State,
   createGoState,
   createGomokuState,
   createXiangqiState,
@@ -10,6 +12,8 @@ import {
 import type {
   BoardGameType,
   ClientToServerMessage,
+  Connect4Move,
+  Connect4State,
   GoMove,
   GoState,
   GomokuMark,
@@ -76,6 +80,17 @@ interface GomokuRuntime {
   };
 }
 
+interface Connect4Runtime {
+  gameType: 'connect4';
+  roomId: string;
+  matchId: string;
+  state: Connect4State;
+  players: {
+    red: string;
+    yellow: string;
+  };
+}
+
 interface GoRuntime {
   gameType: 'go';
   roomId: string;
@@ -98,7 +113,7 @@ interface XiangqiRuntime {
   };
 }
 
-type ActiveRuntime = GomokuRuntime | GoRuntime | XiangqiRuntime;
+type ActiveRuntime = GomokuRuntime | Connect4Runtime | GoRuntime | XiangqiRuntime;
 
 const authSchema = z.object({
   type: z.literal('auth'),
@@ -131,6 +146,14 @@ const roomMoveSchema = z.union([
       gameType: z.literal('gomoku'),
       x: z.number().int().min(0),
       y: z.number().int().min(0)
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('connect4'),
+      column: z.number().int().min(0)
     })
   }),
   z.object({
@@ -176,7 +199,7 @@ const inviteRespondSchema = z.object({
 
 const matchmakingJoinSchema = z.object({
   type: z.literal('matchmaking.join'),
-  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi']) })
+  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4']) })
 });
 
 const pingSchema = z.object({
@@ -204,7 +227,9 @@ const ROOM_INACTIVE_TIMEOUT_MS = 90_000;
 const pendingInactiveRoomLeaves = new Map<string, Map<string, ReturnType<typeof setTimeout>>>();
 
 function playerSlotsForGame(gameType: BoardGameType): number {
-  return gameType === 'gomoku' || gameType === 'go' || gameType === 'xiangqi' ? 2 : 2;
+  return gameType === 'gomoku' || gameType === 'go' || gameType === 'xiangqi' || gameType === 'connect4'
+    ? 2
+    : 2;
 }
 
 function send(client: ClientContext, message: ServerToClientMessage): void {
@@ -336,6 +361,10 @@ function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
 function runtimePlayers(runtime: ActiveRuntime): [string, string] {
   if (runtime.gameType === 'gomoku' || runtime.gameType === 'go') {
     return [runtime.players.black, runtime.players.white];
+  }
+
+  if (runtime.gameType === 'connect4') {
+    return [runtime.players.red, runtime.players.yellow];
   }
 
   return [runtime.players.red, runtime.players.black];
@@ -522,6 +551,19 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'connect4') {
+    return {
+      gameType: 'connect4',
+      roomId: room.id,
+      matchId,
+      state: createConnect4State(),
+      players: {
+        red: players.first,
+        yellow: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'xiangqi') {
     return {
       gameType: 'xiangqi',
@@ -555,6 +597,29 @@ function replayMoves(
       const applied = applyGomokuMove(current.state, {
         x: payload.x,
         y: payload.y,
+        player
+      });
+
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'connect4') {
+      const payload = move.payload as { column?: number; player?: Connect4Move['player'] };
+      if (typeof payload.column !== 'number') {
+        continue;
+      }
+
+      const player = payload.player ?? current.state.nextPlayer;
+      const applied = applyConnect4Move(current.state, {
+        column: payload.column,
         player
       });
 
@@ -741,6 +806,19 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
     return;
   }
 
+  if (room.gameType === 'connect4') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'connect4',
+        state: runtime?.gameType === 'connect4' ? runtime.state : createConnect4State(),
+        viewerRole
+      }
+    });
+    return;
+  }
+
   if (room.gameType === 'xiangqi') {
     send(client, {
       type: 'room.state',
@@ -855,6 +933,61 @@ async function handleGomokuMove(
         x,
         y,
         player: playerMark
+      }
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleConnect4Move(
+  client: ClientContext,
+  runtime: Connect4Runtime,
+  column: number
+): Promise<void> {
+  const userId = client.user!.id;
+  const playerDisc: Connect4Move['player'] | null =
+    runtime.players.red === userId ? 'red' : runtime.players.yellow === userId ? 'yellow' : null;
+
+  if (!playerDisc) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const applied = applyConnect4Move(runtime.state, {
+    column,
+    player: playerDisc
+  });
+
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'connect4.drop_disc',
+    payload: {
+      column,
+      player: playerDisc
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'connect4',
+      state: runtime.state,
+      lastMove: {
+        column,
+        player: playerDisc
       }
     }
   });
@@ -981,6 +1114,7 @@ async function handleMove(
   client: ClientContext,
   message:
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
+    | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'go'; move: GoMove }
     | { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }
 ): Promise<void> {
@@ -1007,6 +1141,11 @@ async function handleMove(
 
   if (message.gameType === 'gomoku' && runtime.gameType === 'gomoku') {
     await handleGomokuMove(client, runtime, message.x, message.y);
+    return;
+  }
+
+  if (message.gameType === 'connect4' && runtime.gameType === 'connect4') {
+    await handleConnect4Move(client, runtime, message.column);
     return;
   }
 
@@ -1223,6 +1362,15 @@ wss.on('connection', (socket) => {
             gameType: 'gomoku',
             x: msg.payload.x,
             y: msg.payload.y
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'connect4') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'connect4',
+            column: msg.payload.column
           });
           return;
         }

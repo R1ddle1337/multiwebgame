@@ -1,4 +1,4 @@
-export type MatchmakingGameType = 'gomoku' | 'xiangqi' | 'go';
+export type MatchmakingGameType = 'gomoku' | 'xiangqi' | 'go' | 'connect4';
 
 export interface QueueEntry {
   userId: string;

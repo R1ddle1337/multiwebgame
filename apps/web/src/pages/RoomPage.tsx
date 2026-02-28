@@ -1,5 +1,12 @@
-import { createGoState, createGomokuState, createXiangqiState } from '@multiwebgame/game-engines';
+import {
+  createConnect4State,
+  createGoState,
+  createGomokuState,
+  createXiangqiState
+} from '@multiwebgame/game-engines';
 import type {
+  Connect4Move,
+  Connect4State,
   GoMove,
   GoState,
   GomokuMove,
@@ -13,6 +20,7 @@ import type {
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
+import { Connect4Board } from '../components/Connect4Board';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
@@ -35,9 +43,9 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
 }
 
 function formatResultText(
-  state: GomokuState | GoState | XiangqiState,
+  state: Connect4State | GomokuState | GoState | XiangqiState,
   statusLabel: (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') => string,
-  colorLabel: (color: 'black' | 'white' | 'red') => string,
+  colorLabel: (color: 'black' | 'white' | 'red' | 'yellow') => string,
   t: (key: string, vars?: Record<string, string | number>) => string
 ): string {
   if (state.status === 'playing') {
@@ -95,7 +103,10 @@ export function RoomPage({ api, user }: Props) {
     (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') => t(`enum.status.${status}`),
     [t]
   );
-  const colorLabel = useCallback((color: 'black' | 'white' | 'red') => t(`enum.color.${color}`), [t]);
+  const colorLabel = useCallback(
+    (color: 'black' | 'white' | 'red' | 'yellow') => t(`enum.color.${color}`),
+    [t]
+  );
 
   const watchMode = useMemo(
     () => new URLSearchParams(location.search).get('watch') === '1',
@@ -107,6 +118,8 @@ export function RoomPage({ api, user }: Props) {
 
   const gomokuState =
     snapshot?.gameType === 'gomoku' ? (snapshot.state as GomokuState) : createGomokuState(15);
+  const connect4State =
+    snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
   const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
   const xiangqiState =
     snapshot?.gameType === 'xiangqi' ? (snapshot.state as XiangqiState) : createXiangqiState();
@@ -123,6 +136,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'gomoku' &&
     viewerRole === 'player' &&
     gomokuState.status === 'playing';
+  const connect4Turn =
+    hasActiveMatch &&
+    room?.gameType === 'connect4' &&
+    viewerRole === 'player' &&
+    connect4State.status === 'playing';
   const goTurn =
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
   const xiangqiTurn =
@@ -135,6 +153,10 @@ export function RoomPage({ api, user }: Props) {
     gomokuTurn &&
     ((seat === 1 && gomokuState.nextPlayer === 'black') ||
       (seat === 2 && gomokuState.nextPlayer === 'white'));
+  const canPlayConnect4 =
+    connect4Turn &&
+    ((seat === 1 && connect4State.nextPlayer === 'red') ||
+      (seat === 2 && connect4State.nextPlayer === 'yellow'));
   const canPlayGo =
     goTurn &&
     ((seat === 1 && goState.nextPlayer === 'black') || (seat === 2 && goState.nextPlayer === 'white'));
@@ -142,7 +164,7 @@ export function RoomPage({ api, user }: Props) {
     xiangqiTurn &&
     ((seat === 1 && xiangqiState.nextPlayer === 'red') ||
       (seat === 2 && xiangqiState.nextPlayer === 'black'));
-  const canPlayCurrentTurn = canPlayGomoku || canPlayGo || canPlayXiangqi;
+  const canPlayCurrentTurn = canPlayGomoku || canPlayConnect4 || canPlayGo || canPlayXiangqi;
   const xiangqiPerspective: XiangqiColor = seat === 2 ? 'black' : 'red';
   const previousCanPlayRef = useRef(false);
 
@@ -157,6 +179,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'gomoku') {
       return describeLastMove('gomoku', snapshot.lastMove as GomokuMove);
+    }
+
+    if (room.gameType === 'connect4') {
+      return describeLastMove('connect4', snapshot.lastMove as Connect4Move);
     }
 
     if (room.gameType === 'go') {
@@ -175,12 +201,26 @@ export function RoomPage({ api, user }: Props) {
       return formatResultText(gomokuState, statusLabel, colorLabel, t);
     }
 
+    if (room.gameType === 'connect4') {
+      return formatResultText(connect4State, statusLabel, colorLabel, t);
+    }
+
     if (room.gameType === 'go') {
       return formatResultText(goState, statusLabel, colorLabel, t);
     }
 
     return formatResultText(xiangqiState, statusLabel, colorLabel, t);
-  }, [room, latestMoveSummary, gomokuState, goState, xiangqiState, statusLabel, colorLabel, t]);
+  }, [
+    room,
+    latestMoveSummary,
+    gomokuState,
+    connect4State,
+    goState,
+    xiangqiState,
+    statusLabel,
+    colorLabel,
+    t
+  ]);
 
   useEffect(() => {
     const justBecameCurrentTurn = didTurnSwitchToCurrent(previousCanPlayRef.current, canPlayCurrentTurn);
@@ -280,6 +320,21 @@ export function RoomPage({ api, user }: Props) {
         gameType: 'gomoku',
         x,
         y
+      }
+    });
+  };
+
+  const sendConnect4Move = (column: number) => {
+    if (!canPlayConnect4) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'connect4',
+        column
       }
     });
   };
@@ -561,6 +616,31 @@ export function RoomPage({ api, user }: Props) {
               <p>
                 {gomokuState.winner
                   ? t('room.result.winner', { winner: colorLabel(gomokuState.winner) })
+                  : t('room.result.draw')}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'connect4' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(connect4State.nextPlayer),
+                  status: statusLabel(connect4State.status)
+                })}
+              </p>
+            ) : null}
+            <Connect4Board
+              state={connect4State}
+              disabled={!canPlayConnect4}
+              onColumnClick={sendConnect4Move}
+            />
+            {connect4State.status === 'completed' || connect4State.status === 'draw' ? (
+              <p>
+                {connect4State.winner
+                  ? t('room.result.winner', { winner: colorLabel(connect4State.winner) })
                   : t('room.result.draw')}
               </p>
             ) : null}

@@ -1,5 +1,5 @@
-export type GameType = 'single_2048' | 'gomoku' | 'xiangqi' | 'go';
-export type BoardGameType = 'gomoku' | 'xiangqi' | 'go';
+export type GameType = 'single_2048' | 'gomoku' | 'xiangqi' | 'go' | 'connect4';
+export type BoardGameType = 'gomoku' | 'xiangqi' | 'go' | 'connect4';
 
 export interface UserDTO {
   id: string;
@@ -149,6 +149,23 @@ export interface GomokuState {
   forbiddenMove: GomokuForbiddenMoveReason | null;
 }
 
+export type Connect4Disc = 'red' | 'yellow';
+
+export interface Connect4Move {
+  column: number;
+  player: Connect4Disc;
+}
+
+export interface Connect4State {
+  columns: number;
+  rows: number;
+  board: (Connect4Disc | null)[][];
+  nextPlayer: Connect4Disc;
+  winner: Connect4Disc | null;
+  status: 'playing' | 'draw' | 'completed';
+  moveCount: number;
+}
+
 export type GoStone = 'black' | 'white';
 export type GoRuleset = 'chinese';
 
@@ -273,6 +290,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'connect4';
+      state: Connect4State | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'go';
       state: GoState | null;
       viewerRole: RoomPlayerRole;
@@ -299,6 +322,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'connect4';
+      state: Connect4State;
+      lastMove: Connect4Move;
+    }
+  | {
+      roomId: string;
       gameType: 'go';
       state: GoState;
       lastMove: GoMove;
@@ -316,6 +345,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.subscribe', { roomId: string; asSpectator?: boolean }>
   | WsEnvelope<'room.unsubscribe', { roomId: string }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'go'; move: GoMove }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }>
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>

@@ -1,4 +1,4 @@
-import type { GoState, GomokuState, XiangqiState } from '@multiwebgame/shared-types';
+import type { Connect4State, GoState, GomokuState, XiangqiState } from '@multiwebgame/shared-types';
 
 export type RuntimeCompletionSnapshot =
   | {
@@ -7,6 +7,14 @@ export type RuntimeCompletionSnapshot =
       players: {
         black: string;
         white: string;
+      };
+    }
+  | {
+      gameType: 'connect4';
+      state: Connect4State;
+      players: {
+        red: string;
+        yellow: string;
       };
     }
   | {
@@ -75,6 +83,33 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
       winnerUserId,
       status: 'completed',
       resultPayload: runtime.state.scoring ? { go: runtime.state.scoring } : null
+    };
+  }
+
+  if (runtime.gameType === 'connect4') {
+    if (runtime.state.status !== 'completed' && runtime.state.status !== 'draw') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'red'
+        ? runtime.players.red
+        : runtime.state.winner === 'yellow'
+          ? runtime.players.yellow
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        connect4: {
+          winner: runtime.state.winner,
+          status: runtime.state.status,
+          moveCount: runtime.state.moveCount,
+          rows: runtime.state.rows,
+          columns: runtime.state.columns
+        }
+      }
     };
   }
 

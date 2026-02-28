@@ -1,4 +1,9 @@
-import { createGoState, createGomokuState, createXiangqiState } from '@multiwebgame/game-engines';
+import {
+  createConnect4State,
+  createGoState,
+  createGomokuState,
+  createXiangqiState
+} from '@multiwebgame/game-engines';
 import { describe, expect, it } from 'vitest';
 
 import { deriveRuntimeCompletion } from '../src/runtime-completion.js';
@@ -129,6 +134,36 @@ describe('deriveRuntimeCompletion', () => {
           winner: 'red',
           outcomeReason: 'checkmate',
           moveCount: 42
+        }
+      }
+    });
+  });
+
+  it('maps connect4 completion to winner and payload', () => {
+    const connect4Completion = deriveRuntimeCompletion({
+      gameType: 'connect4',
+      state: {
+        ...createConnect4State(),
+        status: 'completed',
+        winner: 'yellow',
+        moveCount: 23
+      },
+      players: {
+        red: 'u5',
+        yellow: 'u6'
+      }
+    });
+
+    expect(connect4Completion).toEqual({
+      winnerUserId: 'u6',
+      status: 'completed',
+      resultPayload: {
+        connect4: {
+          winner: 'yellow',
+          status: 'completed',
+          moveCount: 23,
+          rows: 6,
+          columns: 7
         }
       }
     });

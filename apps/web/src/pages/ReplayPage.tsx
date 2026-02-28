@@ -1,15 +1,19 @@
 import {
   apply2048Move,
+  applyConnect4Move,
   applyGoMove,
   applyGomokuMove,
   applyXiangqiMove,
   create2048State,
+  createConnect4State,
   createGoState,
   createGomokuState,
   createXiangqiState,
   formatXiangqiMoveNotation
 } from '@multiwebgame/game-engines';
 import type {
+  Connect4Move,
+  Connect4State,
   Direction2048,
   Game2048State,
   GoMove,
@@ -23,6 +27,7 @@ import type {
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
+import { Connect4Board } from '../components/Connect4Board';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
@@ -108,8 +113,11 @@ function notationFromPayload(payload: XiangqiReplayPayload): string | null {
 export function ReplayPage({ api, viewerUserId }: Props) {
   const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
-  const [gameType, setGameType] = useState<'gomoku' | 'go' | 'xiangqi' | 'single_2048'>('gomoku');
+  const [gameType, setGameType] = useState<'gomoku' | 'connect4' | 'go' | 'xiangqi' | 'single_2048'>(
+    'gomoku'
+  );
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
+  const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
   const [xiangqiStates, setXiangqiStates] = useState<XiangqiState[]>([createXiangqiState()]);
   const [xiangqiMoveLog, setXiangqiMoveLog] = useState<XiangqiReplayMoveLogEntry[]>([]);
@@ -121,7 +129,8 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const gameLabel = (type: 'gomoku' | 'go' | 'xiangqi' | 'single_2048') => t(`enum.game.${type}`);
+  const gameLabel = (type: 'gomoku' | 'connect4' | 'go' | 'xiangqi' | 'single_2048') =>
+    t(`enum.game.${type}`);
   const statusLabel = (status: 'playing' | 'completed' | 'draw' | 'won' | 'lost') =>
     t(`enum.status.${status}`);
 
@@ -187,6 +196,35 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setGoStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'connect4') {
+          let current = createConnect4State();
+          const snapshots: Connect4State[] = [current];
+
+          for (const move of result.match.moves) {
+            const payload = move.payload as Partial<Connect4Move>;
+            if (typeof payload.column !== 'number') {
+              continue;
+            }
+
+            const applied = applyConnect4Move(current, {
+              column: payload.column,
+              player: payload.player ?? current.nextPlayer
+            });
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setConnect4States(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -297,6 +335,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'gomoku') {
       return Math.max(0, gomokuStates.length - 1);
     }
+    if (gameType === 'connect4') {
+      return Math.max(0, connect4States.length - 1);
+    }
     if (gameType === 'go') {
       return Math.max(0, goStates.length - 1);
     }
@@ -304,7 +345,14 @@ export function ReplayPage({ api, viewerUserId }: Props) {
       return Math.max(0, xiangqiStates.length - 1);
     }
     return Math.max(0, game2048States.length - 1);
-  }, [gameType, goStates.length, gomokuStates.length, xiangqiStates.length, game2048States.length]);
+  }, [
+    gameType,
+    goStates.length,
+    gomokuStates.length,
+    connect4States.length,
+    xiangqiStates.length,
+    game2048States.length
+  ]);
 
   useEffect(() => {
     if (!playing) {
@@ -388,6 +436,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
       />
 
       {gameType === 'gomoku' ? <GomokuBoard state={gomokuStates[clampedStep]} disabled /> : null}
+      {gameType === 'connect4' ? <Connect4Board state={connect4States[clampedStep]} disabled /> : null}
       {gameType === 'go' ? <GoBoard state={goStates[clampedStep]} disabled /> : null}
       {gameType === 'xiangqi' ? (
         <>

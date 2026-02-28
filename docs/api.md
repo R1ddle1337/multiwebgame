@@ -57,7 +57,7 @@ Auth uses `Authorization: Bearer <jwt>`.
 
 - `POST /rooms`
   - Auth required
-  - Body: `{ "gameType": "single_2048" | "gomoku" | "go" | "xiangqi", "maxPlayers"?: number }`
+  - Body: `{ "gameType": "single_2048" | "gomoku" | "connect4" | "go" | "xiangqi", "maxPlayers"?: number }`
   - Returns: `{ room }`
 
 - `GET /rooms/:roomId`
@@ -123,6 +123,7 @@ Auth uses `Authorization: Bearer <jwt>`.
   - Auth required
   - Returns: `{ match: MatchDTO }`
   - `match.resultPayload` includes adjudication/scoring payload when available.
+    - Connect Four: winner/status/moveCount/board dimensions.
     - Go: Chinese area score breakdown + komi + winner.
     - Xiangqi: outcome reason (checkmate/stalemate/repetition policy).
     - Gomoku: ruleset and final status metadata.

@@ -215,6 +215,9 @@ export function LobbyPage({ api, user }: Props) {
           <button type="button" onClick={() => createRoom('gomoku')}>
             {t('lobby.create.gomoku')}
           </button>
+          <button type="button" onClick={() => createRoom('connect4')}>
+            {t('lobby.create.connect4')}
+          </button>
           <button type="button" onClick={() => createRoom('go')}>
             {t('lobby.create.go')}
           </button>
@@ -232,7 +235,7 @@ export function LobbyPage({ api, user }: Props) {
         <div className="matchmaking">
           <h3>{t('lobby.matchmaking')}</h3>
           <div className="button-row">
-            {(['gomoku', 'go', 'xiangqi'] as const).map((gameType) => (
+            {(['gomoku', 'connect4', 'go', 'xiangqi'] as const).map((gameType) => (
               <button
                 key={gameType}
                 type="button"
