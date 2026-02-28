@@ -112,12 +112,22 @@ export function RoomPage({ api, user }: Props) {
   const seat = useMemo(() => playerSeat(room, user.id), [room, user.id]);
   const viewerRole =
     snapshot?.viewerRole ?? room?.players.find((player) => player.userId === user.id)?.role ?? 'spectator';
+  const activePlayerCount = room?.players.filter((player) => player.role === 'player').length ?? 0;
+  const hasActiveMatch = room?.gameType !== 'single_2048' && room?.status === 'in_match';
+  const waitingForOpponent = room?.gameType !== 'single_2048' && !hasActiveMatch && activePlayerCount < 2;
 
   const gomokuTurn =
-    room?.gameType === 'gomoku' && viewerRole === 'player' && gomokuState.status === 'playing';
-  const goTurn = room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
+    hasActiveMatch &&
+    room?.gameType === 'gomoku' &&
+    viewerRole === 'player' &&
+    gomokuState.status === 'playing';
+  const goTurn =
+    hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
   const xiangqiTurn =
-    room?.gameType === 'xiangqi' && viewerRole === 'player' && xiangqiState.status === 'playing';
+    hasActiveMatch &&
+    room?.gameType === 'xiangqi' &&
+    viewerRole === 'player' &&
+    xiangqiState.status === 'playing';
 
   const canPlayGomoku =
     gomokuTurn &&
@@ -246,9 +256,15 @@ export function RoomPage({ api, user }: Props) {
       return;
     }
 
+    const normalizedError = realtime.lastError.trim().toLowerCase();
+    if (normalizedError.includes('no_active_match') && !hasActiveMatch) {
+      realtime.clearLastError();
+      return;
+    }
+
     setError(translateError(realtime.lastError));
     realtime.clearLastError();
-  }, [realtime, translateError]);
+  }, [hasActiveMatch, realtime, translateError]);
 
   const sendGomokuMove = (x: number, y: number) => {
     if (!canPlayGomoku) {
@@ -420,7 +436,13 @@ export function RoomPage({ api, user }: Props) {
       <section className="panel">
         <h2>{t('room.game.title')}</h2>
 
-        {room.gameType !== 'single_2048' && viewerRole === 'player' ? (
+        {waitingForOpponent ? (
+          <p role="status" aria-live="polite">
+            {t('room.waiting_for_opponent')}
+          </p>
+        ) : null}
+
+        {room.gameType !== 'single_2048' && viewerRole === 'player' && hasActiveMatch ? (
           <div
             className={`room-turn-reminder ${canPlayCurrentTurn ? 'active' : ''}`}
             role="status"
@@ -478,12 +500,14 @@ export function RoomPage({ api, user }: Props) {
 
         {room.gameType === 'gomoku' ? (
           <>
-            <p>
-              {t('room.next_turn', {
-                player: colorLabel(gomokuState.nextPlayer),
-                status: statusLabel(gomokuState.status)
-              })}
-            </p>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(gomokuState.nextPlayer),
+                  status: statusLabel(gomokuState.status)
+                })}
+              </p>
+            ) : null}
             <GomokuBoard state={gomokuState} disabled={!canPlayGomoku} onCellClick={sendGomokuMove} />
             {gomokuState.status === 'completed' || gomokuState.status === 'draw' ? (
               <p>
@@ -497,12 +521,14 @@ export function RoomPage({ api, user }: Props) {
 
         {room.gameType === 'go' ? (
           <>
-            <p>
-              {t('room.next_turn', {
-                player: colorLabel(goState.nextPlayer),
-                status: statusLabel(goState.status)
-              })}
-            </p>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(goState.nextPlayer),
+                  status: statusLabel(goState.status)
+                })}
+              </p>
+            ) : null}
             <GoBoard
               state={goState}
               disabled={!canPlayGo}
@@ -532,12 +558,14 @@ export function RoomPage({ api, user }: Props) {
 
         {room.gameType === 'xiangqi' ? (
           <>
-            <p>
-              {t('room.next_turn', {
-                player: colorLabel(xiangqiState.nextPlayer),
-                status: statusLabel(xiangqiState.status)
-              })}
-            </p>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(xiangqiState.nextPlayer),
+                  status: statusLabel(xiangqiState.status)
+                })}
+              </p>
+            ) : null}
             <XiangqiBoard
               state={xiangqiState}
               selected={xiangqiSelection}
