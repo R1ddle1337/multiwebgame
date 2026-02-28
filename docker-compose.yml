@@ -3,43 +3,56 @@ version: '3.9'
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: multiwebgame
+    expose:
+      - '5432'
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres -d multiwebgame']
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 15
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    expose:
+      - '6379'
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
+    tmpfs:
+      - /tmp:noexec,nosuid,nodev
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 15
 
   api:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file:
-      - .env.example
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/multiwebgame
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/multiwebgame
       REDIS_URL: redis://redis:6379
       API_PORT: 4000
       WEB_ORIGIN: https://game.lyxnb.de5.net
+      JWT_SECRET: ${JWT_SECRET}
+    expose:
+      - '4000'
     ports:
-      - '4000:4000'
+      - '127.0.0.1:4000:4000'
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,16 +63,17 @@ services:
     build:
       context: .
       dockerfile: apps/realtime/Dockerfile
-    env_file:
-      - .env.example
+    restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/multiwebgame
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/multiwebgame
       REDIS_URL: redis://redis:6379
       REALTIME_PORT: 4001
       API_BASE_URL: http://api:4000
-      JWT_SECRET: replace-with-a-long-random-string
+      JWT_SECRET: ${JWT_SECRET}
+    expose:
+      - '4001'
     ports:
-      - '4001:4001'
+      - '127.0.0.1:4001:4001'
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,10 +87,13 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
-      VITE_API_BASE_URL: http://localhost:4000
-      VITE_WS_URL: ws://localhost:4001
+      VITE_API_BASE_URL: https://game.lyxnb.de5.net/api
+      VITE_WS_URL: wss://game.lyxnb.de5.net/ws
+      VITE_API_TIMEOUT_MS: 12000
+    expose:
+      - '5173'
     ports:
-      - '5173:5173'
+      - '127.0.0.1:5173:5173'
     depends_on:
       api:
         condition: service_started

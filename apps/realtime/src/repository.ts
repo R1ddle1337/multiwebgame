@@ -55,7 +55,7 @@ async function abandonActiveMatches(
       SET
         status = 'abandoned',
         winner_user_id = NULL,
-        result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object('abandonedReason', $2),
+        result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object('abandonedReason', $2::text),
         ended_at = COALESCE(ended_at, NOW())
       WHERE room_id = $1 AND status = 'active'
     `,
@@ -790,23 +790,45 @@ export async function joinRoomIfPossible(
       return null;
     }
 
-    const existing = await client.query<{ id: string }>(
-      'SELECT id FROM room_players WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL',
+    const existing = await client.query<{ role: 'player' | 'spectator'; seat: number | null }>(
+      'SELECT role, seat FROM room_players WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL',
       [roomId, userId]
     );
 
-    if (existing.rowCount === 0) {
-      const members = await client.query<{ role: 'player' | 'spectator'; seat: number | null }>(
-        'SELECT role, seat FROM room_players WHERE room_id = $1 AND left_at IS NULL',
-        [roomId]
-      );
+    const members = await client.query<{ role: 'player' | 'spectator'; seat: number | null }>(
+      'SELECT role, seat FROM room_players WHERE room_id = $1 AND left_at IS NULL',
+      [roomId]
+    );
 
+    const maxPlayerSlots = playerSlotsForGame(room.game_type);
+    const activePlayers = members.rows.filter((row) => row.role === 'player');
+    if (existing.rowCount && existing.rows[0].role === 'spectator' && !asSpectator) {
+      if (activePlayers.length < maxPlayerSlots) {
+        const used = new Set(
+          activePlayers.map((row) => row.seat).filter((value): value is number => value !== null)
+        );
+        let seat = 1;
+        while (used.has(seat) && seat <= maxPlayerSlots) {
+          seat += 1;
+        }
+
+        await client.query(
+          `
+            UPDATE room_players
+            SET role = 'player', seat = $3
+            WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
+          `,
+          [roomId, userId, seat]
+        );
+      }
+
+      return fetchRoomById(client, roomId);
+    }
+
+    if (existing.rowCount === 0) {
       if (members.rows.length >= room.max_players) {
         return null;
       }
-
-      const maxPlayerSlots = playerSlotsForGame(room.game_type);
-      const activePlayers = members.rows.filter((row) => row.role === 'player');
 
       let role: 'player' | 'spectator' = 'spectator';
       let seat: number | null = null;

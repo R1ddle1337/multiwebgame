@@ -38,6 +38,7 @@ export function LobbyPage({ api, user }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [activeQueueGame, setActiveQueueGame] = useState<BoardGameType | null>(null);
   const [blockUserId, setBlockUserId] = useState('');
+  const [reloadTick, setReloadTick] = useState(0);
 
   const gameLabel = useCallback(
     (gameType: RoomDTO['gameType'] | BoardGameType) => t(`enum.game.${gameType}`),
@@ -56,6 +57,11 @@ export function LobbyPage({ api, user }: Props) {
 
   useEffect(() => {
     let active = true;
+    setLoadingRooms(true);
+    setLoadingHistory(true);
+    setLoadingRatings(true);
+    setLoadingReports(user.isAdmin);
+    setError(null);
 
     api
       .listRooms()
@@ -151,7 +157,7 @@ export function LobbyPage({ api, user }: Props) {
     return () => {
       active = false;
     };
-  }, [api, setInvitations, t, translateError, user.isAdmin]);
+  }, [api, reloadTick, setInvitations, t, translateError, user.isAdmin]);
 
   useEffect(() => {
     if (realtime.matchmakingTimeout) {
@@ -243,6 +249,17 @@ export function LobbyPage({ api, user }: Props) {
         </div>
 
         {error ? <p className="error-text">{error}</p> : null}
+        {loadingRooms && realtime.status === 'disconnected' ? (
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setReloadTick((current) => current + 1)}
+            >
+              {t('common.retry')}
+            </button>
+          </div>
+        ) : null}
 
         <h3>{t('lobby.rooms')}</h3>
         {loadingRooms ? <p>{t('lobby.rooms.loading')}</p> : null}

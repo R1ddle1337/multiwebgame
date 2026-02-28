@@ -364,7 +364,7 @@ async function abandonActiveMatches(
       SET
         status = 'abandoned',
         winner_user_id = NULL,
-        result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object('abandonedReason', $2),
+        result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object('abandonedReason', $2::text),
         ended_at = COALESCE(ended_at, NOW())
       WHERE room_id = $1 AND status = 'active'
     `,
@@ -741,16 +741,43 @@ export function createPostgresStore(): Store {
           throw new StoreError('Room is closed', 'forbidden');
         }
 
-        if (room.players.some((member) => member.userId === userId)) {
-          return room;
+        const maxPlayersForMode = playerSlotsForGame(room.gameType);
+        const activePlayers = room.players.filter((member) => member.role === 'player');
+        const existingMember = room.players.find((member) => member.userId === userId);
+        if (existingMember) {
+          if (
+            existingMember.role === 'spectator' &&
+            !asSpectator &&
+            activePlayers.length < maxPlayersForMode
+          ) {
+            const usedSeats = new Set(
+              activePlayers.map((member) => member.seat).filter((value): value is number => value !== null)
+            );
+            let nextSeat = 1;
+            while (usedSeats.has(nextSeat) && nextSeat <= maxPlayersForMode) {
+              nextSeat += 1;
+            }
+
+            await client.query(
+              `
+                UPDATE room_players
+                SET role = 'player', seat = $3
+                WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
+              `,
+              [roomId, userId, nextSeat]
+            );
+          }
+
+          const currentRoom = await fetchRoomById(client, roomId);
+          if (!currentRoom) {
+            throw new StoreError('Room not found', 'not_found');
+          }
+          return currentRoom;
         }
 
         if (room.players.length >= room.maxPlayers) {
           throw new StoreError('Room capacity reached', 'capacity_reached');
         }
-
-        const maxPlayersForMode = playerSlotsForGame(room.gameType);
-        const activePlayers = room.players.filter((member) => member.role === 'player');
 
         let role: 'player' | 'spectator' = 'spectator';
         let seat: number | null = null;

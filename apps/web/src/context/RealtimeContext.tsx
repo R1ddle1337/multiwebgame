@@ -13,6 +13,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { storage } from '../lib/api';
 import { resolveWsUrl } from '../lib/endpoints';
 import { isAuthInvalidMessage } from '../lib/errorHandling';
+import { isHeartbeatStale, nextReconnectDelay } from '../lib/reconnect';
 
 interface RoomSnapshot {
   room: RoomDTO;
@@ -40,6 +41,9 @@ interface RealtimeValue {
 const RealtimeContext = createContext<RealtimeValue | null>(null);
 
 const WS_URL = resolveWsUrl();
+const WS_AUTH_TIMEOUT_MS = 10_000;
+const WS_PING_INTERVAL_MS = 15_000;
+const WS_PONG_TIMEOUT_MS = 45_000;
 
 interface Props {
   token: string;
@@ -51,7 +55,10 @@ interface Props {
 export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const lastPongAtRef = useRef(Date.now());
   const isAuthedRef = useRef(false);
   const shouldReconnectRef = useRef(true);
   const pendingMessagesRef = useRef<ClientToServerMessage[]>([]);
@@ -74,14 +81,36 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
     pendingMessagesRef.current = [];
     isAuthedRef.current = false;
     shouldReconnectRef.current = true;
+    reconnectAttemptRef.current = 0;
+    lastPongAtRef.current = Date.now();
+
+    const clearAuthTimer = () => {
+      if (authTimerRef.current !== null) {
+        clearTimeout(authTimerRef.current);
+        authTimerRef.current = null;
+      }
+    };
+
+    const clearPingTimer = () => {
+      if (pingTimerRef.current !== null) {
+        clearInterval(pingTimerRef.current);
+        pingTimerRef.current = null;
+      }
+    };
 
     const connect = () => {
       shouldReconnectRef.current = true;
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       setStatus('connecting');
       const socket = new WebSocket(WS_URL);
       socketRef.current = socket;
 
       socket.addEventListener('open', () => {
+        isAuthedRef.current = false;
+        lastPongAtRef.current = Date.now();
         const reconnectKey = storage.getReconnectKey();
         socket.send(
           JSON.stringify({
@@ -92,6 +121,13 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
             }
           })
         );
+
+        clearAuthTimer();
+        authTimerRef.current = globalThis.setTimeout(() => {
+          if (socket.readyState === WebSocket.OPEN && !isAuthedRef.current) {
+            socket.close(4001, 'auth_timeout');
+          }
+        }, WS_AUTH_TIMEOUT_MS);
       });
 
       socket.addEventListener('message', (event) => {
@@ -104,9 +140,12 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
 
         switch (message.type) {
           case 'auth.ok': {
+            clearAuthTimer();
             setStatus('connected');
             setLastError(null);
             isAuthedRef.current = true;
+            reconnectAttemptRef.current = 0;
+            lastPongAtRef.current = Date.now();
             storage.setReconnectKey(message.payload.reconnectKey);
             socket.send(JSON.stringify({ type: 'lobby.subscribe', payload: {} }));
 
@@ -122,12 +161,14 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
               }
             }
 
-            if (pingTimerRef.current !== null) {
-              clearInterval(pingTimerRef.current);
-            }
-
+            clearPingTimer();
             pingTimerRef.current = globalThis.setInterval(() => {
               if (socket.readyState !== WebSocket.OPEN) {
+                return;
+              }
+
+              if (isHeartbeatStale(lastPongAtRef.current, Date.now(), WS_PONG_TIMEOUT_MS)) {
+                socket.close(4000, 'pong_timeout');
                 return;
               }
 
@@ -137,12 +178,13 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
                   payload: { ts: Date.now() }
                 })
               );
-            }, 15_000);
+            }, WS_PING_INTERVAL_MS);
             break;
           }
           case 'auth.error': {
             // Fallback: stale reconnect key/session can cause auth loop after deployments.
             storage.setReconnectKey(null);
+            clearAuthTimer();
             isAuthedRef.current = false;
             setStatus('disconnected');
 
@@ -227,6 +269,10 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
             });
             break;
           }
+          case 'pong': {
+            lastPongAtRef.current = Date.now();
+            break;
+          }
           case 'error': {
             setLastError(message.payload.reason);
             break;
@@ -239,16 +285,17 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
       socket.addEventListener('close', () => {
         setStatus('disconnected');
         isAuthedRef.current = false;
-        if (pingTimerRef.current !== null) {
-          clearInterval(pingTimerRef.current);
-          pingTimerRef.current = null;
-        }
+        clearAuthTimer();
+        clearPingTimer();
+        socketRef.current = null;
 
         if (!isMounted || !shouldReconnectRef.current) {
           return;
         }
 
-        reconnectTimerRef.current = globalThis.setTimeout(connect, 1500);
+        const delay = nextReconnectDelay(reconnectAttemptRef.current);
+        reconnectAttemptRef.current += 1;
+        reconnectTimerRef.current = globalThis.setTimeout(connect, delay);
       });
     };
 
@@ -256,12 +303,13 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
 
     return () => {
       isMounted = false;
+      shouldReconnectRef.current = false;
       if (reconnectTimerRef.current !== null) {
         clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
-      if (pingTimerRef.current !== null) {
-        clearInterval(pingTimerRef.current);
-      }
+      clearAuthTimer();
+      clearPingTimer();
       pendingMessagesRef.current = [];
       socketRef.current?.close();
       socketRef.current = null;

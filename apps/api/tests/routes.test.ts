@@ -212,8 +212,25 @@ class InMemoryStore implements Store {
       throw new Error('room_or_user_not_found');
     }
 
-    const alreadyInRoom = room.players.some((player) => player.userId === userId);
-    if (alreadyInRoom) {
+    const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
+    const activePlayers = room.players.filter((player) => player.role === 'player');
+    const existing = room.players.find((player) => player.userId === userId);
+    if (existing) {
+      if (existing.role === 'spectator' && !asSpectator && activePlayers.length < playerSlots) {
+        const usedSeats = new Set(
+          activePlayers
+            .map((player) => player.seat)
+            .filter((seat): seat is number => typeof seat === 'number')
+        );
+        let nextSeat = 1;
+        while (usedSeats.has(nextSeat) && nextSeat <= playerSlots) {
+          nextSeat += 1;
+        }
+
+        existing.role = 'player';
+        existing.seat = nextSeat;
+        this.rooms.set(roomId, room);
+      }
       return room;
     }
 
@@ -221,8 +238,6 @@ class InMemoryStore implements Store {
       throw new StoreError('Room capacity reached', 'capacity_reached');
     }
 
-    const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
-    const activePlayers = room.players.filter((player) => player.role === 'player');
     const role = !asSpectator && activePlayers.length < playerSlots ? 'player' : 'spectator';
     const usedSeats = new Set(
       activePlayers.map((player) => player.seat).filter((seat): seat is number => typeof seat === 'number')
@@ -482,6 +497,51 @@ describe('critical API routes', () => {
     );
     expect(watcherRow.role).toBe('spectator');
     expect(watcherRow.seat).toBeNull();
+  });
+
+  it('promotes an existing spectator to player when a seat opens', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const player2 = await request(app).post('/auth/guest').send({ displayName: 'Player2' }).expect(201);
+    const watcher = await request(app).post('/auth/guest').send({ displayName: 'Watcher' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'xiangqi', maxPlayers: 4 })
+      .expect(201);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${player2.body.token}`)
+      .send({})
+      .expect(200);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${watcher.body.token}`)
+      .send({ asSpectator: true })
+      .expect(200);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/leave`)
+      .set('Authorization', `Bearer ${player2.body.token}`)
+      .send({})
+      .expect(200);
+
+    const promoted = await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${watcher.body.token}`)
+      .send({ asSpectator: false })
+      .expect(200);
+
+    const watcherRow = promoted.body.room.players.find(
+      (player: { userId: string }) => player.userId === watcher.body.user.id
+    );
+    expect(watcherRow.role).toBe('player');
+    expect(watcherRow.seat).toBe(2);
   });
 
   it('enforces room capacity and seat role semantics for 4-player rooms', async () => {

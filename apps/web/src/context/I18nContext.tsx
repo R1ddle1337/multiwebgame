@@ -45,6 +45,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'auth.reset_session': '重置会话',
     'auth.session_reset_done': '会话已重置，请重试。',
     'auth.session_restore_failed': '无法恢复会话，请重试。',
+    'auth.session_restore_delayed': '会话恢复超时较久，建议重试或重置会话。',
     'auth.session_restore_network': '无法恢复会话：网络请求失败。请重试；若持续失败可手动重置会话。',
     'auth.session_restore_cors':
       '无法恢复会话：请求被跨域策略拦截（CORS）。请刷新后重试；若持续失败可手动重置会话。',
@@ -149,9 +150,15 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.room_capacity': '房间已满',
     'error.room_closed': '房间已关闭',
     'error.no_active_match': '当前没有可进行的对局',
+    'error.match_not_active': '当前对局未处于进行状态',
     'error.not_a_match_player': '你不是当前对局玩家',
+    'error.room_not_subscribed': '请先进入房间后再操作',
+    'error.room_join_failed': '加入房间失败，请稍后重试',
     'error.game_type_mismatch': '游戏类型不匹配',
+    'error.out_of_turn': '未轮到你落子',
+    'error.piece_not_owned': '只能操作己方棋子',
     'error.invalid_move': '非法落子',
+    'error.realtime_unstable': '实时连接不稳定，正在尝试重连',
     'error.network': '网络请求失败，请稍后重试',
     'error.cors': '请求被浏览器跨域策略拦截（CORS），请刷新后重试',
     'error.auth_failed': '认证失败'
@@ -195,6 +202,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'auth.reset_session': 'Reset session',
     'auth.session_reset_done': 'Session has been reset. Please retry.',
     'auth.session_restore_failed': 'Unable to restore session. Please retry.',
+    'auth.session_restore_delayed': 'Session restore is taking too long. Retry or reset session.',
     'auth.session_restore_network':
       'Unable to restore session: network request failed. Retry, or reset session if this persists.',
     'auth.session_restore_cors':
@@ -300,9 +308,15 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.room_capacity': 'Room capacity reached',
     'error.room_closed': 'Room is closed',
     'error.no_active_match': 'No active match',
+    'error.match_not_active': 'Match is not active',
     'error.not_a_match_player': 'Not a match player',
+    'error.room_not_subscribed': 'Join the room before sending actions',
+    'error.room_join_failed': 'Failed to join room. Please retry.',
     'error.game_type_mismatch': 'Game type mismatch',
+    'error.out_of_turn': 'It is not your turn',
+    'error.piece_not_owned': 'You can only move your own piece',
     'error.invalid_move': 'Invalid move',
+    'error.realtime_unstable': 'Realtime connection is unstable. Reconnecting…',
     'error.network': 'Network request failed. Please retry.',
     'error.cors': 'Request blocked by browser CORS policy. Please refresh and retry.',
     'error.auth_failed': 'Authentication failed'
@@ -384,6 +398,11 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   const translateError = useCallback(
     (message: string) => {
       const normalized = message.trim().toLowerCase();
+      const withCode = (key: string) => {
+        const translated = t(key);
+        const isMachineCode = /^[a-z0-9_.:-]{3,80}$/.test(normalized);
+        return isMachineCode ? `${translated} (${normalized})` : translated;
+      };
 
       const transport = classifyTransportErrorMessage(normalized);
       if (transport === 'cors') {
@@ -406,16 +425,39 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
         return t('error.room_closed');
       }
       if (normalized.includes('no_active_match')) {
-        return t('error.no_active_match');
+        return withCode('error.no_active_match');
+      }
+      if (normalized.includes('match_is_not_active')) {
+        return withCode('error.match_not_active');
       }
       if (normalized.includes('not_a_match_player')) {
-        return t('error.not_a_match_player');
+        return withCode('error.not_a_match_player');
+      }
+      if (normalized.includes('room_not_subscribed')) {
+        return withCode('error.room_not_subscribed');
+      }
+      if (normalized.includes('room_join_failed')) {
+        return withCode('error.room_join_failed');
       }
       if (normalized.includes('game_type_mismatch')) {
-        return t('error.game_type_mismatch');
+        return withCode('error.game_type_mismatch');
+      }
+      if (normalized.includes('out_of_turn')) {
+        return withCode('error.out_of_turn');
+      }
+      if (normalized.includes('piece_not_owned')) {
+        return withCode('error.piece_not_owned');
+      }
+      if (
+        normalized.includes('pong_timeout') ||
+        normalized.includes('heartbeat_timeout') ||
+        normalized.includes('auth_timeout') ||
+        normalized.includes('realtime_transport_error')
+      ) {
+        return withCode('error.realtime_unstable');
       }
       if (normalized.includes('invalid_move') || normalized.includes('illegal_')) {
-        return t('error.invalid_move');
+        return withCode('error.invalid_move');
       }
       if (
         isAuthInvalidMessage(normalized) ||

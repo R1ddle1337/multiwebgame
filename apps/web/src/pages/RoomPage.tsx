@@ -184,6 +184,19 @@ export function RoomPage({ api, user }: Props) {
     });
   };
 
+  const leaveCurrentRoom = async () => {
+    try {
+      send({
+        type: 'room.unsubscribe',
+        payload: { roomId }
+      });
+      await api.leaveRoom(roomId);
+      navigate('/');
+    } catch (err) {
+      setError(translateError(err instanceof Error ? err.message : t('common.error_generic')));
+    }
+  };
+
   if (!room) {
     return (
       <main className="panel">
@@ -215,14 +228,7 @@ export function RoomPage({ api, user }: Props) {
         </p>
 
         <div className="button-row">
-          <button
-            type="button"
-            className="secondary"
-            onClick={async () => {
-              await api.leaveRoom(room.id);
-              navigate('/');
-            }}
-          >
+          <button type="button" className="secondary" onClick={leaveCurrentRoom}>
             {t('room.leave')}
           </button>
           {viewerRole !== 'spectator' ? null : (

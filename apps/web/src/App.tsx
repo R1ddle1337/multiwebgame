@@ -320,6 +320,7 @@ export function App() {
   const [token, setToken] = useState<string | null>(() => storage.getToken());
   const [user, setUser] = useState<UserDTO | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
+  const [loadingStalled, setLoadingStalled] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [showSessionResetAction, setShowSessionResetAction] = useState(false);
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
@@ -331,6 +332,7 @@ export function App() {
     setSessionError(null);
     setShowSessionResetAction(false);
     setLoading(false);
+    setLoadingStalled(false);
   }, []);
 
   useEffect(() => {
@@ -339,6 +341,7 @@ export function App() {
       setSessionError(null);
       setShowSessionResetAction(false);
       setLoading(false);
+      setLoadingStalled(false);
       return;
     }
 
@@ -383,6 +386,7 @@ export function App() {
       .finally(() => {
         if (active) {
           setLoading(false);
+          setLoadingStalled(false);
         }
       });
 
@@ -390,6 +394,19 @@ export function App() {
       active = false;
     };
   }, [clearSession, token, sessionCheckAttempt, t, translateError]);
+
+  useEffect(() => {
+    if (!token || !loading) {
+      setLoadingStalled(false);
+      return;
+    }
+
+    const timer = globalThis.setTimeout(() => {
+      setLoadingStalled(true);
+    }, 9_000);
+
+    return () => clearTimeout(timer);
+  }, [loading, token]);
 
   if (!token) {
     if (loading) {
@@ -410,14 +427,17 @@ export function App() {
   }
 
   if (!user) {
-    if (loading) {
+    if (loading && !loadingStalled) {
       return <main className="auth-gate">{t('auth.loading_session')}</main>;
     }
 
     return (
       <SessionRecoveryGate
-        error={sessionError ?? t('auth.session_restore_failed')}
-        showManualReset={showSessionResetAction}
+        error={
+          sessionError ??
+          (loadingStalled ? t('auth.session_restore_delayed') : t('auth.session_restore_failed'))
+        }
+        showManualReset={showSessionResetAction || loadingStalled}
         onRetry={() => setSessionCheckAttempt((current) => current + 1)}
         onResetSession={clearSession}
       />
