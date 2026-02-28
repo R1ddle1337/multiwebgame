@@ -6,7 +6,8 @@ import {
   create2048State,
   createGoState,
   createGomokuState,
-  createXiangqiState
+  createXiangqiState,
+  formatXiangqiMoveNotation
 } from '@multiwebgame/game-engines';
 import type {
   Direction2048,
@@ -24,6 +25,7 @@ import { useParams } from 'react-router-dom';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
+import { XiangqiMoveList, type XiangqiReplayMoveLogEntry } from '../components/XiangqiMoveList';
 import { useI18n } from '../context/I18nContext';
 import type { ApiClient } from '../lib/api';
 
@@ -42,6 +44,65 @@ function randomFromSequence(values: number[]): () => number {
   };
 }
 
+interface XiangqiStoredMoveLog {
+  from?: XiangqiMove['from'];
+  to?: XiangqiMove['to'];
+  player?: XiangqiMove['player'];
+  notation?: string;
+}
+
+interface XiangqiReplayPayload extends Partial<XiangqiMove> {
+  notation?: string;
+  moveLog?: XiangqiStoredMoveLog;
+}
+
+function isXiangqiPosition(value: unknown): value is XiangqiMove['from'] {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const position = value as Partial<XiangqiMove['from']>;
+  return (
+    typeof position.x === 'number' &&
+    Number.isInteger(position.x) &&
+    position.x >= 0 &&
+    position.x <= 8 &&
+    typeof position.y === 'number' &&
+    Number.isInteger(position.y) &&
+    position.y >= 0 &&
+    position.y <= 9
+  );
+}
+
+function isXiangqiPlayer(value: unknown): value is XiangqiMove['player'] {
+  return value === 'red' || value === 'black';
+}
+
+function toXiangqiMove(payload: XiangqiReplayPayload): XiangqiMove | null {
+  const source = payload.moveLog ?? payload;
+  if (!isXiangqiPosition(source.from) || !isXiangqiPosition(source.to) || !isXiangqiPlayer(source.player)) {
+    return null;
+  }
+
+  return {
+    from: source.from,
+    to: source.to,
+    player: source.player
+  };
+}
+
+function notationFromPayload(payload: XiangqiReplayPayload): string | null {
+  if (typeof payload.moveLog?.notation === 'string' && payload.moveLog.notation.trim()) {
+    return payload.moveLog.notation;
+  }
+
+  if (typeof payload.notation === 'string' && payload.notation.trim()) {
+    return payload.notation;
+  }
+
+  return null;
+}
+
 export function ReplayPage({ api }: Props) {
   const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
@@ -49,6 +110,7 @@ export function ReplayPage({ api }: Props) {
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
   const [xiangqiStates, setXiangqiStates] = useState<XiangqiState[]>([createXiangqiState()]);
+  const [xiangqiMoveLog, setXiangqiMoveLog] = useState<XiangqiReplayMoveLogEntry[]>([]);
   const [game2048States, setGame2048States] = useState<Game2048State[]>([create2048State(() => 0)]);
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -96,6 +158,7 @@ export function ReplayPage({ api }: Props) {
           }
 
           setGomokuStates(snapshots);
+          setXiangqiMoveLog([]);
           setStep(snapshots.length - 1);
           return;
         }
@@ -120,6 +183,7 @@ export function ReplayPage({ api }: Props) {
           }
 
           setGoStates(snapshots);
+          setXiangqiMoveLog([]);
           setStep(snapshots.length - 1);
           return;
         }
@@ -127,23 +191,37 @@ export function ReplayPage({ api }: Props) {
         if (result.match.gameType === 'xiangqi') {
           let current = createXiangqiState();
           const snapshots: XiangqiState[] = [current];
+          const replayMoveLog: XiangqiReplayMoveLogEntry[] = [];
 
           for (const move of result.match.moves) {
-            const payload = move.payload as unknown as Partial<XiangqiMove>;
-            if (!payload?.from || !payload?.to || !payload?.player) {
+            const payload = move.payload as unknown as XiangqiReplayPayload;
+            const replayMove = toXiangqiMove(payload);
+            if (!replayMove) {
               continue;
             }
 
-            const applied = applyXiangqiMove(current, payload as XiangqiMove);
+            const applied = applyXiangqiMove(current, replayMove);
             if (!applied.accepted) {
               continue;
             }
 
+            const notation =
+              notationFromPayload(payload) ||
+              formatXiangqiMoveNotation(current, replayMove) ||
+              `${replayMove.from.x},${replayMove.from.y}-${replayMove.to.x},${replayMove.to.y}`;
+
             current = applied.nextState;
             snapshots.push(current);
+            replayMoveLog.push({
+              ply: replayMoveLog.length + 1,
+              player: replayMove.player,
+              move: replayMove,
+              notation
+            });
           }
 
           setXiangqiStates(snapshots);
+          setXiangqiMoveLog(replayMoveLog);
           setStep(snapshots.length - 1);
           return;
         }
@@ -182,6 +260,7 @@ export function ReplayPage({ api }: Props) {
         }
 
         setGame2048States(snapshots);
+        setXiangqiMoveLog([]);
         setStep(snapshots.length - 1);
       })
       .catch((err) => {
@@ -296,7 +375,23 @@ export function ReplayPage({ api }: Props) {
 
       {gameType === 'gomoku' ? <GomokuBoard state={gomokuStates[clampedStep]} disabled /> : null}
       {gameType === 'go' ? <GoBoard state={goStates[clampedStep]} disabled /> : null}
-      {gameType === 'xiangqi' ? <XiangqiBoard state={xiangqiStates[clampedStep]} disabled /> : null}
+      {gameType === 'xiangqi' ? (
+        <>
+          <XiangqiBoard state={xiangqiStates[clampedStep]} disabled blackCharacterVariant="traditional" />
+          <XiangqiMoveList
+            entries={xiangqiMoveLog}
+            currentPly={clampedStep}
+            onSelectPly={(ply) => setStep(ply)}
+            labels={{
+              title: t('replay.moves.title'),
+              round: t('replay.moves.round'),
+              red: t('replay.moves.red'),
+              black: t('replay.moves.black'),
+              empty: t('replay.moves.empty')
+            }}
+          />
+        </>
+      ) : null}
       {gameType === 'single_2048' ? (
         <div className="game-2048 replay-2048">
           <p>

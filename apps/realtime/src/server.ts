@@ -4,7 +4,8 @@ import {
   applyXiangqiMove,
   createGoState,
   createGomokuState,
-  createXiangqiState
+  createXiangqiState,
+  formatXiangqiMoveNotation
 } from '@multiwebgame/game-engines';
 import type {
   BoardGameType,
@@ -934,6 +935,7 @@ async function handleXiangqiMove(
     to: move.to,
     player: playerColor
   };
+  const notation = formatXiangqiMoveNotation(runtime.state, normalizedMove);
 
   const applied = applyXiangqiMove(runtime.state, normalizedMove);
   if (!applied.accepted) {
@@ -949,7 +951,16 @@ async function handleXiangqiMove(
     actorUserId: userId,
     moveIndex: runtime.state.moveCount,
     moveType: 'xiangqi.move_piece',
-    payload: normalizedMove as unknown as Record<string, unknown>
+    payload: {
+      ...normalizedMove,
+      notation,
+      moveLog: {
+        from: normalizedMove.from,
+        to: normalizedMove.to,
+        player: normalizedMove.player,
+        notation
+      }
+    }
   });
 
   const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
