@@ -25,6 +25,12 @@ Message shape:
 - `room.unsubscribe`
   - `{ roomId: string }`
 
+- `room.rng.commit`
+  - `{ roomId: string, commit: string }`
+
+- `room.rng.reveal`
+  - `{ roomId: string, nonce: string }`
+
 - `room.move` (Gomoku)
   - `{ roomId: string, gameType: "gomoku", x: number, y: number }`
 
@@ -81,6 +87,9 @@ Message shape:
 - `room.player_left`
   - `{ roomId, userId }`
 
+- `room.rng.updated`
+  - `{ roomId, phase, serverSeedCommit, commits, revealedUsers, revealDeadlineAt, rngSeed }`
+
 - `invite.received`
   - `{ invitation }`
 
@@ -122,6 +131,11 @@ Message shape:
   - Client stores `reconnectKey` from `auth.ok`.
   - On reconnect, client sends `auth` with prior `reconnectKey`.
   - Server restores prior lobby + room subscriptions inside reconnect grace window.
+
+- Verifiable randomness commit-reveal:
+  - RNG-enabled matches can require both players to submit `room.rng.commit` then `room.rng.reveal`.
+  - Until reveal is complete, gameplay moves may be rejected with `rng_reveal_pending`.
+  - Reveal timeout may abandon the active match (`abandonedReason: "rng_reveal_timeout"` in match result payload).
 
 - Matchmaking queue:
   - `matchmaking.leave` cancels queue membership.

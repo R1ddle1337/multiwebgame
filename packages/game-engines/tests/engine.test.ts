@@ -8,6 +8,7 @@ import {
   applyGomokuMove,
   applyReversiMove,
   applyXiangqiMove,
+  createDeterministicPrng,
   create2048State,
   createConnect4State,
   createDotsState,
@@ -410,6 +411,38 @@ describe('dots and boxes engine', () => {
     expect(state.status).toBe('completed');
     expect(state.winner).toBe('white');
     expect(state.scores.white).toBe(1);
+  });
+});
+
+describe('deterministic prng', () => {
+  it('produces identical sequences for identical seeds', () => {
+    const a = createDeterministicPrng('a'.repeat(64));
+    const b = createDeterministicPrng('a'.repeat(64));
+
+    const sequenceA = [a.nextUint32(), a.nextUint32(), a.nextUint32(), a.nextUint32()];
+    const sequenceB = [b.nextUint32(), b.nextUint32(), b.nextUint32(), b.nextUint32()];
+
+    expect(sequenceA).toEqual(sequenceB);
+  });
+
+  it('shuffles deterministically', () => {
+    const first = createDeterministicPrng('0123456789abcdef'.repeat(4));
+    const second = createDeterministicPrng('0123456789abcdef'.repeat(4));
+
+    const a = first.shuffleInPlace([1, 2, 3, 4, 5, 6]);
+    const b = second.shuffleInPlace([1, 2, 3, 4, 5, 6]);
+
+    expect(a).toEqual(b);
+    expect(a).not.toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('enforces bounds for nextInt and nextDie', () => {
+    const prng = createDeterministicPrng('f'.repeat(64));
+    const picks = Array.from({ length: 20 }, () => prng.nextInt(7));
+    const dice = Array.from({ length: 20 }, () => prng.nextDie());
+
+    expect(picks.every((value) => value >= 0 && value < 7)).toBe(true);
+    expect(dice.every((value) => value >= 1 && value <= 6)).toBe(true);
   });
 });
 

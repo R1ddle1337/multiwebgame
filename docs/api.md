@@ -123,6 +123,7 @@ Auth uses `Authorization: Bearer <jwt>`.
   - Auth required
   - Returns: `{ match: MatchDTO }`
   - `match.resultPayload` includes adjudication/scoring payload when available.
+    - RNG proof (when enabled): `rng.serverSeed`, `rng.serverSeedCommit`, `rng.commits`, `rng.nonces`, `rng.rngSeed`.
     - Connect Four: winner/status/moveCount/board dimensions.
     - Reversi: winner/status/moveCount/disc counts.
     - Dots and Boxes: winner/status/moveCount/final scores/dot-grid dimensions.

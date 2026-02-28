@@ -60,6 +60,13 @@ import {
   touchRoomLastActiveAt
 } from './repository.js';
 import { deriveRuntimeCompletion } from './runtime-completion.js';
+import {
+  applyPlayerCommit,
+  applyPlayerReveal,
+  buildRngPayload,
+  isRevealTimedOut,
+  type VerifiableRngSession
+} from './verifiable-rng.js';
 
 interface ClientContext {
   socket: WebSocket;
@@ -84,6 +91,7 @@ interface GomokuRuntime {
   roomId: string;
   matchId: string;
   state: GomokuState;
+  rngSession?: VerifiableRngSession;
   players: {
     black: string;
     white: string;
@@ -95,6 +103,7 @@ interface Connect4Runtime {
   roomId: string;
   matchId: string;
   state: Connect4State;
+  rngSession?: VerifiableRngSession;
   players: {
     red: string;
     yellow: string;
@@ -106,6 +115,7 @@ interface GoRuntime {
   roomId: string;
   matchId: string;
   state: GoState;
+  rngSession?: VerifiableRngSession;
   players: {
     black: string;
     white: string;
@@ -117,6 +127,7 @@ interface ReversiRuntime {
   roomId: string;
   matchId: string;
   state: ReversiState;
+  rngSession?: VerifiableRngSession;
   players: {
     black: string;
     white: string;
@@ -128,6 +139,7 @@ interface DotsRuntime {
   roomId: string;
   matchId: string;
   state: DotsState;
+  rngSession?: VerifiableRngSession;
   players: {
     black: string;
     white: string;
@@ -139,6 +151,7 @@ interface XiangqiRuntime {
   roomId: string;
   matchId: string;
   state: XiangqiState;
+  rngSession?: VerifiableRngSession;
   players: {
     red: string;
     black: string;
@@ -173,6 +186,22 @@ const roomUnsubscribeSchema = z.object({
   type: z.literal('room.unsubscribe'),
   payload: z.object({
     roomId: z.string().uuid()
+  })
+});
+
+const roomRngCommitSchema = z.object({
+  type: z.literal('room.rng.commit'),
+  payload: z.object({
+    roomId: z.string().uuid(),
+    commit: z.string().min(1).max(256)
+  })
+});
+
+const roomRngRevealSchema = z.object({
+  type: z.literal('room.rng.reveal'),
+  payload: z.object({
+    roomId: z.string().uuid(),
+    nonce: z.string().min(1).max(512)
   })
 });
 
@@ -453,6 +482,88 @@ function isRuntimeSyncedWithRoom(runtime: ActiveRuntime, room: RoomDTO): boolean
   return first === players.first && second === players.second;
 }
 
+function hasRngSession(
+  runtime: ActiveRuntime
+): runtime is ActiveRuntime & { rngSession: VerifiableRngSession } {
+  return Boolean(runtime.rngSession);
+}
+
+function rngPhaseReady(runtime: ActiveRuntime): boolean {
+  if (!hasRngSession(runtime)) {
+    return true;
+  }
+
+  return runtime.rngSession.phase === 'ready';
+}
+
+function mergeResultPayloadWithRng(
+  runtime: ActiveRuntime,
+  base: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null {
+  if (!hasRngSession(runtime)) {
+    return base ?? null;
+  }
+
+  return {
+    ...(base ?? {}),
+    rng: buildRngPayload(runtime.rngSession)
+  };
+}
+
+function rngUpdatedMessage(
+  runtime: ActiveRuntime & { rngSession: VerifiableRngSession }
+): ServerToClientMessage {
+  return {
+    type: 'room.rng.updated',
+    payload: {
+      roomId: runtime.roomId,
+      phase: runtime.rngSession.phase,
+      serverSeedCommit: runtime.rngSession.serverSeedCommit,
+      commits: runtime.rngSession.playerCommits,
+      revealedUsers: Object.entries(runtime.rngSession.playerNonces)
+        .filter(([, nonce]) => nonce !== null)
+        .map(([userId]) => userId),
+      revealDeadlineAt: runtime.rngSession.revealDeadlineAt,
+      rngSeed: runtime.rngSession.phase === 'ready' ? runtime.rngSession.rngSeed : null
+    }
+  };
+}
+
+async function abandonForRngRevealTimeout(
+  runtime: ActiveRuntime,
+  targets: Set<ClientContext>
+): Promise<boolean> {
+  if (!hasRngSession(runtime) || !isRevealTimedOut(runtime.rngSession)) {
+    return false;
+  }
+
+  const resultPayload = mergeResultPayloadWithRng(runtime, {
+    abandonedReason: 'rng_reveal_timeout'
+  }) ?? { abandonedReason: 'rng_reveal_timeout' };
+
+  await completeMatch({
+    matchId: runtime.matchId,
+    roomId: runtime.roomId,
+    winnerUserId: null,
+    status: 'abandoned',
+    resultPayload
+  });
+
+  activeRuntimes.delete(runtime.roomId);
+  broadcast(targets, {
+    type: 'match.completed',
+    payload: {
+      roomId: runtime.roomId,
+      matchId: runtime.matchId,
+      winnerUserId: null,
+      resultPayload
+    }
+  });
+
+  await broadcastRoomStateToSubscribers(runtime.roomId);
+  return true;
+}
+
 function clearPendingInactiveLeaves(userId: string, roomId?: string): void {
   const byRoom = pendingInactiveRoomLeaves.get(userId);
   if (!byRoom) {
@@ -498,17 +609,23 @@ function clearReconnectSnapshotsForUser(userId: string): void {
 }
 
 async function finishMatchIfCompleted(runtime: ActiveRuntime, targets: Set<ClientContext>): Promise<boolean> {
+  if (await abandonForRngRevealTimeout(runtime, targets)) {
+    return true;
+  }
+
   const completion = deriveRuntimeCompletion(runtime);
   if (!completion) {
     return false;
   }
+
+  const resultPayload = mergeResultPayloadWithRng(runtime, completion.resultPayload);
 
   await completeMatch({
     matchId: runtime.matchId,
     roomId: runtime.roomId,
     winnerUserId: completion.winnerUserId,
     status: completion.status,
-    resultPayload: completion.resultPayload
+    resultPayload
   });
 
   activeRuntimes.delete(runtime.roomId);
@@ -518,7 +635,7 @@ async function finishMatchIfCompleted(runtime: ActiveRuntime, targets: Set<Clien
       roomId: runtime.roomId,
       matchId: runtime.matchId,
       winnerUserId: completion.winnerUserId,
-      resultPayload: completion.resultPayload
+      resultPayload
     }
   });
 
@@ -851,16 +968,39 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   const replayed = replayMoves(base, match.moves);
 
   if (match.status === 'active') {
+    if (hasRngSession(replayed) && isRevealTimedOut(replayed.rngSession)) {
+      activeRuntimes.delete(roomId);
+      const timeoutPayload = mergeResultPayloadWithRng(replayed, {
+        abandonedReason: 'rng_reveal_timeout'
+      }) ?? { abandonedReason: 'rng_reveal_timeout' };
+      try {
+        await completeMatch({
+          matchId: match.id,
+          roomId,
+          winnerUserId: null,
+          status: 'abandoned',
+          resultPayload: timeoutPayload
+        });
+      } catch (error) {
+        console.warn(
+          'stale rng reveal timeout recovery failed',
+          error instanceof Error ? error.message : 'unknown_error'
+        );
+      }
+      return replayed;
+    }
+
     const completion = deriveRuntimeCompletion(replayed);
     if (completion) {
       activeRuntimes.delete(roomId);
+      const resultPayload = mergeResultPayloadWithRng(replayed, completion.resultPayload);
       try {
         await completeMatch({
           matchId: match.id,
           roomId,
           winnerUserId: completion.winnerUserId,
           status: completion.status,
-          resultPayload: completion.resultPayload
+          resultPayload
         });
       } catch (error) {
         console.warn(
@@ -1395,6 +1535,94 @@ async function handleXiangqiMove(
   await finishMatchIfCompleted(runtime, targets);
 }
 
+async function handleRngCommit(client: ClientContext, roomId: string, commit: string): Promise<void> {
+  if (!client.user) {
+    sendError(client, 'not_authenticated');
+    return;
+  }
+
+  if (!client.subscribedRooms.has(roomId)) {
+    sendError(client, 'room_not_subscribed');
+    return;
+  }
+
+  const runtime = await getOrLoadRuntime(roomId);
+  if (!runtime) {
+    sendError(client, 'no_active_match');
+    return;
+  }
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  if (await abandonForRngRevealTimeout(runtime, targets)) {
+    return;
+  }
+
+  if (!hasRngSession(runtime)) {
+    sendError(client, 'rng_not_required');
+    return;
+  }
+
+  const [first, second] = runtimePlayers(runtime);
+  if (client.user.id !== first && client.user.id !== second) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const committed = applyPlayerCommit(runtime.rngSession, client.user.id, commit, Date.now());
+  if (!committed.accepted) {
+    sendError(client, committed.reason ?? 'rng_commit_rejected');
+    return;
+  }
+
+  runtime.rngSession = committed.session;
+  activeRuntimes.set(runtime.roomId, runtime);
+  broadcast(targets, rngUpdatedMessage(runtime));
+}
+
+async function handleRngReveal(client: ClientContext, roomId: string, nonce: string): Promise<void> {
+  if (!client.user) {
+    sendError(client, 'not_authenticated');
+    return;
+  }
+
+  if (!client.subscribedRooms.has(roomId)) {
+    sendError(client, 'room_not_subscribed');
+    return;
+  }
+
+  const runtime = await getOrLoadRuntime(roomId);
+  if (!runtime) {
+    sendError(client, 'no_active_match');
+    return;
+  }
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  if (await abandonForRngRevealTimeout(runtime, targets)) {
+    return;
+  }
+
+  if (!hasRngSession(runtime)) {
+    sendError(client, 'rng_not_required');
+    return;
+  }
+
+  const [first, second] = runtimePlayers(runtime);
+  if (client.user.id !== first && client.user.id !== second) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const revealed = applyPlayerReveal(runtime.rngSession, client.user.id, nonce);
+  if (!revealed.accepted) {
+    sendError(client, revealed.reason ?? 'rng_reveal_rejected');
+    return;
+  }
+
+  runtime.rngSession = revealed.session;
+  activeRuntimes.set(runtime.roomId, runtime);
+  broadcast(targets, rngUpdatedMessage(runtime));
+}
+
 async function handleMove(
   client: ClientContext,
   message:
@@ -1423,6 +1651,11 @@ async function handleMove(
 
   if (runtime.gameType !== message.gameType) {
     sendError(client, 'game_type_mismatch');
+    return;
+  }
+
+  if (!rngPhaseReady(runtime)) {
+    sendError(client, 'rng_reveal_pending');
     return;
   }
 
@@ -1660,6 +1893,18 @@ wss.on('connection', (socket) => {
             });
           }
         }
+        return;
+      }
+
+      if (parsed.type === 'room.rng.commit') {
+        const msg = roomRngCommitSchema.parse(parsed);
+        await handleRngCommit(client, msg.payload.roomId, msg.payload.commit);
+        return;
+      }
+
+      if (parsed.type === 'room.rng.reveal') {
+        const msg = roomRngRevealSchema.parse(parsed);
+        await handleRngReveal(client, msg.payload.roomId, msg.payload.nonce);
         return;
       }
 
@@ -1911,6 +2156,11 @@ const roomLifecycleSweepInterval = setInterval(() => {
       .then(async (room) => {
         const runtime = activeRuntimes.get(roomId);
         if (!runtime) {
+          return;
+        }
+
+        const targets = roomSubscribers.get(roomId) ?? new Set<ClientContext>();
+        if (await abandonForRngRevealTimeout(runtime, targets)) {
           return;
         }
 

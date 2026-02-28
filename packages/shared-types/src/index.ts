@@ -328,6 +328,18 @@ export interface WsEnvelope<TType extends string, TPayload> {
   payload: TPayload;
 }
 
+export type VerifiableRngPhase = 'awaiting_commits' | 'awaiting_reveals' | 'ready';
+
+export interface VerifiableRngPublicState {
+  roomId: string;
+  phase: VerifiableRngPhase;
+  serverSeedCommit: string;
+  commits: Record<string, string | null>;
+  revealedUsers: string[];
+  revealDeadlineAt: number | null;
+  rngSeed: string | null;
+}
+
 export type RoomStatePayload =
   | {
       room: RoomDTO;
@@ -415,6 +427,8 @@ export type ClientToServerMessage =
   | WsEnvelope<'lobby.subscribe', Record<string, never>>
   | WsEnvelope<'room.subscribe', { roomId: string; asSpectator?: boolean }>
   | WsEnvelope<'room.unsubscribe', { roomId: string }>
+  | WsEnvelope<'room.rng.commit', { roomId: string; commit: string }>
+  | WsEnvelope<'room.rng.reveal', { roomId: string; nonce: string }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'reversi'; x: number; y: number }>
@@ -436,6 +450,7 @@ export type ServerToClientMessage =
   | WsEnvelope<'room.state', RoomStatePayload>
   | WsEnvelope<'room.player_joined', { roomId: string; user: UserDTO; role: RoomPlayerRole }>
   | WsEnvelope<'room.player_left', { roomId: string; userId: string }>
+  | WsEnvelope<'room.rng.updated', VerifiableRngPublicState>
   | WsEnvelope<'invite.received', { invitation: InvitationDTO }>
   | WsEnvelope<'invite.updated', { invitationId: string; status: InvitationDTO['status'] }>
   | WsEnvelope<'matchmaking.queued', { gameType: BoardGameType; queueSize: number }>
