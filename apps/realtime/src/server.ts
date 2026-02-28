@@ -1,10 +1,12 @@
 import {
   applyConnect4Move,
+  applyDotsMove,
   applyGoMove,
   applyGomokuMove,
   applyReversiMove,
   applyXiangqiMove,
   createConnect4State,
+  createDotsState,
   createGoState,
   createGomokuState,
   createReversiState,
@@ -16,6 +18,8 @@ import type {
   ClientToServerMessage,
   Connect4Move,
   Connect4State,
+  DotsMove,
+  DotsState,
   GoMove,
   GoState,
   GomokuMark,
@@ -117,6 +121,17 @@ interface ReversiRuntime {
   };
 }
 
+interface DotsRuntime {
+  gameType: 'dots';
+  roomId: string;
+  matchId: string;
+  state: DotsState;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
 interface XiangqiRuntime {
   gameType: 'xiangqi';
   roomId: string;
@@ -128,7 +143,13 @@ interface XiangqiRuntime {
   };
 }
 
-type ActiveRuntime = GomokuRuntime | Connect4Runtime | GoRuntime | ReversiRuntime | XiangqiRuntime;
+type ActiveRuntime =
+  | GomokuRuntime
+  | Connect4Runtime
+  | GoRuntime
+  | ReversiRuntime
+  | DotsRuntime
+  | XiangqiRuntime;
 
 const authSchema = z.object({
   type: z.literal('auth'),
@@ -184,6 +205,18 @@ const roomMoveSchema = z.union([
     type: z.literal('room.move'),
     payload: z.object({
       roomId: z.string().uuid(),
+      gameType: z.literal('dots'),
+      move: z.object({
+        orientation: z.enum(['h', 'v']),
+        x: z.number().int().min(0),
+        y: z.number().int().min(0)
+      })
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
       gameType: z.literal('go'),
       move: z.discriminatedUnion('type', [
         z.object({
@@ -223,7 +256,7 @@ const inviteRespondSchema = z.object({
 
 const matchmakingJoinSchema = z.object({
   type: z.literal('matchmaking.join'),
-  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi']) })
+  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi', 'dots']) })
 });
 
 const pingSchema = z.object({
@@ -255,7 +288,8 @@ function playerSlotsForGame(gameType: BoardGameType): number {
     gameType === 'go' ||
     gameType === 'xiangqi' ||
     gameType === 'connect4' ||
-    gameType === 'reversi'
+    gameType === 'reversi' ||
+    gameType === 'dots'
     ? 2
     : 2;
 }
@@ -387,7 +421,12 @@ function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
 }
 
 function runtimePlayers(runtime: ActiveRuntime): [string, string] {
-  if (runtime.gameType === 'gomoku' || runtime.gameType === 'go' || runtime.gameType === 'reversi') {
+  if (
+    runtime.gameType === 'gomoku' ||
+    runtime.gameType === 'go' ||
+    runtime.gameType === 'reversi' ||
+    runtime.gameType === 'dots'
+  ) {
     return [runtime.players.black, runtime.players.white];
   }
 
@@ -592,6 +631,19 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'dots') {
+    return {
+      gameType: 'dots',
+      roomId: room.id,
+      matchId,
+      state: createDotsState(),
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'connect4') {
     return {
       gameType: 'connect4',
@@ -686,6 +738,35 @@ function replayMoves(
         x: payload.x,
         y: payload.y,
         player
+      });
+
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'dots') {
+      const payload = move.payload as Partial<DotsMove> & { move?: Partial<DotsMove> };
+      const source = payload.move ?? payload;
+      if (!source || typeof source.x !== 'number' || typeof source.y !== 'number') {
+        continue;
+      }
+
+      if (source.orientation !== 'h' && source.orientation !== 'v') {
+        continue;
+      }
+
+      const applied = applyDotsMove(current.state, {
+        orientation: source.orientation,
+        x: source.x,
+        y: source.y,
+        player: source.player ?? current.state.nextPlayer
       });
 
       if (!applied.accepted) {
@@ -878,6 +959,19 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
         room,
         gameType: 'reversi',
         state: runtime?.gameType === 'reversi' ? runtime.state : createReversiState(),
+        viewerRole
+      }
+    });
+    return;
+  }
+
+  if (room.gameType === 'dots') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'dots',
+        state: runtime?.gameType === 'dots' ? runtime.state : createDotsState(),
         viewerRole
       }
     });
@@ -1132,6 +1226,58 @@ async function handleReversiMove(
   await finishMatchIfCompleted(runtime, targets);
 }
 
+async function handleDotsMove(
+  client: ClientContext,
+  runtime: DotsRuntime,
+  move: Pick<DotsMove, 'orientation' | 'x' | 'y'>
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: DotsMove['player'] | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove: DotsMove = {
+    orientation: move.orientation,
+    x: move.x,
+    y: move.y,
+    player
+  };
+
+  const applied = applyDotsMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'dots.draw_line',
+    payload: normalizedMove as unknown as Record<string, unknown>
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'dots',
+      state: runtime.state,
+      lastMove: normalizedMove
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
 async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoMove): Promise<void> {
   const userId = client.user!.id;
   const playerStone =
@@ -1253,6 +1399,7 @@ async function handleMove(
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
+    | { roomId: string; gameType: 'dots'; move: Pick<DotsMove, 'orientation' | 'x' | 'y'> }
     | { roomId: string; gameType: 'go'; move: GoMove }
     | { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }
 ): Promise<void> {
@@ -1289,6 +1436,11 @@ async function handleMove(
 
   if (message.gameType === 'reversi' && runtime.gameType === 'reversi') {
     await handleReversiMove(client, runtime, message.x, message.y);
+    return;
+  }
+
+  if (message.gameType === 'dots' && runtime.gameType === 'dots') {
+    await handleDotsMove(client, runtime, message.move);
     return;
   }
 
@@ -1524,6 +1676,15 @@ wss.on('connection', (socket) => {
             gameType: 'reversi',
             x: msg.payload.x,
             y: msg.payload.y
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'dots') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'dots',
+            move: msg.payload.move
           });
           return;
         }

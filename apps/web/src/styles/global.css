@@ -247,6 +247,49 @@ h3 {
   margin-inline: auto;
 }
 
+.dots-board {
+  max-width: min(100%, 560px);
+  margin-inline: auto;
+}
+
+.dots-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 2px solid #88a2c7;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #f9fbff 0%, #edf3fb 100%);
+}
+
+.dots-line {
+  stroke: #1f3a5a;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.dots-hitline {
+  stroke: transparent;
+  stroke-width: 14;
+  stroke-linecap: round;
+  cursor: pointer;
+}
+
+.dots-hitline:hover {
+  stroke: rgba(30, 90, 155, 0.28);
+}
+
+.dots-dot {
+  fill: #21406a;
+}
+
+.dots-box.black {
+  fill: rgba(27, 45, 67, 0.35);
+}
+
+.dots-box.white {
+  fill: rgba(255, 255, 255, 0.72);
+}
+
 .connect4-grid {
   display: grid;
   gap: 6px;
@@ -682,6 +725,7 @@ button.xiangqi-move-chip:hover {
   .go-grid,
   .reversi-grid,
   .connect4-grid,
+  .dots-board,
   .xiangqi-board {
     max-width: 100%;
   }

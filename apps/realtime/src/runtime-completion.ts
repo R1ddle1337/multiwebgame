@@ -1,5 +1,6 @@
 import type {
   Connect4State,
+  DotsState,
   GoState,
   GomokuState,
   ReversiState,
@@ -26,6 +27,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'reversi';
       state: ReversiState;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'dots';
+      state: DotsState;
       players: {
         black: string;
         white: string;
@@ -149,6 +158,34 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           moveCount: runtime.state.moveCount,
           boardSize: runtime.state.boardSize,
           counts: runtime.state.counts
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'dots') {
+    if (runtime.state.status !== 'completed' && runtime.state.status !== 'draw') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        dots: {
+          winner: runtime.state.winner,
+          status: runtime.state.status,
+          moveCount: runtime.state.moveCount,
+          dotsX: runtime.state.dotsX,
+          dotsY: runtime.state.dotsY,
+          scores: runtime.state.scores
         }
       }
     };

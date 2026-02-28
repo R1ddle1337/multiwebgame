@@ -252,6 +252,9 @@ function Shell({
             {t('enum.game.reversi')} {user.ratings.reversi ?? 1200}
           </span>
           <span className="status-pill">
+            {t('enum.game.dots')} {user.ratings.dots ?? 1200}
+          </span>
+          <span className="status-pill">
             {t('enum.game.go')} {user.ratings.go ?? 1200}
           </span>
           <span className="status-pill">

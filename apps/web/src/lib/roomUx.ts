@@ -1,5 +1,6 @@
 import type {
   Connect4Move,
+  DotsMove,
   GoMove,
   GomokuMove,
   ReversiMove,
@@ -78,13 +79,18 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'dots',
+  move: DotsMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'xiangqi',
   move: XiangqiMove,
   xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
-  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'xiangqi',
-  move: GomokuMove | Connect4Move | GoMove | ReversiMove | XiangqiMove,
+  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'dots' | 'xiangqi',
+  move: GomokuMove | Connect4Move | GoMove | ReversiMove | DotsMove | XiangqiMove,
   xiangqiPerspective: XiangqiPerspective = 'red'
 ): LastMoveSummary {
   if (gameType === 'gomoku') {
@@ -134,6 +140,27 @@ export function describeLastMove(
       action: {
         kind: 'place',
         point: formatBoardPoint(reversiMove.x, reversiMove.y)
+      }
+    };
+  }
+
+  if (gameType === 'dots') {
+    const dotsMove = move as DotsMove;
+    const from =
+      dotsMove.orientation === 'h'
+        ? formatBoardPoint(dotsMove.x, dotsMove.y)
+        : formatBoardPoint(dotsMove.x, dotsMove.y);
+    const to =
+      dotsMove.orientation === 'h'
+        ? formatBoardPoint(dotsMove.x + 1, dotsMove.y)
+        : formatBoardPoint(dotsMove.x, dotsMove.y + 1);
+
+    return {
+      actor: dotsMove.player,
+      action: {
+        kind: 'move',
+        from,
+        to
       }
     };
   }

@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   apply2048Move,
   applyConnect4Move,
+  applyDotsMove,
   applyGoMove,
   applyGomokuMove,
   applyReversiMove,
   applyXiangqiMove,
   create2048State,
   createConnect4State,
+  createDotsState,
   createGoState,
   createGomokuState,
   createReversiState,
@@ -335,6 +337,79 @@ describe('reversi engine', () => {
     expect(result.accepted).toBe(true);
     expect(result.nextState.status).toBe('completed');
     expect(result.nextState.winner).toBe('black');
+  });
+});
+
+describe('dots and boxes engine', () => {
+  it('rejects drawing an occupied line', () => {
+    let state = createDotsState({ dotsX: 3, dotsY: 3 });
+    const first = applyDotsMove(state, {
+      orientation: 'h',
+      x: 0,
+      y: 0,
+      player: 'black'
+    });
+    expect(first.accepted).toBe(true);
+    state = first.nextState;
+
+    const second = applyDotsMove(state, {
+      orientation: 'h',
+      x: 0,
+      y: 0,
+      player: 'white'
+    });
+    expect(second.accepted).toBe(false);
+    expect(second.reason).toBe('line_already_drawn');
+  });
+
+  it('grants an extra turn when completing a box', () => {
+    let state = createDotsState({ dotsX: 3, dotsY: 3 });
+    const sequence = [
+      { orientation: 'h', x: 0, y: 0, player: 'black' as const },
+      { orientation: 'h', x: 1, y: 0, player: 'white' as const },
+      { orientation: 'v', x: 0, y: 0, player: 'black' as const },
+      { orientation: 'v', x: 2, y: 0, player: 'white' as const },
+      { orientation: 'h', x: 0, y: 1, player: 'black' as const },
+      { orientation: 'h', x: 1, y: 1, player: 'white' as const },
+      { orientation: 'v', x: 0, y: 1, player: 'black' as const }
+    ];
+
+    for (const move of sequence) {
+      const next = applyDotsMove(state, move);
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    const scoringMove = applyDotsMove(state, {
+      orientation: 'v',
+      x: 1,
+      y: 0,
+      player: 'white'
+    });
+
+    expect(scoringMove.accepted).toBe(true);
+    expect(scoringMove.nextState.scores.white).toBe(2);
+    expect(scoringMove.nextState.nextPlayer).toBe('white');
+  });
+
+  it('completes a 1-box game with winner', () => {
+    let state = createDotsState({ dotsX: 2, dotsY: 2 });
+    const sequence = [
+      { orientation: 'h', x: 0, y: 0, player: 'black' as const },
+      { orientation: 'v', x: 0, y: 0, player: 'white' as const },
+      { orientation: 'h', x: 0, y: 1, player: 'black' as const },
+      { orientation: 'v', x: 1, y: 0, player: 'white' as const }
+    ];
+
+    for (const move of sequence) {
+      const next = applyDotsMove(state, move);
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    expect(state.status).toBe('completed');
+    expect(state.winner).toBe('white');
+    expect(state.scores.white).toBe(1);
   });
 });
 

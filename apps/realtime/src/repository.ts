@@ -14,7 +14,7 @@ import { pool, withTransaction } from './db.js';
 type DbExecutor = Pick<PoolClient, 'query'>;
 type RatingMap = Partial<Record<GameType, number>>;
 
-const ALL_GAME_TYPES: GameType[] = ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi'];
+const ALL_GAME_TYPES: GameType[] = ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi', 'dots'];
 const INITIAL_RATING = 1200;
 const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   single_2048: 24,
@@ -22,7 +22,8 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   xiangqi: 24,
   go: 24,
   connect4: 24,
-  reversi: 24
+  reversi: 24,
+  dots: 24
 };
 
 function toIso(value: Date | string): string {
@@ -36,7 +37,8 @@ function createDefaultRatings(): RatingMap {
     xiangqi: INITIAL_RATING,
     go: INITIAL_RATING,
     connect4: INITIAL_RATING,
-    reversi: INITIAL_RATING
+    reversi: INITIAL_RATING,
+    dots: INITIAL_RATING
   };
 }
 
@@ -488,7 +490,7 @@ export async function getRoom(roomId: string): Promise<RoomDTO | null> {
 export async function createMatchmakingRoom(
   userAId: string,
   userBId: string,
-  gameType: Extract<GameType, 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi'>
+  gameType: Extract<GameType, 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi' | 'dots'>
 ): Promise<{ room: RoomDTO; matchId: string }> {
   return withTransaction(async (client) => {
     const roomResult = await client.query<{ id: string }>(

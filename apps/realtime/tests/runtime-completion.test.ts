@@ -1,5 +1,6 @@
 import {
   createConnect4State,
+  createDotsState,
   createGoState,
   createGomokuState,
   createReversiState,
@@ -201,6 +202,44 @@ describe('deriveRuntimeCompletion', () => {
           counts: {
             black: 40,
             white: 24
+          }
+        }
+      }
+    });
+  });
+
+  it('maps dots completion to winner and payload', () => {
+    const dotsCompletion = deriveRuntimeCompletion({
+      gameType: 'dots',
+      state: {
+        ...createDotsState(),
+        status: 'completed',
+        winner: 'white',
+        moveCount: 40,
+        scores: {
+          black: 6,
+          white: 10
+        }
+      },
+      players: {
+        black: 'u9',
+        white: 'u10'
+      }
+    });
+
+    expect(dotsCompletion).toEqual({
+      winnerUserId: 'u10',
+      status: 'completed',
+      resultPayload: {
+        dots: {
+          winner: 'white',
+          status: 'completed',
+          moveCount: 40,
+          dotsX: 5,
+          dotsY: 5,
+          scores: {
+            black: 6,
+            white: 10
           }
         }
       }
