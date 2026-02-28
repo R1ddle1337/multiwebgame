@@ -2,6 +2,7 @@ import {
   createConnect4State,
   createGoState,
   createGomokuState,
+  createReversiState,
   createXiangqiState
 } from '@multiwebgame/game-engines';
 import type {
@@ -11,6 +12,8 @@ import type {
   GoState,
   GomokuMove,
   GomokuState,
+  ReversiMove,
+  ReversiState,
   RoomDTO,
   UserDTO,
   XiangqiColor,
@@ -23,6 +26,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Connect4Board } from '../components/Connect4Board';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
+import { ReversiBoard } from '../components/ReversiBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
 import { useI18n } from '../context/I18nContext';
 import { useRealtime } from '../context/RealtimeContext';
@@ -43,7 +47,7 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
 }
 
 function formatResultText(
-  state: Connect4State | GomokuState | GoState | XiangqiState,
+  state: Connect4State | GomokuState | GoState | ReversiState | XiangqiState,
   statusLabel: (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') => string,
   colorLabel: (color: 'black' | 'white' | 'red' | 'yellow') => string,
   t: (key: string, vars?: Record<string, string | number>) => string
@@ -121,6 +125,8 @@ export function RoomPage({ api, user }: Props) {
   const connect4State =
     snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
   const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
+  const reversiState =
+    snapshot?.gameType === 'reversi' ? (snapshot.state as ReversiState) : createReversiState();
   const xiangqiState =
     snapshot?.gameType === 'xiangqi' ? (snapshot.state as XiangqiState) : createXiangqiState();
 
@@ -143,6 +149,11 @@ export function RoomPage({ api, user }: Props) {
     connect4State.status === 'playing';
   const goTurn =
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
+  const reversiTurn =
+    hasActiveMatch &&
+    room?.gameType === 'reversi' &&
+    viewerRole === 'player' &&
+    reversiState.status === 'playing';
   const xiangqiTurn =
     hasActiveMatch &&
     room?.gameType === 'xiangqi' &&
@@ -160,11 +171,16 @@ export function RoomPage({ api, user }: Props) {
   const canPlayGo =
     goTurn &&
     ((seat === 1 && goState.nextPlayer === 'black') || (seat === 2 && goState.nextPlayer === 'white'));
+  const canPlayReversi =
+    reversiTurn &&
+    ((seat === 1 && reversiState.nextPlayer === 'black') ||
+      (seat === 2 && reversiState.nextPlayer === 'white'));
   const canPlayXiangqi =
     xiangqiTurn &&
     ((seat === 1 && xiangqiState.nextPlayer === 'red') ||
       (seat === 2 && xiangqiState.nextPlayer === 'black'));
-  const canPlayCurrentTurn = canPlayGomoku || canPlayConnect4 || canPlayGo || canPlayXiangqi;
+  const canPlayCurrentTurn =
+    canPlayGomoku || canPlayConnect4 || canPlayGo || canPlayReversi || canPlayXiangqi;
   const xiangqiPerspective: XiangqiColor = seat === 2 ? 'black' : 'red';
   const previousCanPlayRef = useRef(false);
 
@@ -189,6 +205,10 @@ export function RoomPage({ api, user }: Props) {
       return describeLastMove('go', snapshot.lastMove as GoMove);
     }
 
+    if (room.gameType === 'reversi') {
+      return describeLastMove('reversi', snapshot.lastMove as ReversiMove);
+    }
+
     return describeLastMove('xiangqi', snapshot.lastMove as XiangqiMove, xiangqiPerspective);
   }, [room, snapshot, xiangqiPerspective]);
 
@@ -209,6 +229,10 @@ export function RoomPage({ api, user }: Props) {
       return formatResultText(goState, statusLabel, colorLabel, t);
     }
 
+    if (room.gameType === 'reversi') {
+      return formatResultText(reversiState, statusLabel, colorLabel, t);
+    }
+
     return formatResultText(xiangqiState, statusLabel, colorLabel, t);
   }, [
     room,
@@ -216,6 +240,7 @@ export function RoomPage({ api, user }: Props) {
     gomokuState,
     connect4State,
     goState,
+    reversiState,
     xiangqiState,
     statusLabel,
     colorLabel,
@@ -350,6 +375,22 @@ export function RoomPage({ api, user }: Props) {
         roomId,
         gameType: 'go',
         move
+      }
+    });
+  };
+
+  const sendReversiMove = (x: number, y: number) => {
+    if (!canPlayReversi) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'reversi',
+        x,
+        y
       }
     });
   };
@@ -679,6 +720,37 @@ export function RoomPage({ api, user }: Props) {
                   komi: goState.scoring.komi,
                   winner: goState.scoring.winner ? colorLabel(goState.scoring.winner) : t('room.result.draw')
                 })}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'reversi' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(reversiState.nextPlayer),
+                  status: statusLabel(reversiState.status)
+                })}
+              </p>
+            ) : null}
+            <ReversiBoard
+              state={reversiState}
+              disabled={!canPlayReversi}
+              onCellClick={(x, y) => sendReversiMove(x, y)}
+            />
+            <p>
+              {t('room.reversi.counts', {
+                black: reversiState.counts.black,
+                white: reversiState.counts.white
+              })}
+            </p>
+            {reversiState.status === 'completed' || reversiState.status === 'draw' ? (
+              <p>
+                {reversiState.winner
+                  ? t('room.result.winner', { winner: colorLabel(reversiState.winner) })
+                  : t('room.result.draw')}
               </p>
             ) : null}
           </>

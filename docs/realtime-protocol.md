@@ -31,6 +31,9 @@ Message shape:
 - `room.move` (Connect Four)
   - `{ roomId: string, gameType: "connect4", column: number }`
 
+- `room.move` (Reversi)
+  - `{ roomId: string, gameType: "reversi", x: number, y: number }`
+
 - `room.move` (Go)
   - `{ roomId: string, gameType: "go", move: { type: "place", x, y, player } | { type: "pass", player } }`
 
@@ -38,7 +41,7 @@ Message shape:
   - `{ roomId: string, gameType: "xiangqi", move: { from, to, player } }`
 
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "connect4" | "go" | "xiangqi" }`
+  - `{ gameType: "gomoku" | "connect4" | "reversi" | "go" | "xiangqi" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -63,6 +66,7 @@ Message shape:
 - `room.state`
   - Gomoku: `{ room, gameType: "gomoku", state, viewerRole }`
   - Connect Four: `{ room, gameType: "connect4", state, viewerRole }`
+  - Reversi: `{ room, gameType: "reversi", state, viewerRole }`
   - Go: `{ room, gameType: "go", state, viewerRole }`
   - Xiangqi: `{ room, gameType: "xiangqi", state, viewerRole }`
   - 2048 room: `{ room, gameType: "single_2048", state: null, viewerRole }`

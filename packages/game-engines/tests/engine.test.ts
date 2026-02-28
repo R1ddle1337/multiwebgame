@@ -5,11 +5,13 @@ import {
   applyConnect4Move,
   applyGoMove,
   applyGomokuMove,
+  applyReversiMove,
   applyXiangqiMove,
   create2048State,
   createConnect4State,
   createGoState,
   createGomokuState,
+  createReversiState,
   createXiangqiState
 } from '../src/index.js';
 
@@ -288,6 +290,51 @@ describe('connect4 engine', () => {
 
     expect(state.status).toBe('draw');
     expect(state.winner).toBeNull();
+  });
+});
+
+describe('reversi engine', () => {
+  it('rejects moves that do not flip opponent discs', () => {
+    const state = createReversiState();
+    const result = applyReversiMove(state, { x: 0, y: 0, player: 'black' });
+
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('illegal_move');
+  });
+
+  it('flips captured line and advances turn', () => {
+    const state = createReversiState();
+    const result = applyReversiMove(state, { x: 2, y: 3, player: 'black' });
+
+    expect(result.accepted).toBe(true);
+    expect(result.nextState.board[3][2]).toBe('black');
+    expect(result.nextState.board[3][3]).toBe('black');
+    expect(result.nextState.nextPlayer).toBe('white');
+    expect(result.nextState.counts.black).toBe(4);
+    expect(result.nextState.counts.white).toBe(1);
+  });
+
+  it('completes game when neither side has legal moves', () => {
+    const state = createReversiState();
+    const board = Array.from({ length: 8 }, () => Array.from({ length: 8 }, () => 'black' as const));
+    board[7][6] = 'white';
+    board[7][7] = null;
+
+    const custom = {
+      ...state,
+      board,
+      nextPlayer: 'black' as const,
+      moveCount: 60,
+      counts: {
+        black: 62,
+        white: 1
+      }
+    };
+
+    const result = applyReversiMove(custom, { x: 7, y: 7, player: 'black' });
+    expect(result.accepted).toBe(true);
+    expect(result.nextState.status).toBe('completed');
+    expect(result.nextState.winner).toBe('black');
   });
 });
 

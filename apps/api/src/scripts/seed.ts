@@ -31,7 +31,7 @@ async function run(): Promise<void> {
         FROM UNNEST($2::text[]) AS game_type
         ON CONFLICT (user_id, game_type) DO NOTHING
       `,
-      [row.id, ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4']]
+      [row.id, ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi']]
     );
   }
 

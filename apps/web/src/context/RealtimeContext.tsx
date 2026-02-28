@@ -71,6 +71,7 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
   const [queueSizes, setQueueSizes] = useState<Record<BoardGameType, number>>({
     gomoku: 0,
     connect4: 0,
+    reversi: 0,
     go: 0,
     xiangqi: 0
   });

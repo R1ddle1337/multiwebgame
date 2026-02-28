@@ -1,4 +1,10 @@
-import type { Connect4State, GoState, GomokuState, XiangqiState } from '@multiwebgame/shared-types';
+import type {
+  Connect4State,
+  GoState,
+  GomokuState,
+  ReversiState,
+  XiangqiState
+} from '@multiwebgame/shared-types';
 
 export type RuntimeCompletionSnapshot =
   | {
@@ -15,6 +21,14 @@ export type RuntimeCompletionSnapshot =
       players: {
         red: string;
         yellow: string;
+      };
+    }
+  | {
+      gameType: 'reversi';
+      state: ReversiState;
+      players: {
+        black: string;
+        white: string;
       };
     }
   | {
@@ -108,6 +122,33 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           moveCount: runtime.state.moveCount,
           rows: runtime.state.rows,
           columns: runtime.state.columns
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'reversi') {
+    if (runtime.state.status !== 'completed' && runtime.state.status !== 'draw') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        reversi: {
+          winner: runtime.state.winner,
+          status: runtime.state.status,
+          moveCount: runtime.state.moveCount,
+          boardSize: runtime.state.boardSize,
+          counts: runtime.state.counts
         }
       }
     };

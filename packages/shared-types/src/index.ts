@@ -1,5 +1,5 @@
-export type GameType = 'single_2048' | 'gomoku' | 'xiangqi' | 'go' | 'connect4';
-export type BoardGameType = 'gomoku' | 'xiangqi' | 'go' | 'connect4';
+export type GameType = 'single_2048' | 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi';
+export type BoardGameType = 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi';
 
 export interface UserDTO {
   id: string;
@@ -166,6 +166,27 @@ export interface Connect4State {
   moveCount: number;
 }
 
+export type ReversiDisc = 'black' | 'white';
+
+export interface ReversiMove {
+  x: number;
+  y: number;
+  player: ReversiDisc;
+}
+
+export interface ReversiState {
+  boardSize: number;
+  board: (ReversiDisc | null)[][];
+  nextPlayer: ReversiDisc;
+  winner: ReversiDisc | null;
+  status: 'playing' | 'draw' | 'completed';
+  moveCount: number;
+  counts: {
+    black: number;
+    white: number;
+  };
+}
+
 export type GoStone = 'black' | 'white';
 export type GoRuleset = 'chinese';
 
@@ -296,6 +317,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'reversi';
+      state: ReversiState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'go';
       state: GoState | null;
       viewerRole: RoomPlayerRole;
@@ -328,6 +355,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'reversi';
+      state: ReversiState;
+      lastMove: ReversiMove;
+    }
+  | {
+      roomId: string;
       gameType: 'go';
       state: GoState;
       lastMove: GoMove;
@@ -346,6 +379,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.unsubscribe', { roomId: string }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'reversi'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'go'; move: GoMove }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }>
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>

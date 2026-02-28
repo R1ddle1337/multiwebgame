@@ -236,6 +236,17 @@ h3 {
   margin-inline: auto;
 }
 
+.reversi-grid {
+  display: grid;
+  gap: 2px;
+  background: #2e7440;
+  border: 2px solid #245d33;
+  border-radius: 12px;
+  padding: 4px;
+  max-width: min(100%, 560px);
+  margin-inline: auto;
+}
+
 .connect4-grid {
   display: grid;
   gap: 6px;
@@ -253,6 +264,15 @@ h3 {
   border: none;
   border-radius: 0;
   background: #f2dca9;
+  padding: 0;
+}
+
+.reversi-cell {
+  aspect-ratio: 1;
+  min-width: 24px;
+  border: none;
+  border-radius: 4px;
+  background: #3b8f50;
   padding: 0;
 }
 
@@ -379,6 +399,7 @@ h3 {
 
 .gomoku-cell,
 .go-cell,
+.reversi-cell,
 .xiangqi-cell,
 .connect4-cell {
   transition:
@@ -388,6 +409,7 @@ h3 {
 
 .gomoku-cell:active,
 .go-cell:active,
+.reversi-cell:active,
 .xiangqi-cell:active,
 .connect4-cell:active {
   transform: scale(0.96);
@@ -658,6 +680,7 @@ button.xiangqi-move-chip:hover {
 
   .gomoku-grid,
   .go-grid,
+  .reversi-grid,
   .connect4-grid,
   .xiangqi-board {
     max-width: 100%;

@@ -2,6 +2,7 @@ import type {
   Connect4Move,
   GoMove,
   GomokuMove,
+  ReversiMove,
   XiangqiMove,
   XiangqiPosition
 } from '@multiwebgame/shared-types';
@@ -72,13 +73,18 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'reversi',
+  move: ReversiMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'xiangqi',
   move: XiangqiMove,
   xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
-  gameType: 'gomoku' | 'connect4' | 'go' | 'xiangqi',
-  move: GomokuMove | Connect4Move | GoMove | XiangqiMove,
+  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'xiangqi',
+  move: GomokuMove | Connect4Move | GoMove | ReversiMove | XiangqiMove,
   xiangqiPerspective: XiangqiPerspective = 'red'
 ): LastMoveSummary {
   if (gameType === 'gomoku') {
@@ -117,6 +123,17 @@ export function describeLastMove(
       action: {
         kind: 'place',
         point: formatBoardPoint(goMove.x, goMove.y)
+      }
+    };
+  }
+
+  if (gameType === 'reversi') {
+    const reversiMove = move as ReversiMove;
+    return {
+      actor: reversiMove.player,
+      action: {
+        kind: 'place',
+        point: formatBoardPoint(reversiMove.x, reversiMove.y)
       }
     };
   }

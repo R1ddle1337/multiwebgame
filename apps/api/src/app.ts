@@ -27,7 +27,7 @@ const loginSchema = z.object({
 });
 
 const createRoomSchema = z.object({
-  gameType: z.enum(['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4']),
+  gameType: z.enum(['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi']),
   maxPlayers: z.number().int().min(1).max(8).optional()
 });
 

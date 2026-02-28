@@ -6,6 +6,7 @@
 - `packages/game-engines`: Pure game engines with production adjudication logic for:
   - 2048
   - Connect Four (7x6 gravity-drop, four-in-a-row adjudication)
+  - Reversi (8x8 directional flips with forced-pass handling)
   - Gomoku (`freestyle` + restricted Renju policy support)
   - Go (capture/ko/suicide + Chinese area scoring + komi)
   - Xiangqi (full movement, check safety, mate/stalemate, repetition policy)

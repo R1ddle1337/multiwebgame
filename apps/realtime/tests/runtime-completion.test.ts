@@ -2,6 +2,7 @@ import {
   createConnect4State,
   createGoState,
   createGomokuState,
+  createReversiState,
   createXiangqiState
 } from '@multiwebgame/game-engines';
 import { describe, expect, it } from 'vitest';
@@ -164,6 +165,43 @@ describe('deriveRuntimeCompletion', () => {
           moveCount: 23,
           rows: 6,
           columns: 7
+        }
+      }
+    });
+  });
+
+  it('maps reversi completion to winner and payload', () => {
+    const reversiCompletion = deriveRuntimeCompletion({
+      gameType: 'reversi',
+      state: {
+        ...createReversiState(),
+        status: 'completed',
+        winner: 'black',
+        moveCount: 60,
+        counts: {
+          black: 40,
+          white: 24
+        }
+      },
+      players: {
+        black: 'u7',
+        white: 'u8'
+      }
+    });
+
+    expect(reversiCompletion).toEqual({
+      winnerUserId: 'u7',
+      status: 'completed',
+      resultPayload: {
+        reversi: {
+          winner: 'black',
+          status: 'completed',
+          moveCount: 60,
+          boardSize: 8,
+          counts: {
+            black: 40,
+            white: 24
+          }
         }
       }
     });

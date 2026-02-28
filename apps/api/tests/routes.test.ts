@@ -62,7 +62,8 @@ class InMemoryStore implements Store {
       gomoku: 1200,
       xiangqi: 1200,
       go: 1200,
-      connect4: 1200
+      connect4: 1200,
+      reversi: 1200
     };
   }
 
@@ -162,7 +163,7 @@ class InMemoryStore implements Store {
   }
 
   async listRatingFormulas(): Promise<RatingFormulaDTO[]> {
-    return (['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4'] as const).map((gameType) => ({
+    return (['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi'] as const).map((gameType) => ({
       gameType,
       system: 'elo',
       initialRating: 1200,
@@ -972,7 +973,7 @@ describe('critical API routes', () => {
 
     const response = await request(app).get('/ratings/formula').expect(200);
 
-    expect(response.body.formulas).toHaveLength(5);
+    expect(response.body.formulas).toHaveLength(6);
     expect(response.body.formulas[0].system).toBe('elo');
   });
 

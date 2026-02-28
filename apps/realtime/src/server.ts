@@ -2,10 +2,12 @@ import {
   applyConnect4Move,
   applyGoMove,
   applyGomokuMove,
+  applyReversiMove,
   applyXiangqiMove,
   createConnect4State,
   createGoState,
   createGomokuState,
+  createReversiState,
   createXiangqiState,
   formatXiangqiMoveNotation
 } from '@multiwebgame/game-engines';
@@ -18,6 +20,8 @@ import type {
   GoState,
   GomokuMark,
   GomokuState,
+  ReversiMove,
+  ReversiState,
   RoomDTO,
   RoomPlayerRole,
   ServerToClientMessage,
@@ -102,6 +106,17 @@ interface GoRuntime {
   };
 }
 
+interface ReversiRuntime {
+  gameType: 'reversi';
+  roomId: string;
+  matchId: string;
+  state: ReversiState;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
 interface XiangqiRuntime {
   gameType: 'xiangqi';
   roomId: string;
@@ -113,7 +128,7 @@ interface XiangqiRuntime {
   };
 }
 
-type ActiveRuntime = GomokuRuntime | Connect4Runtime | GoRuntime | XiangqiRuntime;
+type ActiveRuntime = GomokuRuntime | Connect4Runtime | GoRuntime | ReversiRuntime | XiangqiRuntime;
 
 const authSchema = z.object({
   type: z.literal('auth'),
@@ -160,6 +175,15 @@ const roomMoveSchema = z.union([
     type: z.literal('room.move'),
     payload: z.object({
       roomId: z.string().uuid(),
+      gameType: z.literal('reversi'),
+      x: z.number().int().min(0),
+      y: z.number().int().min(0)
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
       gameType: z.literal('go'),
       move: z.discriminatedUnion('type', [
         z.object({
@@ -199,7 +223,7 @@ const inviteRespondSchema = z.object({
 
 const matchmakingJoinSchema = z.object({
   type: z.literal('matchmaking.join'),
-  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4']) })
+  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi']) })
 });
 
 const pingSchema = z.object({
@@ -227,7 +251,11 @@ const ROOM_INACTIVE_TIMEOUT_MS = 90_000;
 const pendingInactiveRoomLeaves = new Map<string, Map<string, ReturnType<typeof setTimeout>>>();
 
 function playerSlotsForGame(gameType: BoardGameType): number {
-  return gameType === 'gomoku' || gameType === 'go' || gameType === 'xiangqi' || gameType === 'connect4'
+  return gameType === 'gomoku' ||
+    gameType === 'go' ||
+    gameType === 'xiangqi' ||
+    gameType === 'connect4' ||
+    gameType === 'reversi'
     ? 2
     : 2;
 }
@@ -359,7 +387,7 @@ function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
 }
 
 function runtimePlayers(runtime: ActiveRuntime): [string, string] {
-  if (runtime.gameType === 'gomoku' || runtime.gameType === 'go') {
+  if (runtime.gameType === 'gomoku' || runtime.gameType === 'go' || runtime.gameType === 'reversi') {
     return [runtime.players.black, runtime.players.white];
   }
 
@@ -551,6 +579,19 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'reversi') {
+    return {
+      gameType: 'reversi',
+      roomId: room.id,
+      matchId,
+      state: createReversiState(),
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'connect4') {
     return {
       gameType: 'connect4',
@@ -620,6 +661,30 @@ function replayMoves(
       const player = payload.player ?? current.state.nextPlayer;
       const applied = applyConnect4Move(current.state, {
         column: payload.column,
+        player
+      });
+
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'reversi') {
+      const payload = move.payload as { x?: number; y?: number; player?: ReversiMove['player'] };
+      if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
+        continue;
+      }
+
+      const player = payload.player ?? current.state.nextPlayer;
+      const applied = applyReversiMove(current.state, {
+        x: payload.x,
+        y: payload.y,
         player
       });
 
@@ -800,6 +865,19 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
         room,
         gameType: 'go',
         state: runtime?.gameType === 'go' ? runtime.state : createGoState(9),
+        viewerRole
+      }
+    });
+    return;
+  }
+
+  if (room.gameType === 'reversi') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'reversi',
+        state: runtime?.gameType === 'reversi' ? runtime.state : createReversiState(),
         viewerRole
       }
     });
@@ -995,6 +1073,65 @@ async function handleConnect4Move(
   await finishMatchIfCompleted(runtime, targets);
 }
 
+async function handleReversiMove(
+  client: ClientContext,
+  runtime: ReversiRuntime,
+  x: number,
+  y: number
+): Promise<void> {
+  const userId = client.user!.id;
+  const playerDisc: ReversiMove['player'] | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!playerDisc) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const applied = applyReversiMove(runtime.state, {
+    x,
+    y,
+    player: playerDisc
+  });
+
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'reversi.place_disc',
+    payload: {
+      x,
+      y,
+      player: playerDisc
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'reversi',
+      state: runtime.state,
+      lastMove: {
+        x,
+        y,
+        player: playerDisc
+      }
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
 async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoMove): Promise<void> {
   const userId = client.user!.id;
   const playerStone =
@@ -1115,6 +1252,7 @@ async function handleMove(
   message:
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'connect4'; column: number }
+    | { roomId: string; gameType: 'reversi'; x: number; y: number }
     | { roomId: string; gameType: 'go'; move: GoMove }
     | { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }
 ): Promise<void> {
@@ -1146,6 +1284,11 @@ async function handleMove(
 
   if (message.gameType === 'connect4' && runtime.gameType === 'connect4') {
     await handleConnect4Move(client, runtime, message.column);
+    return;
+  }
+
+  if (message.gameType === 'reversi' && runtime.gameType === 'reversi') {
+    await handleReversiMove(client, runtime, message.x, message.y);
     return;
   }
 
@@ -1371,6 +1514,16 @@ wss.on('connection', (socket) => {
             roomId: msg.payload.roomId,
             gameType: 'connect4',
             column: msg.payload.column
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'reversi') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'reversi',
+            x: msg.payload.x,
+            y: msg.payload.y
           });
           return;
         }
