@@ -89,8 +89,8 @@ Auth uses `Authorization: Bearer <jwt>`.
   - Auth required
   - Accepts a shareable invite token and joins the room.
   - Auto-role behavior:
-    - Board games (`gomoku`/`go`/`xiangqi`) try player first when seats are available.
-    - If player seats are not available, join falls back to spectator.
+    - Try player first when seats are available.
+    - If player seats are full, join falls back to spectator.
   - Returns: `{ room, role }`
   - Invalid/expired link response: `400 { error: "invite_invalid" }`
   - Invalidation policy:

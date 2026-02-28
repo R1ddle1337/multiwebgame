@@ -360,10 +360,7 @@ class InMemoryStore implements Store {
 
     const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
     const activePlayers = room.players.filter((player) => player.role === 'player').length;
-    const joinAsSpectator =
-      room.gameType === 'gomoku' || room.gameType === 'go' || room.gameType === 'xiangqi'
-        ? activePlayers >= playerSlots
-        : true;
+    const joinAsSpectator = activePlayers >= playerSlots;
 
     const joined = await this.joinRoom(room.id, params.userId, joinAsSpectator);
     const role = joined.players.find((player) => player.userId === params.userId)?.role ?? 'spectator';
@@ -621,6 +618,47 @@ describe('critical API routes', () => {
       .send({})
       .expect(200);
     expect(acceptedSpectator.body.role).toBe('spectator');
+  });
+
+  it('defaults invite-link join to player when seats are available', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const watcher = await request(app).post('/auth/guest').send({ displayName: 'Watcher' }).expect(201);
+    const invited = await request(app).post('/auth/guest').send({ displayName: 'Invited' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'single_2048', maxPlayers: 4 })
+      .expect(201);
+
+    const invite = await request(app)
+      .post(`/rooms/${room.body.room.id}/invite-link`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${watcher.body.token}`)
+      .send({ asSpectator: true })
+      .expect(200);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/leave`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    const accepted = await request(app)
+      .post(`/invite-links/${invite.body.token}/accept`)
+      .set('Authorization', `Bearer ${invited.body.token}`)
+      .send({})
+      .expect(200);
+
+    expect(accepted.body.role).toBe('player');
   });
 
   it('rejects invite-link creation for non-host users', async () => {

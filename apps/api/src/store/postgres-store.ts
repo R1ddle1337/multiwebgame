@@ -1087,19 +1087,16 @@ export function createPostgresStore(): Store {
           }
         }
 
-        let joinAsSpectator = true;
-        if (room.game_type === 'gomoku' || room.game_type === 'go' || room.game_type === 'xiangqi') {
-          const playersResult = await client.query<{ player_count: number }>(
-            `
-              SELECT COUNT(*)::int AS player_count
-              FROM room_players
-              WHERE room_id = $1 AND left_at IS NULL AND role = 'player'
-            `,
-            [room.id]
-          );
-          const playerCount = playersResult.rows[0]?.player_count ?? 0;
-          joinAsSpectator = playerCount >= playerSlotsForGame(room.game_type);
-        }
+        const playersResult = await client.query<{ player_count: number }>(
+          `
+            SELECT COUNT(*)::int AS player_count
+            FROM room_players
+            WHERE room_id = $1 AND left_at IS NULL AND role = 'player'
+          `,
+          [room.id]
+        );
+        const playerCount = playersResult.rows[0]?.player_count ?? 0;
+        const joinAsSpectator = playerCount >= playerSlotsForGame(room.game_type);
 
         const joinedRoom = await joinRoomTx(client, room.id, params.userId, joinAsSpectator);
         const role =
