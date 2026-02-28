@@ -16,6 +16,7 @@ import type {
   GoState,
   GomokuMark,
   GomokuState,
+  XiangqiColor,
   XiangqiMove,
   XiangqiState
 } from '@multiwebgame/shared-types';
@@ -31,6 +32,7 @@ import type { ApiClient } from '../lib/api';
 
 interface Props {
   api: ApiClient;
+  viewerUserId?: string;
 }
 
 function randomFromSequence(values: number[]): () => number {
@@ -103,7 +105,7 @@ function notationFromPayload(payload: XiangqiReplayPayload): string | null {
   return null;
 }
 
-export function ReplayPage({ api }: Props) {
+export function ReplayPage({ api, viewerUserId }: Props) {
   const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
   const [gameType, setGameType] = useState<'gomoku' | 'go' | 'xiangqi' | 'single_2048'>('gomoku');
@@ -111,6 +113,7 @@ export function ReplayPage({ api }: Props) {
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
   const [xiangqiStates, setXiangqiStates] = useState<XiangqiState[]>([createXiangqiState()]);
   const [xiangqiMoveLog, setXiangqiMoveLog] = useState<XiangqiReplayMoveLogEntry[]>([]);
+  const [xiangqiPerspective, setXiangqiPerspective] = useState<XiangqiColor>('red');
   const [game2048States, setGame2048States] = useState<Game2048State[]>([create2048State(() => 0)]);
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -159,6 +162,7 @@ export function ReplayPage({ api }: Props) {
 
           setGomokuStates(snapshots);
           setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
           return;
         }
@@ -184,6 +188,7 @@ export function ReplayPage({ api }: Props) {
 
           setGoStates(snapshots);
           setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
           return;
         }
@@ -220,8 +225,16 @@ export function ReplayPage({ api }: Props) {
             });
           }
 
+          const firstActorUserId = result.match.moves[0]?.actorUserId;
+          const viewerParticipated =
+            typeof viewerUserId === 'string' &&
+            result.match.moves.some((move) => move.actorUserId === viewerUserId);
+          const resolvedPerspective: XiangqiColor =
+            viewerParticipated && firstActorUserId && firstActorUserId !== viewerUserId ? 'black' : 'red';
+
           setXiangqiStates(snapshots);
           setXiangqiMoveLog(replayMoveLog);
+          setXiangqiPerspective(resolvedPerspective);
           setStep(snapshots.length - 1);
           return;
         }
@@ -261,6 +274,7 @@ export function ReplayPage({ api }: Props) {
 
         setGame2048States(snapshots);
         setXiangqiMoveLog([]);
+        setXiangqiPerspective('red');
         setStep(snapshots.length - 1);
       })
       .catch((err) => {
@@ -277,7 +291,7 @@ export function ReplayPage({ api }: Props) {
     return () => {
       active = false;
     };
-  }, [api, matchId, t, translateError]);
+  }, [api, matchId, t, translateError, viewerUserId]);
 
   const maxStep = useMemo(() => {
     if (gameType === 'gomoku') {
@@ -382,6 +396,7 @@ export function ReplayPage({ api }: Props) {
             entries={xiangqiMoveLog}
             currentPly={clampedStep}
             onSelectPly={(ply) => setStep(ply)}
+            perspective={xiangqiPerspective}
             labels={{
               title: t('replay.moves.title'),
               round: t('replay.moves.round'),

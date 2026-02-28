@@ -2,6 +2,7 @@ import type {
   BoardGameType,
   ClientToServerMessage,
   InvitationDTO,
+  MatchMoveAppliedPayload,
   RoomDTO,
   RoomPlayerRole,
   RoomStatePayload,
@@ -20,6 +21,7 @@ interface RoomSnapshot {
   gameType: RoomStatePayload['gameType'];
   state: RoomStatePayload['state'];
   viewerRole: RoomPlayerRole;
+  lastMove: MatchMoveAppliedPayload['lastMove'] | null;
 }
 
 interface RealtimeValue {
@@ -246,7 +248,11 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
                 room: message.payload.room,
                 gameType: message.payload.gameType,
                 state: message.payload.state,
-                viewerRole: message.payload.viewerRole
+                viewerRole: message.payload.viewerRole,
+                lastMove:
+                  current[message.payload.room.id]?.gameType === message.payload.gameType
+                    ? (current[message.payload.room.id]?.lastMove ?? null)
+                    : null
               }
             }));
             break;
@@ -263,7 +269,8 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
                 [message.payload.roomId]: {
                   ...existing,
                   state: message.payload.state,
-                  gameType: message.payload.gameType
+                  gameType: message.payload.gameType,
+                  lastMove: message.payload.lastMove
                 }
               };
             });

@@ -27,6 +27,7 @@ interface Props {
   currentPly: number;
   labels: XiangqiMoveListLabels;
   onSelectPly?: (ply: number) => void;
+  perspective?: XiangqiColor;
 }
 
 function toRounds(entries: XiangqiReplayMoveLogEntry[]): XiangqiMoveRound[] {
@@ -90,8 +91,14 @@ function MoveCell({
   );
 }
 
-export function XiangqiMoveList({ entries, currentPly, labels, onSelectPly }: Props) {
+export function XiangqiMoveList({ entries, currentPly, labels, onSelectPly, perspective = 'red' }: Props) {
   const rounds = useMemo(() => toRounds(entries), [entries]);
+  const firstColumnPlayer = perspective === 'black' ? 'black' : 'red';
+  const secondColumnPlayer = perspective === 'black' ? 'red' : 'black';
+  const firstColumnLabel = firstColumnPlayer === 'red' ? labels.red : labels.black;
+  const secondColumnLabel = secondColumnPlayer === 'red' ? labels.red : labels.black;
+  const pickRoundEntry = (round: XiangqiMoveRound, player: XiangqiColor) =>
+    player === 'red' ? round.red : round.black;
 
   return (
     <section className="xiangqi-move-log">
@@ -100,8 +107,8 @@ export function XiangqiMoveList({ entries, currentPly, labels, onSelectPly }: Pr
         <thead>
           <tr>
             <th>{labels.round}</th>
-            <th>{labels.red}</th>
-            <th>{labels.black}</th>
+            <th>{firstColumnLabel}</th>
+            <th>{secondColumnLabel}</th>
           </tr>
         </thead>
         <tbody>
@@ -110,7 +117,7 @@ export function XiangqiMoveList({ entries, currentPly, labels, onSelectPly }: Pr
               <td className="round-number">{round.round}</td>
               <td>
                 <MoveCell
-                  entry={round.red}
+                  entry={pickRoundEntry(round, firstColumnPlayer)}
                   currentPly={currentPly}
                   onSelectPly={onSelectPly}
                   emptyLabel={labels.empty}
@@ -118,7 +125,7 @@ export function XiangqiMoveList({ entries, currentPly, labels, onSelectPly }: Pr
               </td>
               <td>
                 <MoveCell
-                  entry={round.black}
+                  entry={pickRoundEntry(round, secondColumnPlayer)}
                   currentPly={currentPly}
                   onSelectPly={onSelectPly}
                   emptyLabel={labels.empty}

@@ -2,13 +2,15 @@ import { createGoState, createGomokuState, createXiangqiState } from '@multiwebg
 import type {
   GoMove,
   GoState,
+  GomokuMove,
   GomokuState,
   RoomDTO,
   UserDTO,
+  XiangqiColor,
   XiangqiMove,
   XiangqiState
 } from '@multiwebgame/shared-types';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import { GoBoard } from '../components/GoBoard';
@@ -17,6 +19,7 @@ import { XiangqiBoard } from '../components/XiangqiBoard';
 import { useI18n } from '../context/I18nContext';
 import { useRealtime } from '../context/RealtimeContext';
 import type { ApiClient } from '../lib/api';
+import { describeLastMove, didTurnSwitchToCurrent, type LastMoveSummary } from '../lib/roomUx';
 
 interface Props {
   api: ApiClient;
@@ -29,6 +32,45 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
   }
 
   return room.players.find((player) => player.userId === userId)?.seat ?? null;
+}
+
+function formatResultText(
+  state: GomokuState | GoState | XiangqiState,
+  statusLabel: (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') => string,
+  colorLabel: (color: 'black' | 'white' | 'red') => string,
+  t: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  if (state.status === 'playing') {
+    return statusLabel('playing');
+  }
+
+  if (state.status === 'draw') {
+    return t('room.result.draw');
+  }
+
+  if (state.winner) {
+    return t('room.result.winner', { winner: colorLabel(state.winner) });
+  }
+
+  return t('room.result.draw');
+}
+
+function formatActionText(
+  summary: LastMoveSummary,
+  t: (key: string, vars?: Record<string, string | number>) => string
+): string {
+  if (summary.action.kind === 'pass') {
+    return t('room.last_move.action.pass');
+  }
+
+  if (summary.action.kind === 'place') {
+    return t('room.last_move.action.place', { point: summary.action.point });
+  }
+
+  return t('room.last_move.action.move', {
+    from: summary.action.from,
+    to: summary.action.to
+  });
 }
 
 export function RoomPage({ api, user }: Props) {
@@ -47,9 +89,11 @@ export function RoomPage({ api, user }: Props) {
 
   const gameLabel = (gameType: RoomDTO['gameType']) => t(`enum.game.${gameType}`);
   const roleLabel = (role: 'player' | 'spectator') => t(`enum.role.${role}`);
-  const statusLabel = (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') =>
-    t(`enum.status.${status}`);
-  const colorLabel = (color: 'black' | 'white' | 'red') => t(`enum.color.${color}`);
+  const statusLabel = useCallback(
+    (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') => t(`enum.status.${status}`),
+    [t]
+  );
+  const colorLabel = useCallback((color: 'black' | 'white' | 'red') => t(`enum.color.${color}`), [t]);
 
   const watchMode = useMemo(
     () => new URLSearchParams(location.search).get('watch') === '1',
@@ -86,6 +130,74 @@ export function RoomPage({ api, user }: Props) {
     xiangqiTurn &&
     ((seat === 1 && xiangqiState.nextPlayer === 'red') ||
       (seat === 2 && xiangqiState.nextPlayer === 'black'));
+  const canPlayCurrentTurn = canPlayGomoku || canPlayGo || canPlayXiangqi;
+  const xiangqiPerspective: XiangqiColor = seat === 2 ? 'black' : 'red';
+  const previousCanPlayRef = useRef(false);
+
+  const latestMoveSummary = useMemo<LastMoveSummary | null>(() => {
+    if (!room || room.gameType === 'single_2048') {
+      return null;
+    }
+
+    if (!snapshot?.lastMove || snapshot.gameType !== room.gameType) {
+      return null;
+    }
+
+    if (room.gameType === 'gomoku') {
+      return describeLastMove('gomoku', snapshot.lastMove as GomokuMove);
+    }
+
+    if (room.gameType === 'go') {
+      return describeLastMove('go', snapshot.lastMove as GoMove);
+    }
+
+    return describeLastMove('xiangqi', snapshot.lastMove as XiangqiMove, xiangqiPerspective);
+  }, [room, snapshot, xiangqiPerspective]);
+
+  const latestMoveResult = useMemo(() => {
+    if (!room || room.gameType === 'single_2048' || !latestMoveSummary) {
+      return null;
+    }
+
+    if (room.gameType === 'gomoku') {
+      return formatResultText(gomokuState, statusLabel, colorLabel, t);
+    }
+
+    if (room.gameType === 'go') {
+      return formatResultText(goState, statusLabel, colorLabel, t);
+    }
+
+    return formatResultText(xiangqiState, statusLabel, colorLabel, t);
+  }, [room, latestMoveSummary, gomokuState, goState, xiangqiState, statusLabel, colorLabel, t]);
+
+  useEffect(() => {
+    const justBecameCurrentTurn = didTurnSwitchToCurrent(previousCanPlayRef.current, canPlayCurrentTurn);
+    previousCanPlayRef.current = canPlayCurrentTurn;
+
+    if (!justBecameCurrentTurn) {
+      return;
+    }
+
+    if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+      return;
+    }
+
+    if (document.visibilityState !== 'hidden' || Notification.permission !== 'granted') {
+      return;
+    }
+
+    const notice = new Notification(t('room.turn_alert.notification_title'), {
+      body: t('room.turn_alert.notification_body')
+    });
+    const timer = window.setTimeout(() => {
+      notice.close();
+    }, 4_000);
+
+    return () => {
+      window.clearTimeout(timer);
+      notice.close();
+    };
+  }, [canPlayCurrentTurn, t]);
 
   useEffect(() => {
     if (!roomId) {
@@ -307,6 +419,52 @@ export function RoomPage({ api, user }: Props) {
 
       <section className="panel">
         <h2>{t('room.game.title')}</h2>
+
+        {room.gameType !== 'single_2048' && viewerRole === 'player' ? (
+          <div
+            className={`room-turn-reminder ${canPlayCurrentTurn ? 'active' : ''}`}
+            role="status"
+            aria-live="polite"
+          >
+            <strong>
+              {canPlayCurrentTurn ? t('room.turn_alert.your_turn') : t('room.turn_alert.waiting')}
+            </strong>
+            <span>
+              {canPlayCurrentTurn ? t('room.turn_alert.your_turn_hint') : t('room.turn_alert.waiting_hint')}
+            </span>
+          </div>
+        ) : null}
+
+        {room.gameType !== 'single_2048' ? (
+          <section className="room-last-move" aria-live="polite">
+            <h3>{t('room.last_move.title')}</h3>
+            {latestMoveSummary ? (
+              <>
+                <div className="room-last-move-grid">
+                  <p className="room-last-move-item">
+                    <span className="room-last-move-label">{t('room.last_move.player')}</span>
+                    <strong className="room-last-move-value">{colorLabel(latestMoveSummary.actor)}</strong>
+                  </p>
+                  <p className="room-last-move-item">
+                    <span className="room-last-move-label">{t('room.last_move.action')}</span>
+                    <strong className="room-last-move-value">{formatActionText(latestMoveSummary, t)}</strong>
+                  </p>
+                  <p className="room-last-move-item">
+                    <span className="room-last-move-label">{t('room.last_move.result')}</span>
+                    <strong className="room-last-move-value">
+                      {latestMoveResult ?? t('room.last_move.empty')}
+                    </strong>
+                  </p>
+                </div>
+                {room.gameType === 'xiangqi' && xiangqiPerspective === 'black' ? (
+                  <p className="room-last-move-note">{t('room.last_move.black_perspective')}</p>
+                ) : null}
+              </>
+            ) : (
+              <p className="room-last-move-empty">{t('room.last_move.empty')}</p>
+            )}
+          </section>
+        ) : null}
 
         {room.gameType === 'single_2048' ? (
           <p>

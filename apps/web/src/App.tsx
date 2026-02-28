@@ -308,7 +308,7 @@ function Shell({
         <Route path="/rooms/:roomId" element={<RoomPage api={api} user={user} />} />
         <Route path="/training" element={<TrainingPage />} />
         <Route path="/game/2048" element={<Game2048Page />} />
-        <Route path="/matches/:matchId/replay" element={<ReplayPage api={api} />} />
+        <Route path="/matches/:matchId/replay" element={<ReplayPage api={api} viewerUserId={user.id} />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
