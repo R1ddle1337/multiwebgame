@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
   apply2048Move,
+  applyBackgammonMove,
   applyConnect4Move,
   applyDotsMove,
   applyGoMove,
   applyGomokuMove,
   applyReversiMove,
   applyXiangqiMove,
+  assignBackgammonTurnDice,
   createDeterministicPrng,
   create2048State,
+  createBackgammonState,
   createConnect4State,
   createDotsState,
   createGoState,
@@ -411,6 +414,110 @@ describe('dots and boxes engine', () => {
     expect(state.status).toBe('completed');
     expect(state.winner).toBe('white');
     expect(state.scores.white).toBe(1);
+  });
+});
+
+describe('backgammon engine', () => {
+  it('requires re-entering from bar before moving other checkers', () => {
+    const started = assignBackgammonTurnDice(createBackgammonState(), [3, 1]);
+    const state = {
+      ...started,
+      bar: {
+        ...started.bar,
+        white: 1
+      }
+    };
+
+    const blocked = applyBackgammonMove(state, {
+      from: 5,
+      to: 4,
+      die: 1,
+      player: 'white'
+    });
+
+    expect(blocked.accepted).toBe(false);
+    expect(blocked.reason).toBe('must_enter_from_bar');
+
+    const enter = applyBackgammonMove(state, {
+      from: 'bar',
+      to: 23,
+      die: 1,
+      player: 'white'
+    });
+    expect(enter.accepted).toBe(true);
+    expect(enter.nextState.bar.white).toBe(0);
+    expect(enter.nextState.points[23]).toBe(3);
+  });
+
+  it('hits a blot and sends it to the bar', () => {
+    const base = assignBackgammonTurnDice(createBackgammonState(), [1, 4]);
+    const custom = {
+      ...base,
+      points: Array.from({ length: 24 }, () => 0)
+    };
+    custom.points[10] = 1;
+    custom.points[9] = -1;
+
+    const move = applyBackgammonMove(custom, {
+      from: 10,
+      to: 9,
+      die: 1,
+      player: 'white'
+    });
+
+    expect(move.accepted).toBe(true);
+    expect(move.nextState.points[9]).toBe(1);
+    expect(move.nextState.bar.black).toBe(1);
+  });
+
+  it('switches turn when no legal dice remain', () => {
+    const base = assignBackgammonTurnDice(createBackgammonState(), [6, 6]);
+    const custom = {
+      ...base,
+      points: Array.from({ length: 24 }, () => 0),
+      nextPlayer: 'white' as const
+    };
+    custom.points[23] = 1;
+    custom.points[11] = -2;
+
+    const first = applyBackgammonMove(custom, {
+      from: 23,
+      to: 17,
+      die: 6,
+      player: 'white'
+    });
+
+    expect(first.accepted).toBe(true);
+    expect(first.turnEnded).toBe(true);
+    expect(first.nextState.nextPlayer).toBe('black');
+    expect(first.nextState.remainingDice).toEqual([]);
+    expect(first.nextState.dice).toBeNull();
+  });
+
+  it('completes the game when all checkers are borne off', () => {
+    const base = assignBackgammonTurnDice(createBackgammonState(), [1, 3]);
+    const custom = {
+      ...base,
+      points: Array.from({ length: 24 }, () => 0),
+      borneOff: {
+        white: 14,
+        black: 0
+      },
+      nextPlayer: 'white' as const
+    };
+    custom.points[0] = 1;
+
+    const win = applyBackgammonMove(custom, {
+      from: 0,
+      to: 'off',
+      die: 1,
+      player: 'white'
+    });
+
+    expect(win.accepted).toBe(true);
+    expect(win.nextState.status).toBe('completed');
+    expect(win.nextState.winner).toBe('white');
+    expect(win.nextState.borneOff.white).toBe(15);
   });
 });
 

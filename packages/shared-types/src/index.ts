@@ -1,5 +1,13 @@
-export type GameType = 'single_2048' | 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi' | 'dots';
-export type BoardGameType = 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi' | 'dots';
+export type GameType =
+  | 'single_2048'
+  | 'gomoku'
+  | 'xiangqi'
+  | 'go'
+  | 'connect4'
+  | 'reversi'
+  | 'dots'
+  | 'backgammon';
+export type BoardGameType = 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi' | 'dots' | 'backgammon';
 
 export interface UserDTO {
   id: string;
@@ -315,6 +323,37 @@ export interface XiangqiState {
   positionHistory: string[];
 }
 
+export type BackgammonColor = 'white' | 'black';
+export type BackgammonFrom = number | 'bar';
+export type BackgammonTo = number | 'off';
+
+export interface BackgammonMove {
+  from: BackgammonFrom;
+  to: BackgammonTo;
+  die: number;
+  player: BackgammonColor;
+}
+
+export interface BackgammonState {
+  points: number[];
+  bar: {
+    white: number;
+    black: number;
+  };
+  borneOff: {
+    white: number;
+    black: number;
+  };
+  nextPlayer: BackgammonColor;
+  status: 'playing' | 'completed';
+  winner: BackgammonColor | null;
+  moveCount: number;
+  turnCount: number;
+  rollCount: number;
+  dice: [number, number] | null;
+  remainingDice: number[];
+}
+
 export type Direction2048 = 'up' | 'down' | 'left' | 'right';
 
 export interface Game2048State {
@@ -379,6 +418,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'backgammon';
+      state: BackgammonState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'single_2048';
       state: null;
       viewerRole: RoomPlayerRole;
@@ -420,6 +465,12 @@ export type MatchMoveAppliedPayload =
       gameType: 'xiangqi';
       state: XiangqiState;
       lastMove: XiangqiMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'backgammon';
+      state: BackgammonState;
+      lastMove: BackgammonMove;
     };
 
 export type ClientToServerMessage =
@@ -438,6 +489,10 @@ export type ClientToServerMessage =
     >
   | WsEnvelope<'room.move', { roomId: string; gameType: 'go'; move: GoMove }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }>
+  | WsEnvelope<
+      'room.move',
+      { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
+    >
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.leave', Record<string, never>>
   | WsEnvelope<'invite.respond', { invitationId: string; action: 'accept' | 'decline' }>

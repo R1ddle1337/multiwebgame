@@ -13,11 +13,21 @@ import type {
   UserDTO
 } from '@multiwebgame/shared-types';
 import { randomUUID } from 'crypto';
+import net from 'node:net';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
 import { StoreError, type Store } from '../src/store/types.js';
+
+const canBindTcpPort = await new Promise<boolean>((resolve) => {
+  const server = net.createServer();
+  server.once('error', () => resolve(false));
+  server.listen(0, '127.0.0.1', () => {
+    server.close(() => resolve(true));
+  });
+});
+const describeIfTcpAvailable = canBindTcpPort ? describe : describe.skip;
 
 class InMemoryStore implements Store {
   private users = new Map<string, UserDTO>();
@@ -64,7 +74,8 @@ class InMemoryStore implements Store {
       go: 1200,
       connect4: 1200,
       reversi: 1200,
-      dots: 1200
+      dots: 1200,
+      backgammon: 1200
     };
   }
 
@@ -164,15 +175,15 @@ class InMemoryStore implements Store {
   }
 
   async listRatingFormulas(): Promise<RatingFormulaDTO[]> {
-    return (['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi', 'dots'] as const).map(
-      (gameType) => ({
-        gameType,
-        system: 'elo',
-        initialRating: 1200,
-        kFactor: 24,
-        expectedScore: '1 / (1 + 10^((opponent - player) / 400))'
-      })
-    );
+    return (
+      ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi', 'dots', 'backgammon'] as const
+    ).map((gameType) => ({
+      gameType,
+      system: 'elo',
+      initialRating: 1200,
+      kFactor: 24,
+      expectedScore: '1 / (1 + 10^((opponent - player) / 400))'
+    }));
   }
 
   async listOpenRooms(): Promise<RoomDTO[]> {
@@ -509,7 +520,7 @@ class SessionLookupFailingStore extends InMemoryStore {
   }
 }
 
-describe('critical API routes', () => {
+describeIfTcpAvailable('critical API routes', () => {
   it('creates a guest account and resolves /me', async () => {
     const store = new InMemoryStore();
     const app = createApp(store);
@@ -976,7 +987,7 @@ describe('critical API routes', () => {
 
     const response = await request(app).get('/ratings/formula').expect(200);
 
-    expect(response.body.formulas).toHaveLength(7);
+    expect(response.body.formulas).toHaveLength(8);
     expect(response.body.formulas[0].system).toBe('elo');
   });
 

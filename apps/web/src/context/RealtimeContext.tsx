@@ -69,6 +69,7 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
   const [onlineUsers, setOnlineUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
   const [invitations, setInvitations] = useState<InvitationDTO[]>([]);
   const [queueSizes, setQueueSizes] = useState<Record<BoardGameType, number>>({
+    backgammon: 0,
     gomoku: 0,
     connect4: 0,
     reversi: 0,

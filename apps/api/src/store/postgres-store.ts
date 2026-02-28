@@ -24,7 +24,16 @@ import { StoreError, type Store } from './types.js';
 type DbExecutor = Pick<PoolClient, 'query'>;
 type RatingMap = Partial<Record<GameType, number>>;
 
-const ALL_GAME_TYPES: GameType[] = ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi', 'dots'];
+const ALL_GAME_TYPES: GameType[] = [
+  'single_2048',
+  'gomoku',
+  'xiangqi',
+  'go',
+  'connect4',
+  'reversi',
+  'dots',
+  'backgammon'
+];
 const INITIAL_RATING = 1200;
 const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   single_2048: 24,
@@ -33,7 +42,8 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   go: 24,
   connect4: 24,
   reversi: 24,
-  dots: 24
+  dots: 24,
+  backgammon: 24
 };
 
 function playerSlotsForGame(gameType: GameType): number {
@@ -72,7 +82,8 @@ function createDefaultRatings(): RatingMap {
     go: INITIAL_RATING,
     connect4: INITIAL_RATING,
     reversi: INITIAL_RATING,
-    dots: INITIAL_RATING
+    dots: INITIAL_RATING,
+    backgammon: INITIAL_RATING
   };
 }
 

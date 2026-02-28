@@ -1,4 +1,5 @@
 import type {
+  BackgammonState,
   Connect4State,
   DotsState,
   GoState,
@@ -8,6 +9,14 @@ import type {
 } from '@multiwebgame/shared-types';
 
 export type RuntimeCompletionSnapshot =
+  | {
+      gameType: 'backgammon';
+      state: BackgammonState;
+      players: {
+        white: string;
+        black: string;
+      };
+    }
   | {
       gameType: 'gomoku';
       state: GomokuState;
@@ -64,6 +73,33 @@ export interface RuntimeCompletion {
 }
 
 export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): RuntimeCompletion | null {
+  if (runtime.gameType === 'backgammon') {
+    if (runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'white'
+        ? runtime.players.white
+        : runtime.state.winner === 'black'
+          ? runtime.players.black
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        backgammon: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          turnCount: runtime.state.turnCount,
+          rollCount: runtime.state.rollCount,
+          borneOff: runtime.state.borneOff
+        }
+      }
+    };
+  }
+
   if (runtime.gameType === 'gomoku') {
     if (runtime.state.status !== 'completed' && runtime.state.status !== 'draw') {
       return null;

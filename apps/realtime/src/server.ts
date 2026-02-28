@@ -1,19 +1,27 @@
 import {
+  applyBackgammonMove,
   applyConnect4Move,
   applyDotsMove,
   applyGoMove,
   applyGomokuMove,
   applyReversiMove,
   applyXiangqiMove,
+  assignBackgammonTurnDice,
+  createBackgammonState,
   createConnect4State,
+  createDeterministicPrng,
   createDotsState,
   createGoState,
   createGomokuState,
+  hasAnyLegalBackgammonMove,
   createReversiState,
   createXiangqiState,
-  formatXiangqiMoveNotation
+  formatXiangqiMoveNotation,
+  type DeterministicPrng
 } from '@multiwebgame/game-engines';
 import type {
+  BackgammonMove,
+  BackgammonState,
   BoardGameType,
   ClientToServerMessage,
   Connect4Move,
@@ -64,6 +72,7 @@ import {
   applyPlayerCommit,
   applyPlayerReveal,
   buildRngPayload,
+  createVerifiableRngSession,
   isRevealTimedOut,
   type VerifiableRngSession
 } from './verifiable-rng.js';
@@ -95,6 +104,19 @@ interface GomokuRuntime {
   players: {
     black: string;
     white: string;
+  };
+}
+
+interface BackgammonRuntime {
+  gameType: 'backgammon';
+  roomId: string;
+  matchId: string;
+  state: BackgammonState;
+  rngSession: VerifiableRngSession;
+  rngPrng: DeterministicPrng | null;
+  players: {
+    white: string;
+    black: string;
   };
 }
 
@@ -159,6 +181,7 @@ interface XiangqiRuntime {
 }
 
 type ActiveRuntime =
+  | BackgammonRuntime
   | GomokuRuntime
   | Connect4Runtime
   | GoRuntime
@@ -206,6 +229,18 @@ const roomRngRevealSchema = z.object({
 });
 
 const roomMoveSchema = z.union([
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('backgammon'),
+      move: z.object({
+        from: z.union([z.literal('bar'), z.number().int().min(0).max(23)]),
+        to: z.union([z.literal('off'), z.number().int().min(0).max(23)]),
+        die: z.number().int().min(1).max(6)
+      })
+    })
+  }),
   z.object({
     type: z.literal('room.move'),
     payload: z.object({
@@ -287,7 +322,9 @@ const inviteRespondSchema = z.object({
 
 const matchmakingJoinSchema = z.object({
   type: z.literal('matchmaking.join'),
-  payload: z.object({ gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi', 'dots']) })
+  payload: z.object({
+    gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi', 'dots', 'backgammon'])
+  })
 });
 
 const pingSchema = z.object({
@@ -453,6 +490,7 @@ function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
 
 function runtimePlayers(runtime: ActiveRuntime): [string, string] {
   if (
+    runtime.gameType === 'backgammon' ||
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'go' ||
     runtime.gameType === 'reversi' ||
@@ -527,6 +565,48 @@ function rngUpdatedMessage(
       rngSeed: runtime.rngSession.phase === 'ready' ? runtime.rngSession.rngSeed : null
     }
   };
+}
+
+function ensureBackgammonPrng(runtime: BackgammonRuntime): DeterministicPrng | null {
+  if (!runtime.rngSession.rngSeed) {
+    return null;
+  }
+
+  if (runtime.rngPrng) {
+    return runtime.rngPrng;
+  }
+
+  const prng = createDeterministicPrng(runtime.rngSession.rngSeed);
+  for (let roll = 0; roll < runtime.state.rollCount; roll += 1) {
+    prng.nextDie();
+    prng.nextDie();
+  }
+
+  runtime.rngPrng = prng;
+  return prng;
+}
+
+function maybeRollBackgammonTurn(runtime: BackgammonRuntime): void {
+  const prng = ensureBackgammonPrng(runtime);
+  if (!prng || runtime.state.status !== 'playing') {
+    return;
+  }
+
+  // If a rolled turn has no legal moves, auto-pass and roll for opponent.
+  for (let guard = 0; guard < 6; guard += 1) {
+    const dice: [number, number] = [prng.nextDie(), prng.nextDie()];
+    runtime.state = assignBackgammonTurnDice(runtime.state, dice);
+    if (hasAnyLegalBackgammonMove(runtime.state, runtime.state.nextPlayer)) {
+      return;
+    }
+
+    runtime.state = {
+      ...runtime.state,
+      nextPlayer: runtime.state.nextPlayer === 'white' ? 'black' : 'white',
+      dice: null,
+      remainingDice: []
+    };
+  }
 }
 
 async function abandonForRngRevealTimeout(
@@ -711,6 +791,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     return null;
   }
 
+  if (room.gameType === 'backgammon') {
+    return {
+      gameType: 'backgammon',
+      roomId: room.id,
+      matchId,
+      state: createBackgammonState(),
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerOneUserId: players.first,
+        playerTwoUserId: players.second
+      }),
+      rngPrng: null,
+      players: {
+        white: players.first,
+        black: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'gomoku') {
     return {
       gameType: 'gomoku',
@@ -792,6 +891,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
   return null;
 }
 
+function isBackgammonStateRecord(value: unknown): value is BackgammonState {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<BackgammonState>;
+  return (
+    Array.isArray(typed.points) &&
+    typed.points.length === 24 &&
+    typeof typed.bar?.white === 'number' &&
+    typeof typed.bar?.black === 'number' &&
+    typeof typed.borneOff?.white === 'number' &&
+    typeof typed.borneOff?.black === 'number' &&
+    (typed.nextPlayer === 'white' || typed.nextPlayer === 'black') &&
+    (typed.status === 'playing' || typed.status === 'completed') &&
+    Array.isArray(typed.remainingDice)
+  );
+}
+
 function replayMoves(
   runtime: ActiveRuntime,
   moves: Array<{ payload: Record<string, unknown> }>
@@ -799,6 +917,29 @@ function replayMoves(
   let current = runtime;
 
   for (const move of moves) {
+    if (current.gameType === 'backgammon') {
+      const payload = move.payload as {
+        state?: BackgammonState;
+        rngSeed?: string;
+      };
+      if (isBackgammonStateRecord(payload.state)) {
+        current = {
+          ...current,
+          state: payload.state,
+          rngSession: payload.rngSeed
+            ? {
+                ...current.rngSession,
+                phase: 'ready',
+                rngSeed: payload.rngSeed,
+                revealDeadlineAt: null
+              }
+            : current.rngSession,
+          rngPrng: null
+        };
+      }
+      continue;
+    }
+
     if (current.gameType === 'gomoku') {
       const payload = move.payload as { x?: number; y?: number; player?: GomokuMark };
       if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
@@ -966,6 +1107,12 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   }
 
   const replayed = replayMoves(base, match.moves);
+  if (replayed.gameType === 'backgammon' && replayed.rngSession.phase === 'ready') {
+    ensureBackgammonPrng(replayed);
+    if (replayed.state.status === 'playing' && replayed.state.remainingDice.length === 0) {
+      maybeRollBackgammonTurn(replayed);
+    }
+  }
 
   if (match.status === 'active') {
     if (hasRngSession(replayed) && isRevealTimedOut(replayed.rngSession)) {
@@ -1067,6 +1214,22 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
   }
 
   const viewerRole = getViewerRole(room, client.user.id);
+
+  if (room.gameType === 'backgammon') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'backgammon',
+        state: runtime?.gameType === 'backgammon' ? runtime.state : createBackgammonState(),
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'backgammon') {
+      send(client, rngUpdatedMessage(runtime));
+    }
+    return;
+  }
 
   if (room.gameType === 'gomoku') {
     send(client, {
@@ -1303,6 +1466,67 @@ async function handleConnect4Move(
         column,
         player: playerDisc
       }
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleBackgammonMove(
+  client: ClientContext,
+  runtime: BackgammonRuntime,
+  move: Pick<BackgammonMove, 'from' | 'to' | 'die'>
+): Promise<void> {
+  const userId = client.user!.id;
+  const playerColor: BackgammonMove['player'] | null =
+    runtime.players.white === userId ? 'white' : runtime.players.black === userId ? 'black' : null;
+
+  if (!playerColor) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove: BackgammonMove = {
+    from: move.from,
+    to: move.to,
+    die: move.die,
+    player: playerColor
+  };
+
+  const applied = applyBackgammonMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  if (runtime.state.status === 'playing' && applied.turnEnded) {
+    maybeRollBackgammonTurn(runtime);
+  }
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'backgammon.move_checker',
+    payload: {
+      ...normalizedMove,
+      usedDie: applied.usedDie,
+      turnEnded: applied.turnEnded,
+      state: runtime.state,
+      rngSeed: runtime.rngSession.rngSeed
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'backgammon',
+      state: runtime.state,
+      lastMove: normalizedMove
     }
   });
 
@@ -1619,13 +1843,26 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
   }
 
   runtime.rngSession = revealed.session;
+  if (
+    runtime.gameType === 'backgammon' &&
+    runtime.rngSession.phase === 'ready' &&
+    runtime.state.status === 'playing' &&
+    runtime.state.rollCount === 0
+  ) {
+    runtime.rngPrng = null;
+    maybeRollBackgammonTurn(runtime);
+  }
   activeRuntimes.set(runtime.roomId, runtime);
   broadcast(targets, rngUpdatedMessage(runtime));
+  if (runtime.gameType === 'backgammon' && runtime.rngSession.phase === 'ready') {
+    await broadcastRoomStateToSubscribers(runtime.roomId);
+  }
 }
 
 async function handleMove(
   client: ClientContext,
   message:
+    | { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
@@ -1656,6 +1893,11 @@ async function handleMove(
 
   if (!rngPhaseReady(runtime)) {
     sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  if (message.gameType === 'backgammon' && runtime.gameType === 'backgammon') {
+    await handleBackgammonMove(client, runtime, message.move);
     return;
   }
 
@@ -1910,6 +2152,15 @@ wss.on('connection', (socket) => {
 
       if (parsed.type === 'room.move') {
         const msg = roomMoveSchema.parse(parsed);
+
+        if (msg.payload.gameType === 'backgammon') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'backgammon',
+            move: msg.payload.move
+          });
+          return;
+        }
 
         if (msg.payload.gameType === 'gomoku') {
           await handleMove(client, {

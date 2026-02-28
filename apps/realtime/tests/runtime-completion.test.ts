@@ -1,7 +1,9 @@
 import {
+  assignBackgammonTurnDice,
   createConnect4State,
   createDotsState,
   createGoState,
+  createBackgammonState,
   createGomokuState,
   createReversiState,
   createXiangqiState
@@ -22,6 +24,47 @@ describe('deriveRuntimeCompletion', () => {
     });
 
     expect(completion).toBeNull();
+  });
+
+  it('maps backgammon completion to winner and payload', () => {
+    const completedState = {
+      ...assignBackgammonTurnDice(createBackgammonState(), [6, 3]),
+      status: 'completed' as const,
+      winner: 'white' as const,
+      moveCount: 88,
+      turnCount: 45,
+      rollCount: 45,
+      borneOff: {
+        white: 15,
+        black: 10
+      }
+    };
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'backgammon',
+      state: completedState,
+      players: {
+        white: 'u11',
+        black: 'u12'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u11',
+      status: 'completed',
+      resultPayload: {
+        backgammon: {
+          winner: 'white',
+          moveCount: 88,
+          turnCount: 45,
+          rollCount: 45,
+          borneOff: {
+            white: 15,
+            black: 10
+          }
+        }
+      }
+    });
   });
 
   it('maps gomoku completion to winner and payload', () => {

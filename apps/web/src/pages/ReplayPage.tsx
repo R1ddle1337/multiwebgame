@@ -21,6 +21,7 @@ import type {
   DotsMove,
   DotsState,
   Direction2048,
+  GameType,
   Game2048State,
   GoMove,
   GoState,
@@ -123,9 +124,7 @@ function notationFromPayload(payload: XiangqiReplayPayload): string | null {
 export function ReplayPage({ api, viewerUserId }: Props) {
   const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
-  const [gameType, setGameType] = useState<
-    'gomoku' | 'connect4' | 'dots' | 'go' | 'reversi' | 'xiangqi' | 'single_2048'
-  >('gomoku');
+  const [gameType, setGameType] = useState<GameType>('gomoku');
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [dotsStates, setDotsStates] = useState<DotsState[]>([createDotsState()]);
@@ -141,8 +140,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const gameLabel = (type: 'gomoku' | 'connect4' | 'dots' | 'go' | 'reversi' | 'xiangqi' | 'single_2048') =>
-    t(`enum.game.${type}`);
+  const gameLabel = (type: GameType) => t(`enum.game.${type}`);
   const statusLabel = (status: 'playing' | 'completed' | 'draw' | 'won' | 'lost') =>
     t(`enum.status.${status}`);
 
@@ -355,6 +353,13 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           return;
         }
 
+        if (result.match.gameType === 'backgammon') {
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(0);
+          return;
+        }
+
         let current = create2048State(() => 0);
         const snapshots: Game2048State[] = [current];
 
@@ -428,7 +433,10 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'xiangqi') {
       return Math.max(0, xiangqiStates.length - 1);
     }
-    return Math.max(0, game2048States.length - 1);
+    if (gameType === 'single_2048') {
+      return Math.max(0, game2048States.length - 1);
+    }
+    return 0;
   }, [
     gameType,
     goStates.length,
