@@ -95,6 +95,26 @@ Terminal adjudication:
 - `won` once tile `>= 2048`
 - `lost` when no legal moves remain
 
+## Cards (Crazy Eights, 2-player)
+
+Implemented rules:
+
+- standard 52-card deck
+- 5-card opening hand for each player
+- one opening discard on table
+- legal play: same suit OR same rank as top discard
+- rank `8` is wild and must choose next active suit
+- when no legal play exists:
+  - draw exactly one card
+  - if playable, player may immediately play it or end turn
+  - if not playable, turn ends
+- first player to empty hand wins
+
+Randomness + verification:
+
+- shuffle uses commit-reveal verifiable RNG seed
+- completed match payload includes RNG proof transcript (`serverSeed`, commits/nonces, derived `rngSeed`)
+
 ## Rating Formula
 
 Per-mode rating update uses ELO:

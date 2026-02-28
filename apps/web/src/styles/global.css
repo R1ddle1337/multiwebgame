@@ -585,6 +585,19 @@ h3 {
   margin-top: 0.8rem;
 }
 
+.replay-cards-hands {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.replay-cards-row {
+  margin-top: 0.35rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .xiangqi-move-log {
   max-width: min(100%, 620px);
   margin: 0.85rem auto 0;

@@ -60,6 +60,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.subtitle': '开放房间、实时观战、多模式匹配',
     'lobby.create.gomoku': '创建五子棋房间',
     'lobby.create.backgammon': '创建双陆棋房间',
+    'lobby.create.cards': '创建 Crazy Eights 房间',
     'lobby.create.connect4': '创建四子棋房间',
     'lobby.create.reversi': '创建黑白棋房间',
     'lobby.create.dots': '创建点格棋房间',
@@ -143,6 +144,17 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.go.scoring': '中国规则 • 黑: {black} • 白: {white} (贴目 {komi}) • 胜方: {winner}',
     'room.reversi.counts': '子数 • 黑: {black} • 白: {white}',
     'room.dots.scores': '得分 • 黑: {black} • 白: {white}',
+    'room.cards.waiting_rng': '等待双方完成随机承诺与揭示后发牌',
+    'room.cards.top': '弃牌堆顶: {card}',
+    'room.cards.active_suit': '当前花色: {suit}',
+    'room.cards.hand_counts': '手牌数 • 黑: {black} • 白: {white}',
+    'room.cards.draw_pile': '牌库剩余: {count}',
+    'room.cards.discard_pile': '弃牌堆数量: {count}',
+    'room.cards.your_hand': '你的手牌',
+    'room.cards.hidden_hand': '你当前不可见手牌（观战或对手手牌）。',
+    'room.cards.draw': '摸 1 张',
+    'room.cards.end_turn': '结束回合',
+    'room.cards.pending_draw_play': '你已摸到可出的牌，可立即出牌或结束回合。',
     'replay.loading': '正在加载回放...',
     'replay.title': '回放 {id}',
     'replay.meta': '游戏: {game} • 步数 {step}/{max}',
@@ -183,9 +195,14 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.dots': '点格棋',
     'enum.game.gomoku': '五子棋',
     'enum.game.backgammon': '双陆棋',
+    'enum.game.cards': '扑克（Crazy Eights）',
     'enum.game.go': '围棋',
     'enum.game.xiangqi': '象棋',
     'enum.game.single_2048': '2048',
+    'enum.suit.clubs': '梅花',
+    'enum.suit.diamonds': '方片',
+    'enum.suit.hearts': '红桃',
+    'enum.suit.spades': '黑桃',
     'error.room_not_found': '房间不存在',
     'error.room_access_denied': '无权加入该房间',
     'error.room_capacity': '房间已满',
@@ -263,6 +280,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.subtitle': 'Open rooms, live spectators, and multi-mode matchmaking.',
     'lobby.create.gomoku': 'Create Gomoku Room',
     'lobby.create.backgammon': 'Create Backgammon Room',
+    'lobby.create.cards': 'Create Crazy Eights Room',
     'lobby.create.connect4': 'Create Connect Four Room',
     'lobby.create.reversi': 'Create Reversi Room',
     'lobby.create.dots': 'Create Dots Room',
@@ -346,6 +364,17 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.go.scoring': 'Chinese score • Black: {black} • White: {white} (komi {komi}) • Winner: {winner}',
     'room.reversi.counts': 'Discs • Black: {black} • White: {white}',
     'room.dots.scores': 'Score • Black: {black} • White: {white}',
+    'room.cards.waiting_rng': 'Waiting for commit-reveal to finish before dealing cards.',
+    'room.cards.top': 'Top discard: {card}',
+    'room.cards.active_suit': 'Active suit: {suit}',
+    'room.cards.hand_counts': 'Hand count • Black: {black} • White: {white}',
+    'room.cards.draw_pile': 'Draw pile: {count}',
+    'room.cards.discard_pile': 'Discard pile: {count}',
+    'room.cards.your_hand': 'Your hand',
+    'room.cards.hidden_hand': 'Hand is hidden for this view.',
+    'room.cards.draw': 'Draw 1',
+    'room.cards.end_turn': 'End Turn',
+    'room.cards.pending_draw_play': 'You drew a playable card. Play now or end your turn.',
     'replay.loading': 'Loading replay...',
     'replay.title': 'Replay {id}',
     'replay.meta': 'Game: {game} • Step {step}/{max}',
@@ -386,9 +415,14 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.dots': 'dots',
     'enum.game.gomoku': 'gomoku',
     'enum.game.backgammon': 'backgammon',
+    'enum.game.cards': 'cards',
     'enum.game.go': 'go',
     'enum.game.xiangqi': 'xiangqi',
     'enum.game.single_2048': '2048',
+    'enum.suit.clubs': 'clubs',
+    'enum.suit.diamonds': 'diamonds',
+    'enum.suit.hearts': 'hearts',
+    'enum.suit.spades': 'spades',
     'error.room_not_found': 'Room not found',
     'error.room_access_denied': 'Room access denied',
     'error.room_capacity': 'Room capacity reached',
@@ -543,6 +577,16 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       }
       if (normalized.includes('piece_not_owned')) {
         return withCode('error.piece_not_owned');
+      }
+      if (
+        normalized.includes('card_not_in_hand') ||
+        normalized.includes('card_not_playable') ||
+        normalized.includes('choose_suit_required') ||
+        normalized.includes('draw_not_allowed_when_playable') ||
+        normalized.includes('must_resolve_draw_play') ||
+        normalized.includes('end_turn_not_allowed')
+      ) {
+        return withCode('error.invalid_move');
       }
       if (
         normalized.includes('pong_timeout') ||

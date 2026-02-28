@@ -5,6 +5,14 @@ export {
   createBackgammonState,
   hasAnyLegalBackgammonMove
 } from './backgammon.js';
+export {
+  applyCardsMove,
+  canPlayCardsCard,
+  createCardsDeck,
+  createCardsState,
+  toCardsPublicState,
+  type CardsRuntimeState
+} from './cards.js';
 export { applyConnect4Move, createConnect4State } from './connect4.js';
 export { applyDotsMove, createDotsState } from './dots.js';
 export { applyGoMove, calculateGoScore, createGoState } from './go.js';

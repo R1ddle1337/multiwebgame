@@ -258,6 +258,9 @@ function Shell({
             {t('enum.game.backgammon')} {user.ratings.backgammon ?? 1200}
           </span>
           <span className="status-pill">
+            {t('enum.game.cards')} {user.ratings.cards ?? 1200}
+          </span>
+          <span className="status-pill">
             {t('enum.game.go')} {user.ratings.go ?? 1200}
           </span>
           <span className="status-pill">

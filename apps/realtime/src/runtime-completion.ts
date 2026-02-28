@@ -1,3 +1,4 @@
+import type { CardsRuntimeState } from '@multiwebgame/game-engines';
 import type {
   BackgammonState,
   Connect4State,
@@ -15,6 +16,14 @@ export type RuntimeCompletionSnapshot =
       players: {
         white: string;
         black: string;
+      };
+    }
+  | {
+      gameType: 'cards';
+      state: CardsRuntimeState | null;
+      players: {
+        black: string;
+        white: string;
       };
     }
   | {
@@ -95,6 +104,39 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           turnCount: runtime.state.turnCount,
           rollCount: runtime.state.rollCount,
           borneOff: runtime.state.borneOff
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'cards') {
+    if (!runtime.state || runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    const topCard = runtime.state.discardPile[runtime.state.discardPile.length - 1] ?? null;
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        cards: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          handCounts: {
+            black: runtime.state.hands.black.length,
+            white: runtime.state.hands.white.length
+          },
+          drawPileCount: runtime.state.drawPile.length,
+          discardPileCount: runtime.state.discardPile.length,
+          activeSuit: runtime.state.activeSuit,
+          topCard
         }
       }
     };

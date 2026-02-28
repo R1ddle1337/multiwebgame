@@ -32,7 +32,8 @@ const ALL_GAME_TYPES: GameType[] = [
   'connect4',
   'reversi',
   'dots',
-  'backgammon'
+  'backgammon',
+  'cards'
 ];
 const INITIAL_RATING = 1200;
 const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
@@ -43,7 +44,8 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   connect4: 24,
   reversi: 24,
   dots: 24,
-  backgammon: 24
+  backgammon: 24,
+  cards: 24
 };
 
 function playerSlotsForGame(gameType: GameType): number {
@@ -83,7 +85,8 @@ function createDefaultRatings(): RatingMap {
     connect4: INITIAL_RATING,
     reversi: INITIAL_RATING,
     dots: INITIAL_RATING,
-    backgammon: INITIAL_RATING
+    backgammon: INITIAL_RATING,
+    cards: INITIAL_RATING
   };
 }
 

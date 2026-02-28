@@ -6,8 +6,17 @@ export type GameType =
   | 'connect4'
   | 'reversi'
   | 'dots'
-  | 'backgammon';
-export type BoardGameType = 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi' | 'dots' | 'backgammon';
+  | 'backgammon'
+  | 'cards';
+export type BoardGameType =
+  | 'gomoku'
+  | 'xiangqi'
+  | 'go'
+  | 'connect4'
+  | 'reversi'
+  | 'dots'
+  | 'backgammon'
+  | 'cards';
 
 export interface UserDTO {
   id: string;
@@ -354,6 +363,61 @@ export interface BackgammonState {
   remainingDice: number[];
 }
 
+export type CardsSuit = 'clubs' | 'diamonds' | 'hearts' | 'spades';
+export type CardsRank = 'A' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K';
+export type CardsPlayer = 'black' | 'white';
+
+export interface CardsCard {
+  suit: CardsSuit;
+  rank: CardsRank;
+}
+
+export type CardsMoveInput =
+  | {
+      type: 'play';
+      card: CardsCard;
+      chosenSuit?: CardsSuit;
+    }
+  | {
+      type: 'draw';
+    }
+  | {
+      type: 'end_turn';
+    };
+
+export type CardsMove =
+  | {
+      type: 'play';
+      player: CardsPlayer;
+      card: CardsCard;
+      chosenSuit?: CardsSuit;
+    }
+  | {
+      type: 'draw';
+      player: CardsPlayer;
+    }
+  | {
+      type: 'end_turn';
+      player: CardsPlayer;
+    };
+
+export interface CardsState {
+  nextPlayer: CardsPlayer;
+  status: 'playing' | 'completed';
+  winner: CardsPlayer | null;
+  topCard: CardsCard;
+  activeSuit: CardsSuit;
+  moveCount: number;
+  handCounts: {
+    black: number;
+    white: number;
+  };
+  hand: CardsCard[] | null;
+  drawPileCount: number | null;
+  discardPileCount: number;
+  pendingDrawPlay: boolean;
+}
+
 export type Direction2048 = 'up' | 'down' | 'left' | 'right';
 
 export interface Game2048State {
@@ -424,6 +488,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'cards';
+      state: CardsState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'single_2048';
       state: null;
       viewerRole: RoomPlayerRole;
@@ -471,6 +541,12 @@ export type MatchMoveAppliedPayload =
       gameType: 'backgammon';
       state: BackgammonState;
       lastMove: BackgammonMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'cards';
+      state: CardsState;
+      lastMove: CardsMove;
     };
 
 export type ClientToServerMessage =
@@ -493,6 +569,7 @@ export type ClientToServerMessage =
       'room.move',
       { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     >
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'cards'; move: CardsMoveInput }>
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.leave', Record<string, never>>
   | WsEnvelope<'invite.respond', { invitationId: string; action: 'accept' | 'decline' }>

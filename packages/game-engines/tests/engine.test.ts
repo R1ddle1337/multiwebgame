@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   apply2048Move,
   applyBackgammonMove,
+  applyCardsMove,
   applyConnect4Move,
   applyDotsMove,
   applyGoMove,
@@ -13,6 +14,8 @@ import {
   createDeterministicPrng,
   create2048State,
   createBackgammonState,
+  createCardsDeck,
+  createCardsState,
   createConnect4State,
   createDotsState,
   createGoState,
@@ -518,6 +521,156 @@ describe('backgammon engine', () => {
     expect(win.nextState.status).toBe('completed');
     expect(win.nextState.winner).toBe('white');
     expect(win.nextState.borneOff.white).toBe(15);
+  });
+});
+
+describe('cards engine', () => {
+  it('initializes with 52 cards, 5 cards per player, and one opening discard', () => {
+    const state = createCardsState({
+      deck: createCardsDeck()
+    });
+
+    expect(state.hands.black).toHaveLength(5);
+    expect(state.hands.white).toHaveLength(5);
+    expect(state.discardPile).toHaveLength(1);
+    expect(state.drawPile).toHaveLength(41);
+    expect(state.status).toBe('playing');
+  });
+
+  it('enforces playability by suit or rank', () => {
+    const state = createCardsState({
+      deck: createCardsDeck()
+    });
+    state.hands.black = [
+      { suit: 'clubs', rank: '2' },
+      { suit: 'spades', rank: '5' }
+    ];
+    state.hands.white = [{ suit: 'diamonds', rank: 'K' }];
+    state.discardPile = [{ suit: 'hearts', rank: '5' }];
+    state.activeSuit = 'hearts';
+    state.drawPile = [{ suit: 'clubs', rank: 'A' }];
+    state.nextPlayer = 'black';
+
+    const rejected = applyCardsMove(state, {
+      type: 'play',
+      player: 'black',
+      card: { suit: 'clubs', rank: '2' }
+    });
+    expect(rejected.accepted).toBe(false);
+    expect(rejected.reason).toBe('card_not_playable');
+
+    const accepted = applyCardsMove(state, {
+      type: 'play',
+      player: 'black',
+      card: { suit: 'spades', rank: '5' }
+    });
+    expect(accepted.accepted).toBe(true);
+    expect(accepted.nextState.activeSuit).toBe('spades');
+    expect(accepted.nextState.discardPile[accepted.nextState.discardPile.length - 1]).toEqual({
+      suit: 'spades',
+      rank: '5'
+    });
+  });
+
+  it('requires choosing a suit when playing an 8', () => {
+    const state = createCardsState({
+      deck: createCardsDeck()
+    });
+    state.hands.black = [{ suit: 'clubs', rank: '8' }];
+    state.hands.white = [{ suit: 'diamonds', rank: 'K' }];
+    state.discardPile = [{ suit: 'hearts', rank: '5' }];
+    state.activeSuit = 'hearts';
+    state.drawPile = [{ suit: 'clubs', rank: 'A' }];
+    state.nextPlayer = 'black';
+
+    const missingSuit = applyCardsMove(state, {
+      type: 'play',
+      player: 'black',
+      card: { suit: 'clubs', rank: '8' }
+    });
+    expect(missingSuit.accepted).toBe(false);
+    expect(missingSuit.reason).toBe('choose_suit_required');
+
+    const selectedSuit = applyCardsMove(state, {
+      type: 'play',
+      player: 'black',
+      card: { suit: 'clubs', rank: '8' },
+      chosenSuit: 'spades'
+    });
+    expect(selectedSuit.accepted).toBe(true);
+    expect(selectedSuit.nextState.activeSuit).toBe('spades');
+  });
+
+  it('draws one card when no playable card exists and resolves the turn correctly', () => {
+    const state = createCardsState({
+      deck: createCardsDeck()
+    });
+    state.hands.black = [{ suit: 'clubs', rank: '2' }];
+    state.hands.white = [{ suit: 'diamonds', rank: 'K' }];
+    state.discardPile = [{ suit: 'hearts', rank: '5' }];
+    state.activeSuit = 'hearts';
+    state.drawPile = [{ suit: 'spades', rank: '9' }];
+    state.nextPlayer = 'black';
+
+    const draw = applyCardsMove(state, {
+      type: 'draw',
+      player: 'black'
+    });
+    expect(draw.accepted).toBe(true);
+    expect(draw.nextState.hands.black).toHaveLength(2);
+    expect(draw.nextState.pendingDrawPlay).toBe(false);
+    expect(draw.nextState.nextPlayer).toBe('white');
+  });
+
+  it('allows immediate play decision after drawing a playable card', () => {
+    const state = createCardsState({
+      deck: createCardsDeck()
+    });
+    state.hands.black = [{ suit: 'clubs', rank: '2' }];
+    state.hands.white = [{ suit: 'diamonds', rank: 'K' }];
+    state.discardPile = [{ suit: 'hearts', rank: '5' }];
+    state.activeSuit = 'hearts';
+    state.drawPile = [{ suit: 'hearts', rank: '9' }];
+    state.nextPlayer = 'black';
+
+    const draw = applyCardsMove(state, {
+      type: 'draw',
+      player: 'black'
+    });
+    expect(draw.accepted).toBe(true);
+    expect(draw.nextState.pendingDrawPlay).toBe(true);
+    expect(draw.nextState.nextPlayer).toBe('black');
+
+    const endTurn = applyCardsMove(draw.nextState, {
+      type: 'end_turn',
+      player: 'black'
+    });
+    expect(endTurn.accepted).toBe(true);
+    expect(endTurn.nextState.pendingDrawPlay).toBe(false);
+    expect(endTurn.nextState.nextPlayer).toBe('white');
+  });
+
+  it('completes the match when a player empties their hand', () => {
+    const state = createCardsState({
+      deck: createCardsDeck()
+    });
+    state.hands.black = [{ suit: 'hearts', rank: '7' }];
+    state.hands.white = [{ suit: 'diamonds', rank: 'K' }];
+    state.discardPile = [{ suit: 'hearts', rank: '5' }];
+    state.activeSuit = 'hearts';
+    state.drawPile = [{ suit: 'clubs', rank: 'A' }];
+    state.nextPlayer = 'black';
+
+    const win = applyCardsMove(state, {
+      type: 'play',
+      player: 'black',
+      card: { suit: 'hearts', rank: '7' }
+    });
+
+    expect(win.accepted).toBe(true);
+    expect(win.nextState.status).toBe('completed');
+    expect(win.nextState.winner).toBe('black');
+    expect(win.nextState.hands.black).toHaveLength(0);
   });
 });
 

@@ -57,7 +57,7 @@ Auth uses `Authorization: Bearer <jwt>`.
 
 - `POST /rooms`
   - Auth required
-  - Body: `{ "gameType": "single_2048" | "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi", "maxPlayers"?: number }`
+  - Body: `{ "gameType": "single_2048" | "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards", "maxPlayers"?: number }`
   - Returns: `{ room }`
 
 - `GET /rooms/:roomId`
@@ -124,6 +124,7 @@ Auth uses `Authorization: Bearer <jwt>`.
   - Returns: `{ match: MatchDTO }`
   - `match.resultPayload` includes adjudication/scoring payload when available.
     - RNG proof (when enabled): `rng.serverSeed`, `rng.serverSeedCommit`, `rng.commits`, `rng.nonces`, `rng.rngSeed`.
+    - Cards (Crazy Eights): winner/moveCount/handCounts/topCard/activeSuit.
     - Connect Four: winner/status/moveCount/board dimensions.
     - Reversi: winner/status/moveCount/disc counts.
     - Dots and Boxes: winner/status/moveCount/final scores/dot-grid dimensions.

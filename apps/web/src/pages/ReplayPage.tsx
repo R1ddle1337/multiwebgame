@@ -1,5 +1,6 @@
 import {
   apply2048Move,
+  applyCardsMove,
   applyConnect4Move,
   applyDotsMove,
   applyGoMove,
@@ -7,15 +8,21 @@ import {
   applyReversiMove,
   applyXiangqiMove,
   create2048State,
+  createCardsDeck,
+  createCardsState,
   createConnect4State,
   createDotsState,
   createGoState,
   createGomokuState,
   createReversiState,
   createXiangqiState,
+  type CardsRuntimeState,
+  createDeterministicPrng,
   formatXiangqiMoveNotation
 } from '@multiwebgame/game-engines';
 import type {
+  CardsCard,
+  CardsMove,
   Connect4Move,
   Connect4State,
   DotsMove,
@@ -121,6 +128,71 @@ function notationFromPayload(payload: XiangqiReplayPayload): string | null {
   return null;
 }
 
+function isCardsCard(value: unknown): value is CardsCard {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as { suit?: unknown; rank?: unknown };
+  return (
+    (typed.suit === 'clubs' ||
+      typed.suit === 'diamonds' ||
+      typed.suit === 'hearts' ||
+      typed.suit === 'spades') &&
+    (typed.rank === 'A' ||
+      typed.rank === '2' ||
+      typed.rank === '3' ||
+      typed.rank === '4' ||
+      typed.rank === '5' ||
+      typed.rank === '6' ||
+      typed.rank === '7' ||
+      typed.rank === '8' ||
+      typed.rank === '9' ||
+      typed.rank === '10' ||
+      typed.rank === 'J' ||
+      typed.rank === 'Q' ||
+      typed.rank === 'K')
+  );
+}
+
+function isCardsMove(value: unknown): value is CardsMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<CardsMove>;
+  if (typed.type === 'draw' || typed.type === 'end_turn') {
+    return typed.player === 'black' || typed.player === 'white';
+  }
+
+  if (typed.type === 'play') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      isCardsCard(typed.card) &&
+      (typed.chosenSuit === undefined ||
+        typed.chosenSuit === 'clubs' ||
+        typed.chosenSuit === 'diamonds' ||
+        typed.chosenSuit === 'hearts' ||
+        typed.chosenSuit === 'spades')
+    );
+  }
+
+  return false;
+}
+
+function parseCardsMove(payload: Record<string, unknown>): CardsMove | null {
+  const nested = payload.move;
+  if (isCardsMove(nested)) {
+    return nested;
+  }
+
+  return isCardsMove(payload) ? payload : null;
+}
+
+function formatCardsCard(card: { rank: string; suit: string }): string {
+  return `${card.rank}${card.suit.slice(0, 1).toUpperCase()}`;
+}
+
 export function ReplayPage({ api, viewerUserId }: Props) {
   const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
@@ -131,6 +203,11 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
   const [reversiStates, setReversiStates] = useState<ReversiState[]>([createReversiState()]);
   const [xiangqiStates, setXiangqiStates] = useState<XiangqiState[]>([createXiangqiState()]);
+  const [cardsStates, setCardsStates] = useState<CardsRuntimeState[]>([
+    createCardsState({
+      deck: createCardsDeck()
+    })
+  ]);
   const [xiangqiMoveLog, setXiangqiMoveLog] = useState<XiangqiReplayMoveLogEntry[]>([]);
   const [xiangqiPerspective, setXiangqiPerspective] = useState<XiangqiColor>('red');
   const [game2048States, setGame2048States] = useState<Game2048State[]>([create2048State(() => 0)]);
@@ -353,6 +430,51 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           return;
         }
 
+        if (result.match.gameType === 'cards') {
+          const payload = result.match.resultPayload as { rng?: { rngSeed?: unknown } } | null;
+          let rngSeed = typeof payload?.rng?.rngSeed === 'string' ? payload.rng.rngSeed : null;
+
+          if (!rngSeed) {
+            const fromMove = result.match.moves
+              .map((entry) => entry.payload as { rngSeed?: unknown })
+              .find((entry) => typeof entry.rngSeed === 'string');
+            rngSeed = typeof fromMove?.rngSeed === 'string' ? fromMove.rngSeed : null;
+          }
+
+          if (!rngSeed) {
+            setError(t('common.error_generic'));
+            return;
+          }
+
+          const prng = createDeterministicPrng(rngSeed);
+          const deck = createCardsDeck();
+          prng.shuffleInPlace(deck);
+
+          let current = createCardsState({ deck });
+          const snapshots: CardsRuntimeState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseCardsMove(move.payload as Record<string, unknown>);
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyCardsMove(current, parsedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setCardsStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
         if (result.match.gameType === 'backgammon') {
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
@@ -433,6 +555,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'xiangqi') {
       return Math.max(0, xiangqiStates.length - 1);
     }
+    if (gameType === 'cards') {
+      return Math.max(0, cardsStates.length - 1);
+    }
     if (gameType === 'single_2048') {
       return Math.max(0, game2048States.length - 1);
     }
@@ -445,6 +570,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     dotsStates.length,
     reversiStates.length,
     xiangqiStates.length,
+    cardsStates.length,
     game2048States.length
   ]);
 
@@ -570,6 +696,50 @@ export function ReplayPage({ api, viewerUserId }: Props) {
               empty: t('replay.moves.empty')
             }}
           />
+        </>
+      ) : null}
+      {gameType === 'cards' ? (
+        <>
+          <p>
+            {t('room.cards.top', {
+              card: formatCardsCard(
+                cardsStates[clampedStep].discardPile[cardsStates[clampedStep].discardPile.length - 1]
+              )
+            })}
+          </p>
+          <p>
+            {t('room.cards.active_suit', { suit: t(`enum.suit.${cardsStates[clampedStep].activeSuit}`) })}
+          </p>
+          <p>
+            {t('room.cards.hand_counts', {
+              black: cardsStates[clampedStep].hands.black.length,
+              white: cardsStates[clampedStep].hands.white.length
+            })}
+          </p>
+          <p>{t('room.cards.draw_pile', { count: cardsStates[clampedStep].drawPile.length })}</p>
+          <p>{t('room.cards.discard_pile', { count: cardsStates[clampedStep].discardPile.length })}</p>
+          <div className="replay-cards-hands">
+            <div>
+              <strong>{t('enum.color.black')}</strong>
+              <div className="replay-cards-row">
+                {cardsStates[clampedStep].hands.black.map((card, index) => (
+                  <span key={`black-${card.suit}-${card.rank}-${index}`} className="status-pill">
+                    {formatCardsCard(card)}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div>
+              <strong>{t('enum.color.white')}</strong>
+              <div className="replay-cards-row">
+                {cardsStates[clampedStep].hands.white.map((card, index) => (
+                  <span key={`white-${card.suit}-${card.rank}-${index}`} className="status-pill">
+                    {formatCardsCard(card)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
         </>
       ) : null}
       {gameType === 'single_2048' ? (

@@ -7,6 +7,9 @@ import {
   createXiangqiState
 } from '@multiwebgame/game-engines';
 import type {
+  CardsCard,
+  CardsMoveInput,
+  CardsState,
   Connect4Move,
   Connect4State,
   DotsMove,
@@ -89,6 +92,13 @@ function formatActionText(
   });
 }
 
+const CARD_SUITS: CardsCard['suit'][] = ['clubs', 'diamonds', 'hearts', 'spades'];
+
+function formatCardsCard(card: CardsCard): string {
+  const suitInitial = card.suit.slice(0, 1).toUpperCase();
+  return `${card.rank}${suitInitial}`;
+}
+
 export function RoomPage({ api, user }: Props) {
   const { t, translateError } = useI18n();
   const { roomId = '' } = useParams();
@@ -115,6 +125,7 @@ export function RoomPage({ api, user }: Props) {
     (color: 'black' | 'white' | 'red' | 'yellow') => t(`enum.color.${color}`),
     [t]
   );
+  const suitLabel = useCallback((suit: CardsCard['suit']) => t(`enum.suit.${suit}`), [t]);
 
   const watchMode = useMemo(
     () => new URLSearchParams(location.search).get('watch') === '1',
@@ -134,6 +145,7 @@ export function RoomPage({ api, user }: Props) {
   const dotsState = snapshot?.gameType === 'dots' ? (snapshot.state as DotsState) : createDotsState();
   const xiangqiState =
     snapshot?.gameType === 'xiangqi' ? (snapshot.state as XiangqiState) : createXiangqiState();
+  const cardsState = snapshot?.gameType === 'cards' ? (snapshot.state as CardsState | null) : null;
 
   const seat = useMemo(() => playerSeat(room, user.id), [room, user.id]);
   const viewerRole =
@@ -166,6 +178,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'xiangqi' &&
     viewerRole === 'player' &&
     xiangqiState.status === 'playing';
+  const cardsTurn =
+    hasActiveMatch &&
+    room?.gameType === 'cards' &&
+    viewerRole === 'player' &&
+    cardsState?.status === 'playing';
 
   const canPlayGomoku =
     gomokuTurn &&
@@ -189,8 +206,18 @@ export function RoomPage({ api, user }: Props) {
     xiangqiTurn &&
     ((seat === 1 && xiangqiState.nextPlayer === 'red') ||
       (seat === 2 && xiangqiState.nextPlayer === 'black'));
+  const canPlayCards =
+    Boolean(cardsTurn) &&
+    ((seat === 1 && cardsState?.nextPlayer === 'black') ||
+      (seat === 2 && cardsState?.nextPlayer === 'white'));
   const canPlayCurrentTurn =
-    canPlayGomoku || canPlayConnect4 || canPlayGo || canPlayReversi || canPlayDots || canPlayXiangqi;
+    canPlayGomoku ||
+    canPlayConnect4 ||
+    canPlayGo ||
+    canPlayReversi ||
+    canPlayDots ||
+    canPlayXiangqi ||
+    canPlayCards;
   const xiangqiPerspective: XiangqiColor = seat === 2 ? 'black' : 'red';
   const previousCanPlayRef = useRef(false);
 
@@ -223,6 +250,10 @@ export function RoomPage({ api, user }: Props) {
       return describeLastMove('dots', snapshot.lastMove as DotsMove);
     }
 
+    if (room.gameType === 'cards') {
+      return null;
+    }
+
     return describeLastMove('xiangqi', snapshot.lastMove as XiangqiMove, xiangqiPerspective);
   }, [room, snapshot, xiangqiPerspective]);
 
@@ -249,6 +280,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'dots') {
       return formatResultText(dotsState, statusLabel, colorLabel, t);
+    }
+
+    if (room.gameType === 'cards') {
+      return null;
     }
 
     return formatResultText(xiangqiState, statusLabel, colorLabel, t);
@@ -439,6 +474,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'xiangqi',
+        move
+      }
+    });
+  };
+
+  const sendCardsMove = (move: CardsMoveInput) => {
+    if (!canPlayCards) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'cards',
         move
       }
     });
@@ -814,6 +864,120 @@ export function RoomPage({ api, user }: Props) {
                   : t('room.result.draw')}
               </p>
             ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'cards' ? (
+          <>
+            {!cardsState ? (
+              <p>{t('room.cards.waiting_rng')}</p>
+            ) : (
+              <>
+                {hasActiveMatch ? (
+                  <p>
+                    {t('room.next_turn', {
+                      player: colorLabel(cardsState.nextPlayer),
+                      status: statusLabel(cardsState.status)
+                    })}
+                  </p>
+                ) : null}
+                <p>{t('room.cards.top', { card: formatCardsCard(cardsState.topCard) })}</p>
+                <p>{t('room.cards.active_suit', { suit: suitLabel(cardsState.activeSuit) })}</p>
+                <p>
+                  {t('room.cards.hand_counts', {
+                    black: cardsState.handCounts.black,
+                    white: cardsState.handCounts.white
+                  })}
+                </p>
+                {typeof cardsState.drawPileCount === 'number' ? (
+                  <p>{t('room.cards.draw_pile', { count: cardsState.drawPileCount })}</p>
+                ) : null}
+                <p>{t('room.cards.discard_pile', { count: cardsState.discardPileCount })}</p>
+
+                {cardsState.hand ? (
+                  <>
+                    <p>{t('room.cards.your_hand')}</p>
+                    <div className="button-row">
+                      {cardsState.hand.map((card, index) => {
+                        const playable =
+                          card.rank === '8' ||
+                          card.suit === cardsState.activeSuit ||
+                          card.rank === cardsState.topCard.rank;
+                        return (
+                          <button
+                            key={`${card.suit}-${card.rank}-${index}`}
+                            type="button"
+                            className="secondary"
+                            disabled={!canPlayCards || !playable}
+                            onClick={() => {
+                              if (card.rank === '8') {
+                                const picked = window.prompt(
+                                  'suit: clubs | diamonds | hearts | spades',
+                                  cardsState.activeSuit
+                                );
+                                if (!picked) {
+                                  return;
+                                }
+                                const normalized = picked.trim().toLowerCase() as CardsCard['suit'];
+                                if (!CARD_SUITS.includes(normalized)) {
+                                  setError(t('error.invalid_move'));
+                                  return;
+                                }
+                                sendCardsMove({
+                                  type: 'play',
+                                  card,
+                                  chosenSuit: normalized
+                                });
+                                return;
+                              }
+
+                              sendCardsMove({
+                                type: 'play',
+                                card
+                              });
+                            }}
+                          >
+                            {formatCardsCard(card)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <p>{t('room.cards.hidden_hand')}</p>
+                )}
+
+                <div className="button-row">
+                  <button
+                    type="button"
+                    onClick={() => sendCardsMove({ type: 'draw' })}
+                    disabled={!canPlayCards}
+                  >
+                    {t('room.cards.draw')}
+                  </button>
+                  {cardsState.pendingDrawPlay ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => sendCardsMove({ type: 'end_turn' })}
+                      disabled={!canPlayCards}
+                    >
+                      {t('room.cards.end_turn')}
+                    </button>
+                  ) : null}
+                </div>
+                {cardsState.pendingDrawPlay && canPlayCards ? (
+                  <p>{t('room.cards.pending_draw_play')}</p>
+                ) : null}
+                {cardsState.status === 'completed' ? (
+                  <p>
+                    {cardsState.winner
+                      ? t('room.result.winner', { winner: colorLabel(cardsState.winner) })
+                      : t('room.result.draw')}
+                  </p>
+                ) : null}
+              </>
+            )}
           </>
         ) : null}
 

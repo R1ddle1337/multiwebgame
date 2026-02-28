@@ -1,5 +1,6 @@
 import {
   applyBackgammonMove,
+  applyCardsMove,
   applyConnect4Move,
   applyDotsMove,
   applyGoMove,
@@ -8,6 +9,8 @@ import {
   applyXiangqiMove,
   assignBackgammonTurnDice,
   createBackgammonState,
+  createCardsDeck,
+  createCardsState,
   createConnect4State,
   createDeterministicPrng,
   createDotsState,
@@ -17,12 +20,18 @@ import {
   createReversiState,
   createXiangqiState,
   formatXiangqiMoveNotation,
+  toCardsPublicState,
+  type CardsRuntimeState,
   type DeterministicPrng
 } from '@multiwebgame/game-engines';
 import type {
   BackgammonMove,
   BackgammonState,
   BoardGameType,
+  CardsCard,
+  CardsMove,
+  CardsMoveInput,
+  CardsPlayer,
   ClientToServerMessage,
   Connect4Move,
   Connect4State,
@@ -120,6 +129,19 @@ interface BackgammonRuntime {
   };
 }
 
+interface CardsRuntime {
+  gameType: 'cards';
+  roomId: string;
+  matchId: string;
+  state: CardsRuntimeState | null;
+  rngSession: VerifiableRngSession;
+  rngPrng: DeterministicPrng | null;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
 interface Connect4Runtime {
   gameType: 'connect4';
   roomId: string;
@@ -182,12 +204,20 @@ interface XiangqiRuntime {
 
 type ActiveRuntime =
   | BackgammonRuntime
+  | CardsRuntime
   | GomokuRuntime
   | Connect4Runtime
   | GoRuntime
   | ReversiRuntime
   | DotsRuntime
   | XiangqiRuntime;
+
+const cardsSuitSchema = z.enum(['clubs', 'diamonds', 'hearts', 'spades']);
+const cardsRankSchema = z.enum(['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']);
+const cardsCardSchema = z.object({
+  suit: cardsSuitSchema,
+  rank: cardsRankSchema
+});
 
 const authSchema = z.object({
   type: z.literal('auth'),
@@ -309,6 +339,26 @@ const roomMoveSchema = z.union([
         player: z.enum(['red', 'black'])
       })
     })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('cards'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('play'),
+          card: cardsCardSchema,
+          chosenSuit: cardsSuitSchema.optional()
+        }),
+        z.object({
+          type: z.literal('draw')
+        }),
+        z.object({
+          type: z.literal('end_turn')
+        })
+      ])
+    })
   })
 ]);
 
@@ -323,7 +373,7 @@ const inviteRespondSchema = z.object({
 const matchmakingJoinSchema = z.object({
   type: z.literal('matchmaking.join'),
   payload: z.object({
-    gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi', 'dots', 'backgammon'])
+    gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi', 'dots', 'backgammon', 'cards'])
   })
 });
 
@@ -357,7 +407,8 @@ function playerSlotsForGame(gameType: BoardGameType): number {
     gameType === 'xiangqi' ||
     gameType === 'connect4' ||
     gameType === 'reversi' ||
-    gameType === 'dots'
+    gameType === 'dots' ||
+    gameType === 'cards'
     ? 2
     : 2;
 }
@@ -491,6 +542,7 @@ function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
 function runtimePlayers(runtime: ActiveRuntime): [string, string] {
   if (
     runtime.gameType === 'backgammon' ||
+    runtime.gameType === 'cards' ||
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'go' ||
     runtime.gameType === 'reversi' ||
@@ -606,6 +658,89 @@ function maybeRollBackgammonTurn(runtime: BackgammonRuntime): void {
       dice: null,
       remainingDice: []
     };
+  }
+}
+
+function ensureCardsPrng(runtime: CardsRuntime): DeterministicPrng | null {
+  if (!runtime.rngSession.rngSeed) {
+    return null;
+  }
+
+  if (runtime.rngPrng) {
+    return runtime.rngPrng;
+  }
+
+  runtime.rngPrng = createDeterministicPrng(runtime.rngSession.rngSeed);
+  return runtime.rngPrng;
+}
+
+function ensureCardsRuntimeState(runtime: CardsRuntime): CardsRuntimeState | null {
+  if (runtime.state) {
+    return runtime.state;
+  }
+
+  const prng = ensureCardsPrng(runtime);
+  if (!prng) {
+    return null;
+  }
+
+  const deck = createCardsDeck();
+  prng.shuffleInPlace(deck);
+  runtime.state = createCardsState({
+    deck,
+    startingPlayer: 'black'
+  });
+  return runtime.state;
+}
+
+function viewerCardsSide(runtime: CardsRuntime, userId: string | null): CardsPlayer | null {
+  if (!userId) {
+    return null;
+  }
+
+  if (runtime.players.black === userId) {
+    return 'black';
+  }
+
+  if (runtime.players.white === userId) {
+    return 'white';
+  }
+
+  return null;
+}
+
+function cardsStateForClient(
+  runtime: CardsRuntime,
+  client: ClientContext
+): ReturnType<typeof toCardsPublicState> | null {
+  if (!runtime.state) {
+    return null;
+  }
+
+  const side = viewerCardsSide(runtime, client.user?.id ?? null);
+  return toCardsPublicState(runtime.state, side, Boolean(side));
+}
+
+function broadcastCardsMoveApplied(
+  runtime: CardsRuntime,
+  targets: Set<ClientContext>,
+  lastMove: CardsMove
+): void {
+  for (const target of targets) {
+    const state = cardsStateForClient(runtime, target);
+    if (!state) {
+      continue;
+    }
+
+    send(target, {
+      type: 'match.move_applied',
+      payload: {
+        roomId: runtime.roomId,
+        gameType: 'cards',
+        state,
+        lastMove
+      }
+    });
   }
 }
 
@@ -810,6 +945,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'cards') {
+    return {
+      gameType: 'cards',
+      roomId: room.id,
+      matchId,
+      state: null,
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerOneUserId: players.first,
+        playerTwoUserId: players.second
+      }),
+      rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'gomoku') {
     return {
       gameType: 'gomoku',
@@ -910,6 +1064,67 @@ function isBackgammonStateRecord(value: unknown): value is BackgammonState {
   );
 }
 
+function isCardsCardRecord(value: unknown): value is CardsCard {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<CardsCard>;
+  return (
+    (typed.suit === 'clubs' ||
+      typed.suit === 'diamonds' ||
+      typed.suit === 'hearts' ||
+      typed.suit === 'spades') &&
+    (typed.rank === 'A' ||
+      typed.rank === '2' ||
+      typed.rank === '3' ||
+      typed.rank === '4' ||
+      typed.rank === '5' ||
+      typed.rank === '6' ||
+      typed.rank === '7' ||
+      typed.rank === '8' ||
+      typed.rank === '9' ||
+      typed.rank === '10' ||
+      typed.rank === 'J' ||
+      typed.rank === 'Q' ||
+      typed.rank === 'K')
+  );
+}
+
+function isCardsMoveRecord(value: unknown): value is CardsMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<CardsMove>;
+  if (typed.type === 'draw' || typed.type === 'end_turn') {
+    return typed.player === 'black' || typed.player === 'white';
+  }
+
+  if (typed.type === 'play') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      isCardsCardRecord(typed.card) &&
+      (typed.chosenSuit === undefined ||
+        typed.chosenSuit === 'clubs' ||
+        typed.chosenSuit === 'diamonds' ||
+        typed.chosenSuit === 'hearts' ||
+        typed.chosenSuit === 'spades')
+    );
+  }
+
+  return false;
+}
+
+function readCardsMovePayload(payload: Record<string, unknown>): CardsMove | null {
+  const nested = payload.move;
+  if (isCardsMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isCardsMoveRecord(payload) ? payload : null;
+}
+
 function replayMoves(
   runtime: ActiveRuntime,
   moves: Array<{ payload: Record<string, unknown> }>
@@ -937,6 +1152,45 @@ function replayMoves(
           rngPrng: null
         };
       }
+      continue;
+    }
+
+    if (current.gameType === 'cards') {
+      const payload = move.payload as {
+        move?: Record<string, unknown>;
+        rngSeed?: string;
+      };
+      if (typeof payload.rngSeed === 'string' && payload.rngSeed.length > 0) {
+        current = {
+          ...current,
+          rngSession: {
+            ...current.rngSession,
+            phase: 'ready',
+            rngSeed: payload.rngSeed,
+            revealDeadlineAt: null
+          },
+          rngPrng: null
+        };
+      }
+
+      if (current.rngSession.phase === 'ready') {
+        ensureCardsRuntimeState(current);
+      }
+
+      const parsedMove = readCardsMovePayload(move.payload);
+      if (!parsedMove || !current.state) {
+        continue;
+      }
+
+      const applied = applyCardsMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
       continue;
     }
 
@@ -1113,6 +1367,9 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
       maybeRollBackgammonTurn(replayed);
     }
   }
+  if (replayed.gameType === 'cards' && replayed.rngSession.phase === 'ready') {
+    ensureCardsRuntimeState(replayed);
+  }
 
   if (match.status === 'active') {
     if (hasRngSession(replayed) && isRevealTimedOut(replayed.rngSession)) {
@@ -1165,7 +1422,11 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
 
 async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | null> {
   const existing = await getOrLoadRuntime(roomId);
-  if (existing && existing.state.status === 'playing') {
+  if (
+    existing &&
+    ((existing.gameType === 'cards' && existing.state?.status === 'playing') ||
+      (existing.gameType !== 'cards' && existing.state.status === 'playing'))
+  ) {
     return existing;
   }
 
@@ -1226,6 +1487,26 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
       }
     });
     if (runtime?.gameType === 'backgammon') {
+      send(client, rngUpdatedMessage(runtime));
+    }
+    return;
+  }
+
+  if (room.gameType === 'cards') {
+    if (runtime?.gameType === 'cards' && runtime.rngSession.phase === 'ready') {
+      ensureCardsRuntimeState(runtime);
+    }
+
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'cards',
+        state: runtime?.gameType === 'cards' ? cardsStateForClient(runtime, client) : null,
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'cards') {
       send(client, rngUpdatedMessage(runtime));
     }
     return;
@@ -1530,6 +1811,69 @@ async function handleBackgammonMove(
     }
   });
 
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleCardsMove(
+  client: ClientContext,
+  runtime: CardsRuntime,
+  move: CardsMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: CardsPlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const state = ensureCardsRuntimeState(runtime);
+  if (!state) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  const normalizedMove: CardsMove =
+    move.type === 'play'
+      ? {
+          type: 'play',
+          player,
+          card: move.card,
+          chosenSuit: move.chosenSuit
+        }
+      : move.type === 'draw'
+        ? {
+            type: 'draw',
+            player
+          }
+        : {
+            type: 'end_turn',
+            player
+          };
+
+  const applied = applyCardsMove(state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: `cards.${normalizedMove.type}`,
+    payload: {
+      move: normalizedMove,
+      rngSeed: runtime.rngSession.rngSeed
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcastCardsMoveApplied(runtime, targets, normalizedMove);
   await finishMatchIfCompleted(runtime, targets);
 }
 
@@ -1842,6 +2186,7 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
     return;
   }
 
+  const becameReady = runtime.rngSession.phase !== 'ready' && revealed.session.phase === 'ready';
   runtime.rngSession = revealed.session;
   if (
     runtime.gameType === 'backgammon' &&
@@ -1852,9 +2197,27 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
     runtime.rngPrng = null;
     maybeRollBackgammonTurn(runtime);
   }
+  if (runtime.gameType === 'cards' && runtime.rngSession.phase === 'ready') {
+    runtime.rngPrng = null;
+    ensureCardsRuntimeState(runtime);
+    if (becameReady) {
+      await createMatchMove({
+        matchId: runtime.matchId,
+        actorUserId: client.user.id,
+        moveIndex: 0,
+        moveType: 'cards.rng_ready',
+        payload: {
+          rngSeed: runtime.rngSession.rngSeed
+        }
+      });
+    }
+  }
   activeRuntimes.set(runtime.roomId, runtime);
   broadcast(targets, rngUpdatedMessage(runtime));
-  if (runtime.gameType === 'backgammon' && runtime.rngSession.phase === 'ready') {
+  if (
+    (runtime.gameType === 'backgammon' || runtime.gameType === 'cards') &&
+    runtime.rngSession.phase === 'ready'
+  ) {
     await broadcastRoomStateToSubscribers(runtime.roomId);
   }
 }
@@ -1863,6 +2226,7 @@ async function handleMove(
   client: ClientContext,
   message:
     | { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
+    | { roomId: string; gameType: 'cards'; move: CardsMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
@@ -1898,6 +2262,11 @@ async function handleMove(
 
   if (message.gameType === 'backgammon' && runtime.gameType === 'backgammon') {
     await handleBackgammonMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'cards' && runtime.gameType === 'cards') {
+    await handleCardsMove(client, runtime, message.move);
     return;
   }
 
@@ -2157,6 +2526,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'backgammon',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'cards') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'cards',
             move: msg.payload.move
           });
           return;

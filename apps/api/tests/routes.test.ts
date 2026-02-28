@@ -75,7 +75,8 @@ class InMemoryStore implements Store {
       connect4: 1200,
       reversi: 1200,
       dots: 1200,
-      backgammon: 1200
+      backgammon: 1200,
+      cards: 1200
     };
   }
 
@@ -176,7 +177,17 @@ class InMemoryStore implements Store {
 
   async listRatingFormulas(): Promise<RatingFormulaDTO[]> {
     return (
-      ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi', 'dots', 'backgammon'] as const
+      [
+        'single_2048',
+        'gomoku',
+        'xiangqi',
+        'go',
+        'connect4',
+        'reversi',
+        'dots',
+        'backgammon',
+        'cards'
+      ] as const
     ).map((gameType) => ({
       gameType,
       system: 'elo',

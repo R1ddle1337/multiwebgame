@@ -22,7 +22,8 @@ const ALL_GAME_TYPES: GameType[] = [
   'connect4',
   'reversi',
   'dots',
-  'backgammon'
+  'backgammon',
+  'cards'
 ];
 const INITIAL_RATING = 1200;
 const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
@@ -33,7 +34,8 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   connect4: 24,
   reversi: 24,
   dots: 24,
-  backgammon: 24
+  backgammon: 24,
+  cards: 24
 };
 
 function toIso(value: Date | string): string {
@@ -49,7 +51,8 @@ function createDefaultRatings(): RatingMap {
     connect4: INITIAL_RATING,
     reversi: INITIAL_RATING,
     dots: INITIAL_RATING,
-    backgammon: INITIAL_RATING
+    backgammon: INITIAL_RATING,
+    cards: INITIAL_RATING
   };
 }
 
@@ -517,7 +520,10 @@ export async function getRoom(roomId: string): Promise<RoomDTO | null> {
 export async function createMatchmakingRoom(
   userAId: string,
   userBId: string,
-  gameType: Extract<GameType, 'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi' | 'dots' | 'backgammon'>
+  gameType: Extract<
+    GameType,
+    'gomoku' | 'xiangqi' | 'go' | 'connect4' | 'reversi' | 'dots' | 'backgammon' | 'cards'
+  >
 ): Promise<{ room: RoomDTO; matchId: string }> {
   return withTransaction(async (client) => {
     const roomResult = await client.query<{ id: string }>(

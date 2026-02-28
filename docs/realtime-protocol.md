@@ -49,8 +49,11 @@ Message shape:
 - `room.move` (Xiangqi)
   - `{ roomId: string, gameType: "xiangqi", move: { from, to, player } }`
 
+- `room.move` (Cards / Crazy Eights)
+  - `{ roomId: string, gameType: "cards", move: { type: "play", card, chosenSuit? } | { type: "draw" } | { type: "end_turn" } }`
+
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" }`
+  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -79,6 +82,7 @@ Message shape:
   - Dots and Boxes: `{ room, gameType: "dots", state, viewerRole }`
   - Go: `{ room, gameType: "go", state, viewerRole }`
   - Xiangqi: `{ room, gameType: "xiangqi", state, viewerRole }`
+  - Cards: `{ room, gameType: "cards", state, viewerRole }`
   - 2048 room: `{ room, gameType: "single_2048", state: null, viewerRole }`
 
 - `room.player_joined`
@@ -126,6 +130,9 @@ Message shape:
 - Spectators:
   - Stable room subscription/unsubscription is supported via `room.subscribe`/`room.unsubscribe`.
   - Spectators are read-only at protocol level.
+  - Cards hidden information policy:
+    - active players only receive their own hand;
+    - spectators do not receive hand cards or draw-pile visibility during active play.
 
 - Reconnect:
   - Client stores `reconnectKey` from `auth.ok`.

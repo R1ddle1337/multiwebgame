@@ -1,5 +1,7 @@
 import {
   assignBackgammonTurnDice,
+  createCardsDeck,
+  createCardsState,
   createConnect4State,
   createDotsState,
   createGoState,
@@ -62,6 +64,44 @@ describe('deriveRuntimeCompletion', () => {
             white: 15,
             black: 10
           }
+        }
+      }
+    });
+  });
+
+  it('maps cards completion to winner and payload', () => {
+    const completed = createCardsState({
+      deck: createCardsDeck()
+    });
+    completed.status = 'completed';
+    completed.winner = 'white';
+    completed.moveCount = 27;
+    completed.activeSuit = 'spades';
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'cards',
+      state: completed,
+      players: {
+        black: 'u21',
+        white: 'u22'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u22',
+      status: 'completed',
+      resultPayload: {
+        cards: {
+          winner: 'white',
+          moveCount: 27,
+          handCounts: {
+            black: completed.hands.black.length,
+            white: completed.hands.white.length
+          },
+          drawPileCount: completed.drawPile.length,
+          discardPileCount: completed.discardPile.length,
+          activeSuit: 'spades',
+          topCard: completed.discardPile[completed.discardPile.length - 1]
         }
       }
     });
