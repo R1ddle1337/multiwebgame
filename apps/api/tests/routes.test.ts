@@ -1,12 +1,14 @@
 import type {
   BlockDTO,
   GameType,
+  InviteLinkDTO,
   InvitationDTO,
   MatchDTO,
   RatingDTO,
   RatingFormulaDTO,
   ReportDTO,
   RoomDTO,
+  RoomPlayerRole,
   SessionDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
@@ -27,6 +29,8 @@ class InMemoryStore implements Store {
   private rooms = new Map<string, RoomDTO>();
 
   private invitations = new Map<string, InvitationDTO>();
+
+  private inviteLinks = new Map<string, InviteLinkDTO>();
 
   private matches = new Map<string, MatchDTO>();
 
@@ -290,6 +294,82 @@ class InMemoryStore implements Store {
     return room;
   }
 
+  async createOrGetInviteLink(params: { roomId: string; createdByUserId: string }): Promise<InviteLinkDTO> {
+    const room = this.rooms.get(params.roomId);
+    if (!room) {
+      throw new StoreError('Room not found', 'not_found');
+    }
+    if (room.status === 'closed') {
+      throw new StoreError('Room is closed', 'forbidden');
+    }
+    if (room.hostUserId !== params.createdByUserId) {
+      throw new StoreError('Only room host can create invite links', 'forbidden');
+    }
+
+    const existing = Array.from(this.inviteLinks.values()).find(
+      (link) => link.roomId === params.roomId && !link.invalidatedAt
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const activeMatch = Array.from(this.matches.values()).find(
+      (match) => match.roomId === params.roomId && match.status === 'active'
+    );
+
+    const link: InviteLinkDTO = {
+      id: randomUUID(),
+      roomId: params.roomId,
+      token: randomUUID().replace(/-/g, ''),
+      createdByUserId: params.createdByUserId,
+      matchId: activeMatch?.id ?? null,
+      createdAt: new Date().toISOString(),
+      invalidatedAt: null,
+      invalidatedReason: null
+    };
+    this.inviteLinks.set(link.token, link);
+    return link;
+  }
+
+  async acceptInviteLink(params: {
+    token: string;
+    userId: string;
+  }): Promise<{ room: RoomDTO; role: RoomPlayerRole }> {
+    const link = this.inviteLinks.get(params.token);
+    if (!link || link.invalidatedAt) {
+      throw new StoreError('invite_invalid', 'validation_error');
+    }
+
+    const room = this.rooms.get(link.roomId);
+    if (!room || room.status === 'closed') {
+      link.invalidatedAt = new Date().toISOString();
+      link.invalidatedReason = 'room_closed';
+      this.inviteLinks.set(link.token, link);
+      throw new StoreError('invite_invalid', 'validation_error');
+    }
+
+    if (link.matchId) {
+      const match = this.matches.get(link.matchId);
+      if (!match || match.status !== 'active') {
+        link.invalidatedAt = new Date().toISOString();
+        link.invalidatedReason = 'match_ended';
+        this.inviteLinks.set(link.token, link);
+        throw new StoreError('invite_invalid', 'validation_error');
+      }
+    }
+
+    const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
+    const activePlayers = room.players.filter((player) => player.role === 'player').length;
+    const joinAsSpectator =
+      room.gameType === 'gomoku' || room.gameType === 'go' || room.gameType === 'xiangqi'
+        ? activePlayers >= playerSlots
+        : true;
+
+    const joined = await this.joinRoom(room.id, params.userId, joinAsSpectator);
+    const role = joined.players.find((player) => player.userId === params.userId)?.role ?? 'spectator';
+    return { room: joined, role };
+  }
+
   async createInvitation(params: {
     roomId: string;
     fromUserId: string;
@@ -497,6 +577,110 @@ describe('critical API routes', () => {
     );
     expect(watcherRow.role).toBe('spectator');
     expect(watcherRow.seat).toBeNull();
+  });
+
+  it('creates reusable invite links and auto-assigns player then spectator', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store, { webOrigin: 'http://localhost:5173' });
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const firstJoiner = await request(app).post('/auth/guest').send({ displayName: 'Joiner1' }).expect(201);
+    const secondJoiner = await request(app).post('/auth/guest').send({ displayName: 'Joiner2' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'gomoku', maxPlayers: 4 })
+      .expect(201);
+
+    const inviteA = await request(app)
+      .post(`/rooms/${room.body.room.id}/invite-link`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    const inviteB = await request(app)
+      .post(`/rooms/${room.body.room.id}/invite-link`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    expect(inviteA.body.token).toBe(inviteB.body.token);
+    expect(inviteA.body.url).toBe(`http://localhost:5173/invite/${inviteA.body.token}`);
+
+    const acceptedPlayer = await request(app)
+      .post(`/invite-links/${inviteA.body.token}/accept`)
+      .set('Authorization', `Bearer ${firstJoiner.body.token}`)
+      .send({})
+      .expect(200);
+    expect(acceptedPlayer.body.role).toBe('player');
+
+    const acceptedSpectator = await request(app)
+      .post(`/invite-links/${inviteA.body.token}/accept`)
+      .set('Authorization', `Bearer ${secondJoiner.body.token}`)
+      .send({})
+      .expect(200);
+    expect(acceptedSpectator.body.role).toBe('spectator');
+  });
+
+  it('rejects invite-link creation for non-host users', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const member = await request(app).post('/auth/guest').send({ displayName: 'Member' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'go', maxPlayers: 4 })
+      .expect(201);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/join`)
+      .set('Authorization', `Bearer ${member.body.token}`)
+      .send({})
+      .expect(200);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/invite-link`)
+      .set('Authorization', `Bearer ${member.body.token}`)
+      .send({})
+      .expect(403);
+  });
+
+  it('returns invite_invalid when invite-link target room is closed', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+    const guest = await request(app).post('/auth/guest').send({ displayName: 'Guest' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'gomoku', maxPlayers: 4 })
+      .expect(201);
+
+    const invite = await request(app)
+      .post(`/rooms/${room.body.room.id}/invite-link`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    await request(app)
+      .post(`/rooms/${room.body.room.id}/leave`)
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({})
+      .expect(200);
+
+    const invalid = await request(app)
+      .post(`/invite-links/${invite.body.token}/accept`)
+      .set('Authorization', `Bearer ${guest.body.token}`)
+      .send({})
+      .expect(400);
+
+    expect(invalid.body.error).toBe('invite_invalid');
   });
 
   it('promotes an existing spectator to player when a seat opens', async () => {

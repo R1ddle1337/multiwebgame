@@ -1,6 +1,7 @@
 import type {
   BlockDTO,
   GameType,
+  InviteLinkDTO,
   InvitationDTO,
   MatchDTO,
   MatchMoveDTO,
@@ -9,9 +10,11 @@ import type {
   ReportDTO,
   RoomDTO,
   RoomPlayerDTO,
+  RoomPlayerRole,
   SessionDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
+import { randomBytes } from 'crypto';
 import type { PoolClient } from 'pg';
 
 import { pool, withTransaction } from '../db.js';
@@ -48,6 +51,10 @@ function normalizeMaxPlayers(gameType: GameType, requested?: number): number {
   }
 
   return maxPlayers;
+}
+
+function createInviteToken(): string {
+  return randomBytes(32).toString('base64url');
 }
 
 function toIso(value: Date | string): string {
@@ -131,6 +138,28 @@ function mapInvitation(row: {
     status: row.status,
     createdAt: toIso(row.created_at),
     respondedAt: row.responded_at ? toIso(row.responded_at) : null
+  };
+}
+
+function mapInviteLink(row: {
+  id: string;
+  room_id: string;
+  token: string;
+  created_by_user_id: string | null;
+  match_id: string | null;
+  created_at: Date | string;
+  invalidated_at: Date | string | null;
+  invalidated_reason: string | null;
+}): InviteLinkDTO {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    token: row.token,
+    createdByUserId: row.created_by_user_id,
+    matchId: row.match_id,
+    createdAt: toIso(row.created_at),
+    invalidatedAt: row.invalidated_at ? toIso(row.invalidated_at) : null,
+    invalidatedReason: row.invalidated_reason
   };
 }
 
@@ -353,12 +382,27 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
   };
 }
 
+async function invalidateInviteLinksByRoom(
+  client: DbExecutor,
+  roomId: string,
+  reason: 'match_ended' | 'room_closed'
+): Promise<void> {
+  await client.query(
+    `
+      UPDATE invite_links
+      SET invalidated_at = NOW(), invalidated_reason = $2
+      WHERE room_id = $1 AND invalidated_at IS NULL
+    `,
+    [roomId, reason]
+  );
+}
+
 async function abandonActiveMatches(
   client: DbExecutor,
   roomId: string,
   reason: 'required_player_left' | 'inactive_timeout' | 'room_empty' | 'stale_match_recovery'
 ): Promise<void> {
-  await client.query(
+  const result = await client.query(
     `
       UPDATE matches
       SET
@@ -370,6 +414,10 @@ async function abandonActiveMatches(
     `,
     [roomId, reason]
   );
+
+  if (result.rowCount) {
+    await invalidateInviteLinksByRoom(client, roomId, 'match_ended');
+  }
 }
 
 async function reconcileRoomLifecycleTx(
@@ -414,6 +462,7 @@ async function reconcileRoomLifecycleTx(
   if (members.rows.length === 0) {
     await abandonActiveMatches(client, roomId, 'room_empty');
     await client.query(`UPDATE rooms SET status = 'closed' WHERE id = $1`, [roomId]);
+    await invalidateInviteLinksByRoom(client, roomId, 'room_closed');
     return null;
   }
 
@@ -469,6 +518,86 @@ async function loadMovesForMatches(
   }
 
   return grouped;
+}
+
+async function joinRoomTx(
+  client: DbExecutor,
+  roomId: string,
+  userId: string,
+  asSpectator = false
+): Promise<RoomDTO> {
+  const room = await reconcileRoomLifecycleTx(client, roomId, 'stale_match_recovery');
+  if (!room) {
+    throw new StoreError('Room not found', 'not_found');
+  }
+
+  if (room.status === 'closed') {
+    throw new StoreError('Room is closed', 'forbidden');
+  }
+
+  const maxPlayersForMode = playerSlotsForGame(room.gameType);
+  const activePlayers = room.players.filter((member) => member.role === 'player');
+  const existingMember = room.players.find((member) => member.userId === userId);
+  if (existingMember) {
+    if (existingMember.role === 'spectator' && !asSpectator && activePlayers.length < maxPlayersForMode) {
+      const usedSeats = new Set(
+        activePlayers.map((member) => member.seat).filter((value): value is number => value !== null)
+      );
+      let nextSeat = 1;
+      while (usedSeats.has(nextSeat) && nextSeat <= maxPlayersForMode) {
+        nextSeat += 1;
+      }
+
+      await client.query(
+        `
+          UPDATE room_players
+          SET role = 'player', seat = $3
+          WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
+        `,
+        [roomId, userId, nextSeat]
+      );
+    }
+
+    const currentRoom = await fetchRoomById(client, roomId);
+    if (!currentRoom) {
+      throw new StoreError('Room not found', 'not_found');
+    }
+    return currentRoom;
+  }
+
+  if (room.players.length >= room.maxPlayers) {
+    throw new StoreError('Room capacity reached', 'capacity_reached');
+  }
+
+  let role: RoomPlayerRole = 'spectator';
+  let seat: number | null = null;
+
+  if (!asSpectator && activePlayers.length < maxPlayersForMode) {
+    role = 'player';
+    const usedSeats = new Set(
+      activePlayers.map((member) => member.seat).filter((value): value is number => value !== null)
+    );
+    let nextSeat = 1;
+    while (usedSeats.has(nextSeat) && nextSeat <= maxPlayersForMode) {
+      nextSeat += 1;
+    }
+    seat = nextSeat;
+  }
+
+  await client.query(
+    `
+      INSERT INTO room_players (room_id, user_id, role, seat)
+      VALUES ($1, $2, $3, $4)
+    `,
+    [roomId, userId, role, seat]
+  );
+
+  const updatedRoom = await fetchRoomById(client, roomId);
+  if (!updatedRoom) {
+    throw new StoreError('Room not found', 'not_found');
+  }
+
+  return updatedRoom;
 }
 
 export function createPostgresStore(): Store {
@@ -731,84 +860,7 @@ export function createPostgresStore(): Store {
     },
 
     async joinRoom(roomId: string, userId: string, asSpectator = false): Promise<RoomDTO> {
-      return withTransaction(async (client) => {
-        const room = await reconcileRoomLifecycleTx(client, roomId, 'stale_match_recovery');
-        if (!room) {
-          throw new StoreError('Room not found', 'not_found');
-        }
-
-        if (room.status === 'closed') {
-          throw new StoreError('Room is closed', 'forbidden');
-        }
-
-        const maxPlayersForMode = playerSlotsForGame(room.gameType);
-        const activePlayers = room.players.filter((member) => member.role === 'player');
-        const existingMember = room.players.find((member) => member.userId === userId);
-        if (existingMember) {
-          if (
-            existingMember.role === 'spectator' &&
-            !asSpectator &&
-            activePlayers.length < maxPlayersForMode
-          ) {
-            const usedSeats = new Set(
-              activePlayers.map((member) => member.seat).filter((value): value is number => value !== null)
-            );
-            let nextSeat = 1;
-            while (usedSeats.has(nextSeat) && nextSeat <= maxPlayersForMode) {
-              nextSeat += 1;
-            }
-
-            await client.query(
-              `
-                UPDATE room_players
-                SET role = 'player', seat = $3
-                WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL
-              `,
-              [roomId, userId, nextSeat]
-            );
-          }
-
-          const currentRoom = await fetchRoomById(client, roomId);
-          if (!currentRoom) {
-            throw new StoreError('Room not found', 'not_found');
-          }
-          return currentRoom;
-        }
-
-        if (room.players.length >= room.maxPlayers) {
-          throw new StoreError('Room capacity reached', 'capacity_reached');
-        }
-
-        let role: 'player' | 'spectator' = 'spectator';
-        let seat: number | null = null;
-
-        if (!asSpectator && activePlayers.length < maxPlayersForMode) {
-          role = 'player';
-          const usedSeats = new Set(
-            activePlayers.map((member) => member.seat).filter((value): value is number => value !== null)
-          );
-          let nextSeat = 1;
-          while (usedSeats.has(nextSeat) && nextSeat <= maxPlayersForMode) {
-            nextSeat += 1;
-          }
-          seat = nextSeat;
-        }
-
-        await client.query(
-          `
-            INSERT INTO room_players (room_id, user_id, role, seat)
-            VALUES ($1, $2, $3, $4)
-          `,
-          [roomId, userId, role, seat]
-        );
-
-        const updatedRoom = await fetchRoomById(client, roomId);
-        if (!updatedRoom) {
-          throw new StoreError('Room not found', 'not_found');
-        }
-
-        return updatedRoom;
-      });
+      return withTransaction((client) => joinRoomTx(client, roomId, userId, asSpectator));
     },
 
     async leaveRoom(roomId: string, userId: string): Promise<RoomDTO | null> {
@@ -842,6 +894,217 @@ export function createPostgresStore(): Store {
           throw new StoreError('User is not in room', 'not_found');
         }
         return reconcileRoomLifecycleTx(client, roomId, 'required_player_left');
+      });
+    },
+
+    async createOrGetInviteLink(params): Promise<InviteLinkDTO> {
+      return withTransaction(async (client) => {
+        const roomResult = await client.query<{
+          id: string;
+          host_user_id: string;
+          status: 'open' | 'in_match' | 'closed';
+        }>(
+          `
+            SELECT id, host_user_id, status
+            FROM rooms
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [params.roomId]
+        );
+
+        const room = roomResult.rows[0];
+        if (!room) {
+          throw new StoreError('Room not found', 'not_found');
+        }
+        if (room.status === 'closed') {
+          throw new StoreError('Room is closed', 'forbidden');
+        }
+        if (room.host_user_id !== params.createdByUserId) {
+          throw new StoreError('Only room host can create invite links', 'forbidden');
+        }
+
+        const existing = await client.query<{
+          id: string;
+          room_id: string;
+          token: string;
+          created_by_user_id: string | null;
+          match_id: string | null;
+          created_at: Date | string;
+          invalidated_at: Date | string | null;
+          invalidated_reason: string | null;
+        }>(
+          `
+            SELECT
+              id,
+              room_id,
+              token,
+              created_by_user_id,
+              match_id,
+              created_at,
+              invalidated_at,
+              invalidated_reason
+            FROM invite_links
+            WHERE room_id = $1 AND invalidated_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+          `,
+          [params.roomId]
+        );
+
+        if (existing.rows[0]) {
+          return mapInviteLink(existing.rows[0]);
+        }
+
+        const activeMatch = await client.query<{ id: string }>(
+          `
+            SELECT id
+            FROM matches
+            WHERE room_id = $1 AND status = 'active'
+            ORDER BY started_at DESC
+            LIMIT 1
+          `,
+          [params.roomId]
+        );
+
+        const matchId = activeMatch.rows[0]?.id ?? null;
+
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          const token = createInviteToken();
+          try {
+            const created = await client.query<{
+              id: string;
+              room_id: string;
+              token: string;
+              created_by_user_id: string | null;
+              match_id: string | null;
+              created_at: Date | string;
+              invalidated_at: Date | string | null;
+              invalidated_reason: string | null;
+            }>(
+              `
+                INSERT INTO invite_links (room_id, token, created_by_user_id, match_id)
+                VALUES ($1, $2, $3, $4)
+                RETURNING
+                  id,
+                  room_id,
+                  token,
+                  created_by_user_id,
+                  match_id,
+                  created_at,
+                  invalidated_at,
+                  invalidated_reason
+              `,
+              [params.roomId, token, params.createdByUserId, matchId]
+            );
+            return mapInviteLink(created.rows[0]);
+          } catch (error: unknown) {
+            if (
+              typeof error === 'object' &&
+              error !== null &&
+              'code' in error &&
+              (error as { code: string }).code === '23505'
+            ) {
+              continue;
+            }
+
+            throw error;
+          }
+        }
+
+        throw new StoreError('Failed to allocate invite link token', 'conflict');
+      });
+    },
+
+    async acceptInviteLink(params): Promise<{ room: RoomDTO; role: RoomPlayerRole }> {
+      return withTransaction(async (client) => {
+        const inviteResult = await client.query<{
+          id: string;
+          room_id: string;
+          token: string;
+          created_by_user_id: string | null;
+          match_id: string | null;
+          created_at: Date | string;
+          invalidated_at: Date | string | null;
+          invalidated_reason: string | null;
+        }>(
+          `
+            SELECT
+              id,
+              room_id,
+              token,
+              created_by_user_id,
+              match_id,
+              created_at,
+              invalidated_at,
+              invalidated_reason
+            FROM invite_links
+            WHERE token = $1
+            FOR UPDATE
+          `,
+          [params.token]
+        );
+
+        const invite = inviteResult.rows[0];
+        if (!invite || invite.invalidated_at) {
+          throw new StoreError('invite_invalid', 'validation_error');
+        }
+
+        const roomResult = await client.query<{
+          id: string;
+          game_type: GameType;
+          status: 'open' | 'in_match' | 'closed';
+        }>(
+          `
+            SELECT id, game_type, status
+            FROM rooms
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [invite.room_id]
+        );
+
+        const room = roomResult.rows[0];
+        if (!room || room.status === 'closed') {
+          await invalidateInviteLinksByRoom(client, invite.room_id, 'room_closed');
+          throw new StoreError('invite_invalid', 'validation_error');
+        }
+
+        if (invite.match_id) {
+          const matchResult = await client.query<{ status: 'active' | 'completed' | 'abandoned' }>(
+            `
+              SELECT status
+              FROM matches
+              WHERE id = $1
+              LIMIT 1
+            `,
+            [invite.match_id]
+          );
+
+          if (!matchResult.rows[0] || matchResult.rows[0].status !== 'active') {
+            await invalidateInviteLinksByRoom(client, invite.room_id, 'match_ended');
+            throw new StoreError('invite_invalid', 'validation_error');
+          }
+        }
+
+        let joinAsSpectator = true;
+        if (room.game_type === 'gomoku' || room.game_type === 'go' || room.game_type === 'xiangqi') {
+          const playersResult = await client.query<{ player_count: number }>(
+            `
+              SELECT COUNT(*)::int AS player_count
+              FROM room_players
+              WHERE room_id = $1 AND left_at IS NULL AND role = 'player'
+            `,
+            [room.id]
+          );
+          const playerCount = playersResult.rows[0]?.player_count ?? 0;
+          joinAsSpectator = playerCount >= playerSlotsForGame(room.game_type);
+        }
+
+        const joinedRoom = await joinRoomTx(client, room.id, params.userId, joinAsSpectator);
+        const role =
+          joinedRoom.players.find((player) => player.userId === params.userId)?.role ?? 'spectator';
+        return { room: joinedRoom, role };
       });
     },
 

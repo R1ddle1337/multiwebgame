@@ -1,12 +1,14 @@
 import type {
   BlockDTO,
   GameType,
+  InviteLinkDTO,
   InvitationDTO,
   MatchDTO,
   RatingFormulaDTO,
   RatingDTO,
   ReportDTO,
   RoomDTO,
+  RoomPlayerRole,
   SessionDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
@@ -51,6 +53,11 @@ export interface Store {
   createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO>;
   joinRoom(roomId: string, userId: string, asSpectator?: boolean): Promise<RoomDTO>;
   leaveRoom(roomId: string, userId: string): Promise<RoomDTO | null>;
+  createOrGetInviteLink(params: { roomId: string; createdByUserId: string }): Promise<InviteLinkDTO>;
+  acceptInviteLink(params: {
+    token: string;
+    userId: string;
+  }): Promise<{ room: RoomDTO; role: RoomPlayerRole }>;
   createInvitation(params: { roomId: string; fromUserId: string; toUserId: string }): Promise<InvitationDTO>;
   listInvitationsForUser(userId: string): Promise<InvitationDTO[]>;
   respondInvitation(params: {

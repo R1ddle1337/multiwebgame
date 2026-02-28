@@ -1,6 +1,6 @@
 import type { UserDTO } from '@multiwebgame/shared-types';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 import { LanguageSwitcher, useI18n } from './context/I18nContext';
 import { RealtimeProvider, useRealtime } from './context/RealtimeContext';
@@ -11,6 +11,20 @@ import { LobbyPage } from './pages/LobbyPage';
 import { ReplayPage } from './pages/ReplayPage';
 import { RoomPage } from './pages/RoomPage';
 import { TrainingPage } from './pages/TrainingPage';
+import { InvitePage } from './pages/InvitePage';
+
+function resolveInviteToken(pathname: string): string | null {
+  const match = pathname.match(/^\/invite\/([^/]+)$/);
+  if (!match) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
 
 function AuthGate({ onAuth }: { onAuth: (token: string, user: UserDTO) => void }) {
   const { t, translateError } = useI18n();
@@ -317,6 +331,8 @@ function Shell({
 
 export function App() {
   const { t, translateError } = useI18n();
+  const location = useLocation();
+  const inviteToken = useMemo(() => resolveInviteToken(location.pathname), [location.pathname]);
   const [token, setToken] = useState<string | null>(() => storage.getToken());
   const [user, setUser] = useState<UserDTO | null>(null);
   const [loading, setLoading] = useState(Boolean(token));
@@ -333,6 +349,14 @@ export function App() {
     setShowSessionResetAction(false);
     setLoading(false);
     setLoadingStalled(false);
+  }, []);
+
+  const applyAuth = useCallback((nextToken: string, nextUser: UserDTO) => {
+    storage.setToken(nextToken);
+    setToken(nextToken);
+    setUser(nextUser);
+    setSessionError(null);
+    setShowSessionResetAction(false);
   }, []);
 
   useEffect(() => {
@@ -408,22 +432,18 @@ export function App() {
     return () => clearTimeout(timer);
   }, [loading, token]);
 
+  if (inviteToken) {
+    return (
+      <InvitePage inviteToken={inviteToken} token={token} onAuth={applyAuth} onAuthInvalid={clearSession} />
+    );
+  }
+
   if (!token) {
     if (loading) {
       return <main className="auth-gate">{t('auth.loading_session')}</main>;
     }
 
-    return (
-      <AuthGate
-        onAuth={(nextToken, nextUser) => {
-          storage.setToken(nextToken);
-          setToken(nextToken);
-          setUser(nextUser);
-          setSessionError(null);
-          setShowSessionResetAction(false);
-        }}
-      />
-    );
+    return <AuthGate onAuth={applyAuth} />;
   }
 
   if (!user) {

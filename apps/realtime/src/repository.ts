@@ -49,7 +49,7 @@ async function abandonActiveMatches(
   roomId: string,
   reason: 'required_player_left' | 'inactive_timeout' | 'room_empty' | 'stale_match_recovery'
 ): Promise<void> {
-  await client.query(
+  const result = await client.query(
     `
       UPDATE matches
       SET
@@ -58,6 +58,25 @@ async function abandonActiveMatches(
         result_payload = COALESCE(result_payload, '{}'::jsonb) || jsonb_build_object('abandonedReason', $2::text),
         ended_at = COALESCE(ended_at, NOW())
       WHERE room_id = $1 AND status = 'active'
+    `,
+    [roomId, reason]
+  );
+
+  if (result.rowCount) {
+    await invalidateInviteLinksByRoom(client, roomId, 'match_ended');
+  }
+}
+
+async function invalidateInviteLinksByRoom(
+  client: DbExecutor,
+  roomId: string,
+  reason: 'match_ended' | 'room_closed'
+): Promise<void> {
+  await client.query(
+    `
+      UPDATE invite_links
+      SET invalidated_at = NOW(), invalidated_reason = $2
+      WHERE room_id = $1 AND invalidated_at IS NULL
     `,
     [roomId, reason]
   );
@@ -105,6 +124,7 @@ async function reconcileRoomLifecycleTx(
   if (membersResult.rows.length === 0) {
     await abandonActiveMatches(client, roomId, 'room_empty');
     await client.query(`UPDATE rooms SET status = 'closed' WHERE id = $1`, [roomId]);
+    await invalidateInviteLinksByRoom(client, roomId, 'room_closed');
     return null;
   }
 
@@ -666,7 +686,7 @@ export async function completeMatch(params: {
       return;
     }
 
-    await client.query(
+    const completed = await client.query(
       `
         UPDATE matches
         SET status = $1, winner_user_id = $2, result_payload = $3, ended_at = NOW()
@@ -675,9 +695,15 @@ export async function completeMatch(params: {
       [params.status, params.winnerUserId, params.resultPayload ?? null, params.matchId]
     );
 
+    if (!completed.rowCount) {
+      return;
+    }
+
     if (params.status === 'completed') {
       await updateRatingsForMatch(client, params.roomId, match.game_type, params.winnerUserId);
     }
+
+    await invalidateInviteLinksByRoom(client, params.roomId, 'match_ended');
 
     await client.query(
       `

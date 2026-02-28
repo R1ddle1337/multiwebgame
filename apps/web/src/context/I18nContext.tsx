@@ -107,6 +107,12 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.invite.title': '按用户 ID 邀请',
     'room.invite.placeholder': '目标用户 UUID',
     'room.invite.submit': '发送邀请',
+    'room.invite_link.title': '邀请链接',
+    'room.invite_link.hint': '可重复使用，直到该房间对局结束或房间关闭。',
+    'room.invite_link.generate': '生成邀请链接',
+    'room.invite_link.copy': '复制链接',
+    'room.invite_link.copied': '已复制到剪贴板',
+    'room.invite_link.copy_manual': '复制失败，请手动复制链接',
     'room.game.title': '对局',
     'room.waiting_for_opponent': '等待对手加入后开始',
     'room.next_turn': '下一手: {player} • 状态: {status}',
@@ -147,6 +153,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'replay.moves.red': '红方',
     'replay.moves.black': '黑方',
     'replay.moves.empty': '—',
+    'invite.title': '邀请链接加入',
+    'invite.processing': '正在处理邀请链接，请稍候...',
+    'invite.failed': '邀请处理失败',
     'enum.role.player': '玩家',
     'enum.role.spectator': '观战',
     'enum.status.open': '开放',
@@ -175,7 +184,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.not_a_match_player': '你不是当前对局玩家',
     'error.room_not_subscribed': '请先进入房间后再操作',
     'error.room_join_failed': '加入房间失败，请稍后重试',
+    'error.invite_invalid': '邀请链接已失效或不可用',
     'error.game_type_mismatch': '游戏类型不匹配',
+    'error.out_of_bounds': '坐标超出棋盘范围',
     'error.out_of_turn': '未轮到你落子',
     'error.piece_not_owned': '只能操作己方棋子',
     'error.invalid_move': '非法落子',
@@ -286,6 +297,12 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.invite.title': 'Invite User By ID',
     'room.invite.placeholder': 'target user UUID',
     'room.invite.submit': 'Send Invite',
+    'room.invite_link.title': 'Invite Link',
+    'room.invite_link.hint': 'Reusable until the room match ends or the room is closed.',
+    'room.invite_link.generate': 'Generate Invite Link',
+    'room.invite_link.copy': 'Copy Link',
+    'room.invite_link.copied': 'Copied to clipboard',
+    'room.invite_link.copy_manual': 'Copy failed. Please copy the link manually.',
     'room.game.title': 'Game',
     'room.waiting_for_opponent': 'Waiting for an opponent to join before the match starts.',
     'room.next_turn': 'Next turn: {player} • Status: {status}',
@@ -326,6 +343,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'replay.moves.red': 'Red',
     'replay.moves.black': 'Black',
     'replay.moves.empty': '—',
+    'invite.title': 'Join Via Invite Link',
+    'invite.processing': 'Processing invite link...',
+    'invite.failed': 'Unable to join from invite link',
     'enum.role.player': 'player',
     'enum.role.spectator': 'spectator',
     'enum.status.open': 'open',
@@ -354,7 +374,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.not_a_match_player': 'Not a match player',
     'error.room_not_subscribed': 'Join the room before sending actions',
     'error.room_join_failed': 'Failed to join room. Please retry.',
+    'error.invite_invalid': 'Invite link is invalid or expired',
     'error.game_type_mismatch': 'Game type mismatch',
+    'error.out_of_bounds': 'Move coordinates are out of bounds',
     'error.out_of_turn': 'It is not your turn',
     'error.piece_not_owned': 'You can only move your own piece',
     'error.invalid_move': 'Invalid move',
@@ -460,6 +482,9 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       if (normalized.includes('room_access_denied')) {
         return t('error.room_access_denied');
       }
+      if (normalized.includes('invite_invalid') || normalized.includes('match_ended')) {
+        return withCode('error.invite_invalid');
+      }
       if (normalized.includes('capacity')) {
         return t('error.room_capacity');
       }
@@ -483,6 +508,9 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       }
       if (normalized.includes('game_type_mismatch')) {
         return withCode('error.game_type_mismatch');
+      }
+      if (normalized.includes('out_of_bounds')) {
+        return withCode('error.out_of_bounds');
       }
       if (normalized.includes('out_of_turn')) {
         return withCode('error.out_of_turn');

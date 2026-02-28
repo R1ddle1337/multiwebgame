@@ -78,6 +78,25 @@ Auth uses `Authorization: Bearer <jwt>`.
     - if required player count is no longer satisfiable for an active match -> active match is marked `abandoned`, room reopens
   - Room cleanup supports reconnect grace in realtime; prolonged inactivity can be treated as leave by server policy.
 
+- `POST /rooms/:roomId/invite-link`
+  - Auth required
+  - Host-only
+  - Creates or reuses the active room invite link.
+  - Returns: `{ roomId, token, url }`
+  - `url` format: `${WEB_ORIGIN}/invite/:token`
+
+- `POST /invite-links/:token/accept`
+  - Auth required
+  - Accepts a shareable invite token and joins the room.
+  - Auto-role behavior:
+    - Board games (`gomoku`/`go`/`xiangqi`) try player first when seats are available.
+    - If player seats are not available, join falls back to spectator.
+  - Returns: `{ room, role }`
+  - Invalid/expired link response: `400 { error: "invite_invalid" }`
+  - Invalidation policy:
+    - room closed -> invalid
+    - active match completed/abandoned -> invalid
+
 ## Invitations
 
 - `GET /invitations`

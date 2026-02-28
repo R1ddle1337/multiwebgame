@@ -134,6 +134,18 @@ export class ApiClient {
     });
   }
 
+  createInviteLink(roomId: string): Promise<{ roomId: string; token: string; url: string }> {
+    return this.request(`/rooms/${roomId}/invite-link`, {
+      method: 'POST'
+    });
+  }
+
+  acceptInviteLink(token: string): Promise<{ room: RoomDTO; role: 'player' | 'spectator' }> {
+    return this.request(`/invite-links/${token}/accept`, {
+      method: 'POST'
+    });
+  }
+
   leaveRoom(roomId: string): Promise<{ room: RoomDTO | null }> {
     return this.request(`/rooms/${roomId}/leave`, {
       method: 'POST'

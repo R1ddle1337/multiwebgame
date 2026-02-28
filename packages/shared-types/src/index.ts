@@ -51,6 +51,17 @@ export interface InvitationDTO {
   respondedAt: string | null;
 }
 
+export interface InviteLinkDTO {
+  id: string;
+  roomId: string;
+  token: string;
+  createdByUserId: string | null;
+  matchId: string | null;
+  createdAt: string;
+  invalidatedAt: string | null;
+  invalidatedReason: string | null;
+}
+
 export interface MatchMoveDTO {
   id: string;
   matchId: string;

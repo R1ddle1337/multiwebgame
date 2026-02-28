@@ -83,6 +83,8 @@ export function RoomPage({ api, user }: Props) {
 
   const [fallbackRoom, setFallbackRoom] = useState<RoomDTO | null>(null);
   const [inviteUserId, setInviteUserId] = useState('');
+  const [inviteLinkUrl, setInviteLinkUrl] = useState<string | null>(null);
+  const [inviteLinkNotice, setInviteLinkNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [xiangqiSelection, setXiangqiSelection] = useState<{ x: number; y: number } | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -429,6 +431,52 @@ export function RoomPage({ api, user }: Props) {
           />
           <button type="submit">{t('room.invite.submit')}</button>
         </form>
+
+        <h3>{t('room.invite_link.title')}</h3>
+        <p>{t('room.invite_link.hint')}</p>
+        <div className="button-row">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const result = await api.createInviteLink(room.id);
+                setInviteLinkUrl(result.url);
+                setInviteLinkNotice(null);
+                setError(null);
+              } catch (err) {
+                setError(translateError(err instanceof Error ? err.message : t('common.error_generic')));
+              }
+            }}
+          >
+            {t('room.invite_link.generate')}
+          </button>
+          {inviteLinkUrl ? (
+            <button
+              type="button"
+              className="secondary"
+              onClick={async () => {
+                try {
+                  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+                    setInviteLinkNotice(t('room.invite_link.copy_manual'));
+                    return;
+                  }
+                  await navigator.clipboard.writeText(inviteLinkUrl);
+                  setInviteLinkNotice(t('room.invite_link.copied'));
+                } catch {
+                  setInviteLinkNotice(t('room.invite_link.copy_manual'));
+                }
+              }}
+            >
+              {t('room.invite_link.copy')}
+            </button>
+          ) : null}
+        </div>
+        {inviteLinkUrl ? (
+          <p>
+            <code>{inviteLinkUrl}</code>
+          </p>
+        ) : null}
+        {inviteLinkNotice ? <p>{inviteLinkNotice}</p> : null}
 
         {error ? <p className="error-text">{error}</p> : null}
       </section>

@@ -118,6 +118,11 @@ function normalizeOrigin(origin: string): string {
   }
 }
 
+function inviteLinkUrl(webOrigin: string, token: string): string {
+  const base = normalizeOrigin(webOrigin).replace(/\/+$/, '');
+  return `${base}/invite/${encodeURIComponent(token)}`;
+}
+
 function parseCorsOrigins(value: string): ParsedCorsOrigins {
   const candidates = value
     .split(',')
@@ -366,10 +371,39 @@ export function createApp(store: Store, options: CreateAppOptions = {}) {
     }
   });
 
+  app.post('/rooms/:roomId/invite-link', requireAuth(store), async (req: AuthedRequest, res, next) => {
+    try {
+      const inviteLink = await store.createOrGetInviteLink({
+        roomId: firstParam(req.params.roomId),
+        createdByUserId: req.auth!.userId
+      });
+
+      res.json({
+        roomId: inviteLink.roomId,
+        token: inviteLink.token,
+        url: inviteLinkUrl(options.webOrigin ?? config.webOrigin, inviteLink.token)
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post('/rooms/:roomId/leave', requireAuth(store), async (req: AuthedRequest, res, next) => {
     try {
       const room = await store.leaveRoom(firstParam(req.params.roomId), req.auth!.userId);
       res.json({ room });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/invite-links/:token/accept', requireAuth(store), async (req: AuthedRequest, res, next) => {
+    try {
+      const accepted = await store.acceptInviteLink({
+        token: firstParam(req.params.token),
+        userId: req.auth!.userId
+      });
+      res.json(accepted);
     } catch (error) {
       next(error);
     }

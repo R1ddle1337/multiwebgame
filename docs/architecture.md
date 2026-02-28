@@ -32,6 +32,10 @@
   - creator/host leaves -> ownership is reassigned
   - empty rooms auto-close
 - Impossible active matches auto-abandon and room status is reconciled back to `open`.
+- Shareable room invite links are reusable and role-aware:
+  - token opens web route `/invite/:token`
+  - join defaults to player for available board-game seats; otherwise spectator
+  - link invalidates on room close or when the room's active match ends (`completed`/`abandoned`)
 - Realtime applies inactive-player timeout with reconnect grace; reconnecting with same session before timeout restores control without seat ghosting.
 
 ## Client i18n Model

@@ -59,6 +59,10 @@ describe('postgres store regressions', () => {
         return { rows: [], rowCount: 1 };
       }
 
+      if (normalized.includes('UPDATE invite_links SET invalidated_at = NOW()')) {
+        return { rows: [], rowCount: 1 };
+      }
+
       if (normalized.includes("UPDATE rooms SET status = 'closed' WHERE id = $1")) {
         return { rows: [], rowCount: 1 };
       }
