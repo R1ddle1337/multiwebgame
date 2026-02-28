@@ -67,6 +67,10 @@ describe('postgres store regressions', () => {
         return { rows: [], rowCount: 1 };
       }
 
+      if (normalized.includes('UPDATE rooms SET last_active_at = NOW() WHERE id = $1')) {
+        return { rows: [], rowCount: 1 };
+      }
+
       throw new Error(`Unexpected query: ${normalized}`);
     });
 

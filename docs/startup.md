@@ -10,6 +10,9 @@
 
 1. Copy `.env.example` to `.env`.
 2. Set a strong `JWT_SECRET`.
+3. Room idle cleanup knobs (optional):
+   - `ROOM_IDLE_CLOSE_MINUTES` (default `30`)
+   - `ROOM_IDLE_CLOSE_SWEEP_MINUTES` (default `5`)
 
 ## Install
 

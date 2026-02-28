@@ -403,6 +403,10 @@ async function invalidateInviteLinksByRoom(
   );
 }
 
+async function touchRoomLastActiveAtTx(client: DbExecutor, roomId: string): Promise<void> {
+  await client.query(`UPDATE rooms SET last_active_at = NOW() WHERE id = $1`, [roomId]);
+}
+
 async function abandonActiveMatches(
   client: DbExecutor,
   roomId: string,
@@ -564,6 +568,7 @@ async function joinRoomTx(
       );
     }
 
+    await touchRoomLastActiveAtTx(client, roomId);
     const currentRoom = await fetchRoomById(client, roomId);
     if (!currentRoom) {
       throw new StoreError('Room not found', 'not_found');
@@ -598,6 +603,7 @@ async function joinRoomTx(
     [roomId, userId, role, seat]
   );
 
+  await touchRoomLastActiveAtTx(client, roomId);
   const updatedRoom = await fetchRoomById(client, roomId);
   if (!updatedRoom) {
     throw new StoreError('Room not found', 'not_found');
@@ -899,6 +905,7 @@ export function createPostgresStore(): Store {
         if (!left.rowCount) {
           throw new StoreError('User is not in room', 'not_found');
         }
+        await touchRoomLastActiveAtTx(client, roomId);
         return reconcileRoomLifecycleTx(client, roomId, 'required_player_left');
       });
     },

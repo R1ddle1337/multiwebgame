@@ -34,6 +34,9 @@
 - Host lifecycle is deterministic:
   - creator/host leaves -> ownership is reassigned
   - empty rooms auto-close
+- Realtime runs periodic idle-room cleanup:
+  - `rooms.status='open'` + no active match + `last_active_at` beyond TTL
+  - eligible rooms are auto-closed (history/match data preserved)
 - Impossible active matches auto-abandon and room status is reconciled back to `open`.
 - Shareable room invite links are reusable and role-aware:
   - token opens web route `/invite/:token`

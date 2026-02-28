@@ -45,6 +45,7 @@ import { MatchmakingQueue } from './matchmaking.js';
 import { aggregateReconnectState } from './reconnect-state.js';
 import {
   close,
+  closeIdleRooms,
   completeMatch,
   createMatchForRoom,
   createMatchMove,
@@ -55,7 +56,8 @@ import {
   leaveRoomIfPresent,
   listPendingInvitationsForUser,
   reconcileRoomLifecycle,
-  respondToInvitation
+  respondToInvitation,
+  touchRoomLastActiveAt
 } from './repository.js';
 import { deriveRuntimeCompletion } from './runtime-completion.js';
 
@@ -1482,6 +1484,18 @@ async function handleInvitePoll(): Promise<void> {
   }
 }
 
+async function handleIdleRoomCloseSweep(): Promise<void> {
+  const closedRoomIds = await closeIdleRooms(config.roomIdleCloseMinutes);
+  if (closedRoomIds.length === 0) {
+    return;
+  }
+
+  for (const roomId of closedRoomIds) {
+    activeRuntimes.delete(roomId);
+    await broadcastRoomStateToSubscribers(roomId);
+  }
+}
+
 function parseMessage(raw: string): ClientToServerMessage | null {
   try {
     return JSON.parse(raw) as ClientToServerMessage;
@@ -1625,6 +1639,7 @@ wss.on('connection', (socket) => {
         }
 
         addRoomSubscription(client, msg.payload.roomId);
+        await touchRoomLastActiveAt(msg.payload.roomId);
 
         await ensureRoomMatchIfReady(msg.payload.roomId);
         await broadcastRoomStateToSubscribers(msg.payload.roomId);
@@ -1910,6 +1925,12 @@ const roomLifecycleSweepInterval = setInterval(() => {
   }
 }, 7_000);
 
+const idleRoomCloseSweepInterval = setInterval(() => {
+  handleIdleRoomCloseSweep().catch((error) => {
+    console.warn('idle room close sweep failed', error instanceof Error ? error.message : 'unknown_error');
+  });
+}, config.roomIdleCloseSweepMinutes * 60_000);
+
 redis
   .connect()
   .then(() => redis.ping())
@@ -1929,6 +1950,7 @@ const shutdown = async () => {
   clearInterval(matchmakingSweepInterval);
   clearInterval(heartbeatSweepInterval);
   clearInterval(roomLifecycleSweepInterval);
+  clearInterval(idleRoomCloseSweepInterval);
   for (const byRoom of pendingInactiveRoomLeaves.values()) {
     for (const timer of byRoom.values()) {
       clearTimeout(timer);

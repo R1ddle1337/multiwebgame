@@ -88,6 +88,22 @@ async function invalidateInviteLinksByRoom(
   );
 }
 
+async function touchRoomLastActiveAtTx(client: DbExecutor, roomId: string): Promise<void> {
+  await client.query(`UPDATE rooms SET last_active_at = NOW() WHERE id = $1`, [roomId]);
+}
+
+async function touchRoomByMatchIdTx(client: DbExecutor, matchId: string): Promise<void> {
+  await client.query(
+    `
+      UPDATE rooms r
+      SET last_active_at = NOW()
+      FROM matches m
+      WHERE m.id = $1 AND m.room_id = r.id
+    `,
+    [matchId]
+  );
+}
+
 async function reconcileRoomLifecycleTx(
   client: DbExecutor,
   roomId: string,
@@ -562,9 +578,9 @@ export async function createMatchForRoom(roomId: string): Promise<string> {
 
     const existingMatch = existingActive.rows[0];
     if (existingMatch) {
-      if (room.status !== 'in_match') {
-        await client.query(`UPDATE rooms SET status = 'in_match' WHERE id = $1`, [roomId]);
-      }
+      await client.query(`UPDATE rooms SET status = 'in_match', last_active_at = NOW() WHERE id = $1`, [
+        roomId
+      ]);
       return existingMatch.id;
     }
 
@@ -583,7 +599,9 @@ export async function createMatchForRoom(roomId: string): Promise<string> {
       throw new Error('not_enough_players');
     }
 
-    await client.query(`UPDATE rooms SET status = 'in_match' WHERE id = $1`, [roomId]);
+    await client.query(`UPDATE rooms SET status = 'in_match', last_active_at = NOW() WHERE id = $1`, [
+      roomId
+    ]);
 
     const result = await client.query<{ id: string }>(
       `
@@ -636,24 +654,27 @@ export async function createMatchMove(params: {
   moveType: string;
   payload: Record<string, unknown>;
 }): Promise<MatchMoveDTO> {
-  const result = await pool.query<{
-    id: string;
-    match_id: string;
-    move_index: number;
-    actor_user_id: string;
-    move_type: string;
-    payload: Record<string, unknown>;
-    created_at: Date | string;
-  }>(
-    `
-      INSERT INTO match_moves (match_id, move_index, actor_user_id, move_type, payload)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, match_id, move_index, actor_user_id, move_type, payload, created_at
-    `,
-    [params.matchId, params.moveIndex, params.actorUserId, params.moveType, params.payload]
-  );
+  return withTransaction(async (client) => {
+    const result = await client.query<{
+      id: string;
+      match_id: string;
+      move_index: number;
+      actor_user_id: string;
+      move_type: string;
+      payload: Record<string, unknown>;
+      created_at: Date | string;
+    }>(
+      `
+        INSERT INTO match_moves (match_id, move_index, actor_user_id, move_type, payload)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, match_id, move_index, actor_user_id, move_type, payload, created_at
+      `,
+      [params.matchId, params.moveIndex, params.actorUserId, params.moveType, params.payload]
+    );
 
-  return mapMatchMove(result.rows[0]);
+    await touchRoomByMatchIdTx(client, params.matchId);
+    return mapMatchMove(result.rows[0]);
+  });
 }
 
 export async function completeMatch(params: {
@@ -714,7 +735,7 @@ export async function completeMatch(params: {
     await client.query(
       `
         UPDATE rooms
-        SET status = 'open'
+        SET status = 'open', last_active_at = NOW()
         WHERE id = $1
       `,
       [params.roomId]
@@ -853,7 +874,7 @@ export async function joinRoomIfPossible(
           [roomId, userId, seat]
         );
       }
-
+      await touchRoomLastActiveAtTx(client, roomId);
       return fetchRoomById(client, roomId);
     }
 
@@ -884,6 +905,7 @@ export async function joinRoomIfPossible(
       ]);
     }
 
+    await touchRoomLastActiveAtTx(client, roomId);
     return fetchRoomById(client, roomId);
   });
 }
@@ -908,7 +930,7 @@ export async function leaveRoomIfPresent(
       return null;
     }
 
-    await client.query(
+    const left = await client.query(
       `
         UPDATE room_players
         SET left_at = NOW()
@@ -917,7 +939,49 @@ export async function leaveRoomIfPresent(
       [roomId, userId]
     );
 
+    if (left.rowCount) {
+      await touchRoomLastActiveAtTx(client, roomId);
+    }
+
     return reconcileRoomLifecycleTx(client, roomId, reason);
+  });
+}
+
+export async function touchRoomLastActiveAt(roomId: string): Promise<void> {
+  await pool.query(`UPDATE rooms SET last_active_at = NOW() WHERE id = $1`, [roomId]);
+}
+
+export async function closeIdleRooms(idleMinutes: number): Promise<string[]> {
+  return withTransaction(async (client) => {
+    const closed = await client.query<{ id: string }>(
+      `
+        UPDATE rooms r
+        SET status = 'closed'
+        WHERE r.status = 'open'
+          AND r.last_active_at < NOW() - ($1::int * INTERVAL '1 minute')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM matches m
+            WHERE m.room_id = r.id AND m.status = 'active'
+          )
+        RETURNING r.id
+      `,
+      [idleMinutes]
+    );
+
+    const roomIds = closed.rows.map((row) => row.id);
+    if (roomIds.length > 0) {
+      await client.query(
+        `
+          UPDATE invite_links
+          SET invalidated_at = NOW(), invalidated_reason = 'room_closed'
+          WHERE room_id = ANY($1::uuid[]) AND invalidated_at IS NULL
+        `,
+        [roomIds]
+      );
+    }
+
+    return roomIds;
   });
 }
 
