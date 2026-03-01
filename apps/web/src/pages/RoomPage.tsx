@@ -1,4 +1,5 @@
 import {
+  createBattleshipState,
   createConnect4State,
   createDotsState,
   createHexState,
@@ -11,6 +12,10 @@ import {
   createXiangqiState
 } from '@multiwebgame/game-engines';
 import type {
+  BattleshipMove,
+  BattleshipMoveInput,
+  BattleshipShipPlacement,
+  BattleshipState,
   CardsCard,
   CardsMoveInput,
   CardsState,
@@ -80,6 +85,7 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
 
 function formatResultText(
   state:
+    | BattleshipState
     | Connect4State
     | DotsState
     | GomokuState
@@ -128,6 +134,13 @@ function formatActionText(
 }
 
 const CARD_SUITS: CardsCard['suit'][] = ['clubs', 'diamonds', 'hearts', 'spades'];
+const DEFAULT_BATTLESHIP_FLEET: BattleshipShipPlacement[] = [
+  { x: 0, y: 0, orientation: 'h', length: 5 },
+  { x: 0, y: 1, orientation: 'h', length: 4 },
+  { x: 0, y: 2, orientation: 'h', length: 3 },
+  { x: 0, y: 3, orientation: 'h', length: 3 },
+  { x: 0, y: 4, orientation: 'h', length: 2 }
+];
 
 function santoriniWorkerAt(state: SantoriniState, x: number, y: number): string | null {
   for (const player of ['black', 'white'] as const) {
@@ -151,6 +164,28 @@ function onitamaPieceAt(state: OnitamaState, x: number, y: number): string | nul
   const prefix = piece.player === 'black' ? 'B' : 'W';
   const suffix = piece.kind === 'master' ? 'M' : 'S';
   return `${prefix}${suffix}`;
+}
+
+function battleshipShipAt(
+  ships: BattleshipShipPlacement[] | null,
+  x: number,
+  y: number
+): BattleshipShipPlacement | null {
+  if (!ships) {
+    return null;
+  }
+
+  for (const ship of ships) {
+    for (let offset = 0; offset < ship.length; offset += 1) {
+      const cellX = ship.x + (ship.orientation === 'h' ? offset : 0);
+      const cellY = ship.y + (ship.orientation === 'v' ? offset : 0);
+      if (cellX === x && cellY === y) {
+        return ship;
+      }
+    }
+  }
+
+  return null;
 }
 
 function formatCardsCard(card: CardsCard): string {
@@ -182,6 +217,9 @@ export function RoomPage({ api, user }: Props) {
   const [onitamaFromY, setOnitamaFromY] = useState(4);
   const [onitamaToX, setOnitamaToX] = useState(2);
   const [onitamaToY, setOnitamaToY] = useState(2);
+  const [battleshipFleet, setBattleshipFleet] = useState<BattleshipShipPlacement[]>(DEFAULT_BATTLESHIP_FLEET);
+  const [battleshipShotX, setBattleshipShotX] = useState(0);
+  const [battleshipShotY, setBattleshipShotY] = useState(0);
   const [codenamesClueWord, setCodenamesClueWord] = useState('ocean');
   const [codenamesClueCount, setCodenamesClueCount] = useState(1);
   const [codenamesGuessIndex, setCodenamesGuessIndex] = useState(0);
@@ -211,6 +249,18 @@ export function RoomPage({ api, user }: Props) {
 
   const snapshot = realtime.roomStates[roomId];
   const room = snapshot?.room ?? fallbackRoom;
+  const defaultBattleshipState = useMemo<BattleshipState>(
+    () => ({
+      ...createBattleshipState({
+        boardSize: 10
+      }),
+      placementsSubmitted: {
+        black: false,
+        white: false
+      }
+    }),
+    []
+  );
 
   const gomokuState =
     snapshot?.gameType === 'gomoku' ? (snapshot.state as GomokuState) : createGomokuState(15);
@@ -224,6 +274,8 @@ export function RoomPage({ api, user }: Props) {
       : createOnitamaState({
           openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
         });
+  const battleshipState =
+    snapshot?.gameType === 'battleship' ? (snapshot.state as BattleshipState) : defaultBattleshipState;
   const codenamesState =
     snapshot?.gameType === 'codenames_duet' ? (snapshot.state as CodenamesDuetState | null) : null;
   const connect4State =
@@ -280,6 +332,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'onitama' &&
     viewerRole === 'player' &&
     onitamaState?.status === 'playing';
+  const battleshipTurn =
+    hasActiveMatch &&
+    room?.gameType === 'battleship' &&
+    viewerRole === 'player' &&
+    battleshipState.status === 'playing';
   const codenamesTurn =
     hasActiveMatch &&
     room?.gameType === 'codenames_duet' &&
@@ -338,6 +395,10 @@ export function RoomPage({ api, user }: Props) {
     Boolean(onitamaTurn) &&
     ((seat === 1 && onitamaState?.nextPlayer === 'black') ||
       (seat === 2 && onitamaState?.nextPlayer === 'white'));
+  const canPlayBattleship =
+    battleshipTurn &&
+    ((seat === 1 && battleshipState.nextPlayer === 'black') ||
+      (seat === 2 && battleshipState.nextPlayer === 'white'));
   const codenamesSide = seat === 1 ? 'black' : seat === 2 ? 'white' : null;
   const canPlayCodenames =
     Boolean(codenamesTurn) &&
@@ -382,6 +443,7 @@ export function RoomPage({ api, user }: Props) {
     canPlayGomoku ||
     canPlaySantorini ||
     canPlayOnitama ||
+    canPlayBattleship ||
     canPlayCodenames ||
     canPlayConnect4 ||
     canPlayGo ||
@@ -399,6 +461,11 @@ export function RoomPage({ api, user }: Props) {
     : (loveLetterHand[0] ?? 'guard');
   const xiangqiPerspective: XiangqiColor = seat === 2 ? 'black' : 'red';
   const previousCanPlayRef = useRef(false);
+  const battleshipSide = seat === 1 ? 'black' : seat === 2 ? 'white' : null;
+  const battleshipMyShips = battleshipSide ? battleshipState.ships[battleshipSide] : null;
+  const battleshipOpponent = battleshipSide ? (battleshipSide === 'black' ? 'white' : 'black') : null;
+  const battleshipOutgoingShots = battleshipSide ? battleshipState.shots[battleshipSide] : null;
+  const battleshipIncomingShots = battleshipOpponent ? battleshipState.shots[battleshipOpponent] : null;
 
   const latestMoveSummary = useMemo<LastMoveSummary | null>(() => {
     if (!room || room.gameType === 'single_2048') {
@@ -423,6 +490,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'onitama') {
       return describeLastMove('onitama', snapshot.lastMove as OnitamaMove);
+    }
+
+    if (room.gameType === 'battleship') {
+      return describeLastMove('battleship', snapshot.lastMove as BattleshipMove);
     }
 
     if (room.gameType === 'codenames_duet') {
@@ -491,6 +562,10 @@ export function RoomPage({ api, user }: Props) {
       return onitamaState ? formatResultText(onitamaState, statusLabel, colorLabel, t) : null;
     }
 
+    if (room.gameType === 'battleship') {
+      return formatResultText(battleshipState, statusLabel, colorLabel, t);
+    }
+
     if (room.gameType === 'codenames_duet') {
       if (!codenamesState) {
         return null;
@@ -546,6 +621,7 @@ export function RoomPage({ api, user }: Props) {
     gomokuState,
     santoriniState,
     onitamaState,
+    battleshipState,
     codenamesState,
     connect4State,
     goState,
@@ -687,6 +763,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'onitama',
+        move
+      }
+    });
+  };
+
+  const sendBattleshipMove = (move: BattleshipMoveInput) => {
+    if (!canPlayBattleship) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'battleship',
         move
       }
     });
@@ -1418,6 +1509,237 @@ export function RoomPage({ api, user }: Props) {
                 ) : null}
               </>
             )}
+          </>
+        ) : null}
+
+        {room.gameType === 'battleship' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(battleshipState.nextPlayer),
+                  status: statusLabel(battleshipState.status)
+                })}
+              </p>
+            ) : null}
+            <p>
+              {t('room.battleship.placement_status', {
+                black: battleshipState.placementsSubmitted.black ? '✓' : '…',
+                white: battleshipState.placementsSubmitted.white ? '✓' : '…'
+              })}
+            </p>
+
+            {viewerRole === 'player' &&
+            battleshipSide &&
+            !battleshipState.placementsSubmitted[battleshipSide] ? (
+              <div className="card">
+                <div className="simple-list">
+                  {battleshipFleet.map((ship, index) => (
+                    <div key={`fleet-${ship.length}-${index}`} className="button-row">
+                      <strong>L{ship.length}</strong>
+                      <label>
+                        X{' '}
+                        <input
+                          type="number"
+                          min={0}
+                          max={battleshipState.boardSize - 1}
+                          value={ship.x}
+                          onChange={(event) =>
+                            setBattleshipFleet((current) =>
+                              current.map((entry, entryIndex) =>
+                                entryIndex === index
+                                  ? {
+                                      ...entry,
+                                      x: Math.max(0, Number(event.target.value) || 0)
+                                    }
+                                  : entry
+                              )
+                            )
+                          }
+                          disabled={!canPlayBattleship}
+                        />
+                      </label>
+                      <label>
+                        Y{' '}
+                        <input
+                          type="number"
+                          min={0}
+                          max={battleshipState.boardSize - 1}
+                          value={ship.y}
+                          onChange={(event) =>
+                            setBattleshipFleet((current) =>
+                              current.map((entry, entryIndex) =>
+                                entryIndex === index
+                                  ? {
+                                      ...entry,
+                                      y: Math.max(0, Number(event.target.value) || 0)
+                                    }
+                                  : entry
+                              )
+                            )
+                          }
+                          disabled={!canPlayBattleship}
+                        />
+                      </label>
+                      <label>
+                        Dir{' '}
+                        <select
+                          value={ship.orientation}
+                          onChange={(event) =>
+                            setBattleshipFleet((current) =>
+                              current.map((entry, entryIndex) =>
+                                entryIndex === index
+                                  ? {
+                                      ...entry,
+                                      orientation: event.target
+                                        .value as BattleshipShipPlacement['orientation']
+                                    }
+                                  : entry
+                              )
+                            )
+                          }
+                          disabled={!canPlayBattleship}
+                        >
+                          <option value="h">h</option>
+                          <option value="v">v</option>
+                        </select>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      sendBattleshipMove({
+                        type: 'place_fleet',
+                        ships: battleshipFleet
+                      })
+                    }
+                    disabled={!canPlayBattleship}
+                  >
+                    {t('room.battleship.place_fleet')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {battleshipOutgoingShots ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${battleshipState.boardSize}, minmax(1.8rem, 1fr))`,
+                  gap: '0.2rem',
+                  maxWidth: '26rem'
+                }}
+              >
+                {battleshipOutgoingShots.flatMap((row, y) =>
+                  row.map((cell, x) => (
+                    <button
+                      key={`battleship-shot-${x}-${y}`}
+                      type="button"
+                      className="secondary"
+                      disabled={
+                        !canPlayBattleship || battleshipState.phase !== 'playing' || cell !== 'unknown'
+                      }
+                      onClick={() =>
+                        sendBattleshipMove({
+                          type: 'fire',
+                          x,
+                          y
+                        })
+                      }
+                      style={{ minHeight: '1.9rem', padding: '0.1rem' }}
+                    >
+                      {cell === 'hit' ? 'X' : cell === 'miss' ? 'o' : '·'}
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+
+            {battleshipMyShips && battleshipIncomingShots ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: `repeat(${battleshipState.boardSize}, minmax(1.8rem, 1fr))`,
+                  gap: '0.2rem',
+                  maxWidth: '26rem',
+                  marginTop: '0.6rem'
+                }}
+              >
+                {battleshipIncomingShots.flatMap((row, y) =>
+                  row.map((shot, x) => {
+                    const ship = battleshipShipAt(battleshipMyShips, x, y);
+                    const marker = shot === 'hit' ? 'X' : ship ? 'S' : shot === 'miss' ? 'o' : '·';
+
+                    return (
+                      <div
+                        key={`battleship-own-${x}-${y}`}
+                        style={{
+                          minHeight: '1.9rem',
+                          border: '1px solid var(--border)',
+                          borderRadius: '6px',
+                          textAlign: 'center',
+                          lineHeight: '1.9rem',
+                          fontSize: '0.8rem'
+                        }}
+                      >
+                        {marker}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              <p>{t('room.battleship.hidden_enemy_ships')}</p>
+            )}
+
+            <div className="button-row">
+              <label>
+                X{' '}
+                <input
+                  type="number"
+                  min={0}
+                  max={battleshipState.boardSize - 1}
+                  value={battleshipShotX}
+                  onChange={(event) => setBattleshipShotX(Math.max(0, Number(event.target.value) || 0))}
+                  disabled={!canPlayBattleship || battleshipState.phase !== 'playing'}
+                />
+              </label>
+              <label>
+                Y{' '}
+                <input
+                  type="number"
+                  min={0}
+                  max={battleshipState.boardSize - 1}
+                  value={battleshipShotY}
+                  onChange={(event) => setBattleshipShotY(Math.max(0, Number(event.target.value) || 0))}
+                  disabled={!canPlayBattleship || battleshipState.phase !== 'playing'}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  sendBattleshipMove({
+                    type: 'fire',
+                    x: battleshipShotX,
+                    y: battleshipShotY
+                  })
+                }
+                disabled={!canPlayBattleship || battleshipState.phase !== 'playing'}
+              >
+                {t('room.battleship.fire')}
+              </button>
+            </div>
+
+            {battleshipState.status === 'completed' ? (
+              <p>
+                {battleshipState.winner
+                  ? t('room.result.winner', { winner: colorLabel(battleshipState.winner) })
+                  : t('room.result.draw')}
+              </p>
+            ) : null}
           </>
         ) : null}
 

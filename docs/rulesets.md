@@ -63,6 +63,28 @@ Randomness + verification:
 - gameplay is blocked until RNG phase is `ready`
 - completed payload includes RNG proof transcript and sampled opening cards for replay verification
 
+## Battleship (2-player, 10x10)
+
+Implemented rules:
+
+- default board `10x10`
+- fleet lengths: `5/4/3/3/2`
+- placement phase:
+  - each player submits full fleet layout (no overlap, in-bounds)
+  - match enters firing phase after both fleets are validly submitted
+- firing phase:
+  - players alternate one shot per turn
+  - shot result is `miss` / `hit` / `sunk`
+  - repeat shots on the same cell are rejected
+- terminal:
+  - when one side has all ships sunk, shooter wins immediately
+
+Visibility policy:
+
+- active player only sees own fleet layout
+- spectators do not receive either fleet layout while match is active
+- completed replay/state projection can reveal both full fleets
+
 ## Codenames Duet (2-player co-op, 5x5)
 
 Implemented rules (v1 simplified co-op loop):

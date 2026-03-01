@@ -26,6 +26,13 @@ export {
   ONITAMA_CARDS
 } from './onitama.js';
 export {
+  applyBattleshipMove,
+  createBattleshipState,
+  normalizeBattleshipMove,
+  toBattleshipPublicState,
+  type BattleshipRuntimeState
+} from './battleship.js';
+export {
   applyCodenamesDuetMove,
   createCodenamesDuetRolePool,
   createCodenamesDuetState,

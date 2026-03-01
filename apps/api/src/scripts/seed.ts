@@ -38,6 +38,7 @@ async function run(): Promise<void> {
           'gomoku',
           'santorini',
           'onitama',
+          'battleship',
           'love_letter',
           'codenames_duet',
           'xiangqi',
@@ -46,7 +47,10 @@ async function run(): Promise<void> {
           'reversi',
           'dots',
           'backgammon',
-          'cards'
+          'cards',
+          'quoridor',
+          'hex',
+          'liars_dice'
         ]
       ]
     );

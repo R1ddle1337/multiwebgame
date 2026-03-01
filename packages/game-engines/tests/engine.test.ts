@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   apply2048Move,
   applyBackgammonMove,
+  applyBattleshipMove,
   applyCardsMove,
   applyConnect4Move,
   applyCodenamesDuetMove,
@@ -18,6 +19,7 @@ import {
   applyReversiMove,
   applyXiangqiMove,
   assignBackgammonTurnDice,
+  createBattleshipState,
   createDeterministicPrng,
   create2048State,
   createBackgammonState,
@@ -511,6 +513,105 @@ describe('love letter engine', () => {
     expect(result.accepted).toBe(true);
     expect(result.nextState.status).toBe('completed');
     expect(result.nextState.winner).toBe('white');
+  });
+});
+
+describe('battleship engine', () => {
+  it('accepts legal fleet placements and starts playing', () => {
+    let state = createBattleshipState();
+
+    const blackPlacement = applyBattleshipMove(state, {
+      type: 'place_fleet',
+      player: 'black',
+      ships: [
+        { x: 0, y: 0, orientation: 'h', length: 5 },
+        { x: 0, y: 1, orientation: 'h', length: 4 },
+        { x: 0, y: 2, orientation: 'h', length: 3 },
+        { x: 0, y: 3, orientation: 'h', length: 3 },
+        { x: 0, y: 4, orientation: 'h', length: 2 }
+      ]
+    });
+    expect(blackPlacement.accepted).toBe(true);
+    state = blackPlacement.nextState;
+
+    const whitePlacement = applyBattleshipMove(state, {
+      type: 'place_fleet',
+      player: 'white',
+      ships: [
+        { x: 5, y: 0, orientation: 'h', length: 5 },
+        { x: 6, y: 2, orientation: 'v', length: 4 },
+        { x: 8, y: 4, orientation: 'v', length: 3 },
+        { x: 3, y: 7, orientation: 'h', length: 3 },
+        { x: 0, y: 8, orientation: 'h', length: 2 }
+      ]
+    });
+    expect(whitePlacement.accepted).toBe(true);
+    expect(whitePlacement.nextState.phase).toBe('playing');
+    expect(whitePlacement.nextState.nextPlayer).toBe('black');
+  });
+
+  it('rejects overlapping ships in fleet placement', () => {
+    const state = createBattleshipState();
+    const placement = applyBattleshipMove(state, {
+      type: 'place_fleet',
+      player: 'black',
+      ships: [
+        { x: 0, y: 0, orientation: 'h', length: 5 },
+        { x: 0, y: 0, orientation: 'v', length: 4 },
+        { x: 0, y: 2, orientation: 'h', length: 3 },
+        { x: 0, y: 3, orientation: 'h', length: 3 },
+        { x: 0, y: 4, orientation: 'h', length: 2 }
+      ]
+    });
+
+    expect(placement.accepted).toBe(false);
+    expect(placement.reason).toBe('ship_overlap');
+  });
+
+  it('completes when all opponent ships are sunk', () => {
+    const state = createBattleshipState({
+      boardSize: 5,
+      shipLengths: [2]
+    });
+
+    const blackPlacement = applyBattleshipMove(state, {
+      type: 'place_fleet',
+      player: 'black',
+      ships: [{ x: 0, y: 0, orientation: 'h', length: 2 }]
+    });
+    const whitePlacement = applyBattleshipMove(blackPlacement.nextState, {
+      type: 'place_fleet',
+      player: 'white',
+      ships: [{ x: 2, y: 2, orientation: 'h', length: 2 }]
+    });
+
+    const firstShot = applyBattleshipMove(whitePlacement.nextState, {
+      type: 'fire',
+      player: 'black',
+      x: 2,
+      y: 2
+    });
+    expect(firstShot.accepted).toBe(true);
+    expect(firstShot.nextState.status).toBe('playing');
+
+    const whiteMiss = applyBattleshipMove(firstShot.nextState, {
+      type: 'fire',
+      player: 'white',
+      x: 4,
+      y: 4
+    });
+    expect(whiteMiss.accepted).toBe(true);
+
+    const finalShot = applyBattleshipMove(whiteMiss.nextState, {
+      type: 'fire',
+      player: 'black',
+      x: 3,
+      y: 2
+    });
+    expect(finalShot.accepted).toBe(true);
+    expect(finalShot.nextState.status).toBe('completed');
+    expect(finalShot.nextState.winner).toBe('black');
+    expect(finalShot.nextState.lastShot?.result).toBe('sunk');
   });
 });
 

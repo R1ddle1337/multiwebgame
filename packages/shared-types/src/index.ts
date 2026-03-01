@@ -3,6 +3,7 @@ export type GameType =
   | 'gomoku'
   | 'santorini'
   | 'onitama'
+  | 'battleship'
   | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
@@ -19,6 +20,7 @@ export type BoardGameType =
   | 'gomoku'
   | 'santorini'
   | 'onitama'
+  | 'battleship'
   | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
@@ -405,6 +407,73 @@ export interface LoveLetterState {
     black: boolean;
     white: boolean;
   };
+}
+
+export type BattleshipPlayer = 'black' | 'white';
+export type BattleshipShipOrientation = 'h' | 'v';
+export type BattleshipShotCell = 'unknown' | 'miss' | 'hit';
+
+export interface BattleshipShipPlacement {
+  x: number;
+  y: number;
+  orientation: BattleshipShipOrientation;
+  length: number;
+}
+
+export type BattleshipMoveInput =
+  | {
+      type: 'place_fleet';
+      ships: BattleshipShipPlacement[];
+    }
+  | {
+      type: 'fire';
+      x: number;
+      y: number;
+    };
+
+export type BattleshipMove =
+  | {
+      type: 'place_fleet';
+      ships: BattleshipShipPlacement[];
+      player: BattleshipPlayer;
+    }
+  | {
+      type: 'fire';
+      x: number;
+      y: number;
+      player: BattleshipPlayer;
+    };
+
+export interface BattleshipState {
+  boardSize: number;
+  shipLengths: number[];
+  phase: 'placement' | 'playing' | 'completed';
+  nextPlayer: BattleshipPlayer;
+  status: 'playing' | 'completed';
+  winner: BattleshipPlayer | null;
+  moveCount: number;
+  placementsSubmitted: {
+    black: boolean;
+    white: boolean;
+  };
+  ships: {
+    black: BattleshipShipPlacement[] | null;
+    white: BattleshipShipPlacement[] | null;
+  };
+  shots: {
+    black: BattleshipShotCell[][];
+    white: BattleshipShotCell[][];
+  };
+  sunkShips: {
+    black: number;
+    white: number;
+  };
+  lastShot: {
+    x: number;
+    y: number;
+    player: BattleshipPlayer;
+    result: 'miss' | 'hit' | 'sunk';
+  } | null;
 }
 
 export type Connect4Disc = 'red' | 'yellow';
@@ -838,6 +907,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'battleship';
+      state: BattleshipState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'codenames_duet';
       state: CodenamesDuetState | null;
       viewerRole: RoomPlayerRole;
@@ -936,6 +1011,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'battleship';
+      state: BattleshipState;
+      lastMove: BattleshipMove;
+    }
+  | {
+      roomId: string;
       gameType: 'codenames_duet';
       state: CodenamesDuetState;
       lastMove: CodenamesDuetMove;
@@ -1017,6 +1098,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'battleship'; move: BattleshipMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>

@@ -236,6 +236,9 @@ export function LobbyPage({ api, user }: Props) {
           <button type="button" onClick={() => createRoom('onitama')}>
             {t('lobby.create.onitama')}
           </button>
+          <button type="button" onClick={() => createRoom('battleship')}>
+            {t('lobby.create.battleship')}
+          </button>
           <button type="button" onClick={() => createRoom('love_letter')}>
             {t('lobby.create.love_letter')}
           </button>
@@ -278,6 +281,7 @@ export function LobbyPage({ api, user }: Props) {
                 'gomoku',
                 'santorini',
                 'onitama',
+                'battleship',
                 'love_letter',
                 'codenames_duet',
                 'connect4',

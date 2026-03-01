@@ -1,5 +1,6 @@
 import {
   applyBackgammonMove,
+  applyBattleshipMove,
   applyCardsMove,
   applyCodenamesDuetMove,
   applyConnect4Move,
@@ -15,6 +16,7 @@ import {
   applyReversiMove,
   applyXiangqiMove,
   assignBackgammonTurnDice,
+  createBattleshipState,
   createBackgammonState,
   createCardsDeck,
   createCardsState,
@@ -39,14 +41,17 @@ import {
   createXiangqiState,
   formatXiangqiMoveNotation,
   normalizeOnitamaMove,
+  normalizeBattleshipMove,
   normalizeLoveLetterMove,
   normalizeCodenamesDuetMove,
   normalizeSantoriniMove,
+  toBattleshipPublicState,
   toCardsPublicState,
   toCodenamesDuetPublicState,
   toLoveLetterPublicState,
   toLiarsDicePublicState,
   type CardsRuntimeState,
+  type BattleshipRuntimeState,
   type CodenamesDuetRuntimeState,
   type LoveLetterRuntimeState,
   type LiarsDiceRuntimeState,
@@ -55,6 +60,11 @@ import {
 import type {
   BackgammonMove,
   BackgammonState,
+  BattleshipMove,
+  BattleshipMoveInput,
+  BattleshipPlayer,
+  BattleshipShipPlacement,
+  BattleshipState,
   BoardGameType,
   CardsCard,
   CardsMove,
@@ -188,6 +198,18 @@ interface OnitamaRuntime {
   state: OnitamaState | null;
   rngSession: VerifiableRngSession;
   rngPrng: DeterministicPrng | null;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface BattleshipRuntime {
+  gameType: 'battleship';
+  roomId: string;
+  matchId: string;
+  state: BattleshipRuntimeState;
+  rngSession?: VerifiableRngSession;
   players: {
     black: string;
     white: string;
@@ -352,6 +374,7 @@ type ActiveRuntime =
   | GomokuRuntime
   | SantoriniRuntime
   | OnitamaRuntime
+  | BattleshipRuntime
   | Connect4Runtime
   | GoRuntime
   | ReversiRuntime
@@ -471,6 +494,33 @@ const roomMoveSchema = z.union([
         }),
         card: z.enum(['tiger', 'dragon', 'frog', 'rabbit', 'crab', 'elephant', 'goose', 'rooster'])
       })
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('battleship'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('place_fleet'),
+          ships: z
+            .array(
+              z.object({
+                x: z.number().int().min(0).max(9),
+                y: z.number().int().min(0).max(9),
+                orientation: z.enum(['h', 'v']),
+                length: z.number().int().min(2).max(10)
+              })
+            )
+            .min(1)
+        }),
+        z.object({
+          type: z.literal('fire'),
+          x: z.number().int().min(0).max(9),
+          y: z.number().int().min(0).max(9)
+        })
+      ])
     })
   }),
   z.object({
@@ -652,6 +702,7 @@ const matchmakingJoinSchema = z.object({
       'gomoku',
       'santorini',
       'onitama',
+      'battleship',
       'love_letter',
       'codenames_duet',
       'go',
@@ -696,6 +747,7 @@ function playerSlotsForGame(gameType: BoardGameType): number {
   return gameType === 'gomoku' ||
     gameType === 'santorini' ||
     gameType === 'onitama' ||
+    gameType === 'battleship' ||
     gameType === 'love_letter' ||
     gameType === 'codenames_duet' ||
     gameType === 'go' ||
@@ -845,6 +897,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
     runtime.gameType === 'codenames_duet' ||
     runtime.gameType === 'liars_dice' ||
     runtime.gameType === 'onitama' ||
+    runtime.gameType === 'battleship' ||
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'santorini' ||
     runtime.gameType === 'go' ||
@@ -1200,6 +1253,28 @@ function viewerCodenamesDuetSide(
   return null;
 }
 
+function viewerBattleshipSide(runtime: BattleshipRuntime, userId: string | null): BattleshipPlayer | null {
+  if (!userId) {
+    return null;
+  }
+
+  if (runtime.players.black === userId) {
+    return 'black';
+  }
+
+  if (runtime.players.white === userId) {
+    return 'white';
+  }
+
+  return null;
+}
+
+function battleshipStateForClient(runtime: BattleshipRuntime, client: ClientContext): BattleshipState {
+  const side = viewerBattleshipSide(runtime, client.user?.id ?? null);
+  const revealAll = runtime.state.status === 'completed';
+  return toBattleshipPublicState(runtime.state, side, revealAll);
+}
+
 function cardsStateForClient(
   runtime: CardsRuntime,
   client: ClientContext
@@ -1259,6 +1334,25 @@ function broadcastCardsMoveApplied(
       payload: {
         roomId: runtime.roomId,
         gameType: 'cards',
+        state,
+        lastMove
+      }
+    });
+  }
+}
+
+function broadcastBattleshipMoveApplied(
+  runtime: BattleshipRuntime,
+  targets: Set<ClientContext>,
+  lastMove: BattleshipMove
+): void {
+  for (const target of targets) {
+    const state = battleshipStateForClient(runtime, target);
+    send(target, {
+      type: 'match.move_applied',
+      payload: {
+        roomId: runtime.roomId,
+        gameType: 'battleship',
         state,
         lastMove
       }
@@ -1586,6 +1680,21 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
         playerTwoUserId: players.second
       }),
       rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
+  if (room.gameType === 'battleship') {
+    return {
+      gameType: 'battleship',
+      roomId: room.id,
+      matchId,
+      state: createBattleshipState({
+        boardSize: 10
+      }),
       players: {
         black: players.first,
         white: players.second
@@ -2012,6 +2121,60 @@ function readOnitamaMovePayload(payload: Record<string, unknown>): OnitamaMove |
   return isOnitamaMoveRecord(payload) ? payload : null;
 }
 
+function isBattleshipShipPlacementRecord(value: unknown): value is BattleshipShipPlacement {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<BattleshipShipPlacement>;
+  return (
+    typeof typed.x === 'number' &&
+    Number.isInteger(typed.x) &&
+    typeof typed.y === 'number' &&
+    Number.isInteger(typed.y) &&
+    (typed.orientation === 'h' || typed.orientation === 'v') &&
+    typeof typed.length === 'number' &&
+    Number.isInteger(typed.length) &&
+    typed.length > 0
+  );
+}
+
+function isBattleshipMoveRecord(value: unknown): value is BattleshipMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<BattleshipMove>;
+  if (typed.type === 'fire') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      typeof typed.x === 'number' &&
+      Number.isInteger(typed.x) &&
+      typeof typed.y === 'number' &&
+      Number.isInteger(typed.y)
+    );
+  }
+
+  if (typed.type === 'place_fleet') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      Array.isArray(typed.ships) &&
+      typed.ships.every((ship) => isBattleshipShipPlacementRecord(ship))
+    );
+  }
+
+  return false;
+}
+
+function readBattleshipMovePayload(payload: Record<string, unknown>): BattleshipMove | null {
+  const nested = payload.move;
+  if (isBattleshipMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isBattleshipMoveRecord(payload) ? payload : null;
+}
+
 function isCodenamesDuetMoveRecord(value: unknown): value is CodenamesDuetMove {
   if (!value || typeof value !== 'object') {
     return false;
@@ -2192,6 +2355,24 @@ function replayMoves(
       }
 
       const applied = applyOnitamaMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'battleship') {
+      const parsedMove = readBattleshipMovePayload(move.payload);
+      if (!parsedMove) {
+        continue;
+      }
+
+      const applied = applyBattleshipMove(current.state, parsedMove);
       if (!applied.accepted) {
         continue;
       }
@@ -2784,6 +2965,22 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
     return;
   }
 
+  if (room.gameType === 'battleship') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'battleship',
+        state:
+          runtime?.gameType === 'battleship'
+            ? battleshipStateForClient(runtime, client)
+            : toBattleshipPublicState(createBattleshipState({ boardSize: 10 }), null),
+        viewerRole
+      }
+    });
+    return;
+  }
+
   if (room.gameType === 'codenames_duet') {
     if (runtime?.gameType === 'codenames_duet' && runtime.rngSession.phase === 'ready') {
       ensureCodenamesDuetRuntimeState(runtime);
@@ -3138,6 +3335,46 @@ async function handleOnitamaMove(
       lastMove: normalizedMove
     }
   });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleBattleshipMove(
+  client: ClientContext,
+  runtime: BattleshipRuntime,
+  move: BattleshipMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: BattleshipPlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove = normalizeBattleshipMove(move, player);
+  const applied = applyBattleshipMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: normalizedMove.type === 'place_fleet' ? 'battleship.place_fleet' : 'battleship.fire',
+    payload: {
+      move: normalizedMove
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcastBattleshipMoveApplied(runtime, targets, normalizedMove);
 
   await finishMatchIfCompleted(runtime, targets);
 }
@@ -4011,6 +4248,7 @@ async function handleMove(
   message:
     | { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     | { roomId: string; gameType: 'cards'; move: CardsMoveInput }
+    | { roomId: string; gameType: 'battleship'; move: BattleshipMoveInput }
     | { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }
     | { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
@@ -4058,6 +4296,11 @@ async function handleMove(
 
   if (message.gameType === 'cards' && runtime.gameType === 'cards') {
     await handleCardsMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'battleship' && runtime.gameType === 'battleship') {
+    await handleBattleshipMove(client, runtime, message.move);
     return;
   }
 
@@ -4361,6 +4604,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'cards',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'battleship') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'battleship',
             move: msg.payload.move
           });
           return;

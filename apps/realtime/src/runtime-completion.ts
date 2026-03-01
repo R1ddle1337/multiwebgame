@@ -1,4 +1,5 @@
 import type {
+  BattleshipRuntimeState,
   CardsRuntimeState,
   CodenamesDuetRuntimeState,
   LoveLetterRuntimeState,
@@ -25,6 +26,14 @@ export type RuntimeCompletionSnapshot =
       players: {
         white: string;
         black: string;
+      };
+    }
+  | {
+      gameType: 'battleship';
+      state: BattleshipRuntimeState;
+      players: {
+        black: string;
+        white: string;
       };
     }
   | {
@@ -169,6 +178,35 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           turnCount: runtime.state.turnCount,
           rollCount: runtime.state.rollCount,
           borneOff: runtime.state.borneOff
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'battleship') {
+    if (runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        battleship: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          sunkShips: runtime.state.sunkShips,
+          placementsSubmitted: {
+            black: Boolean(runtime.state.ships.black),
+            white: Boolean(runtime.state.ships.white)
+          }
         }
       }
     };

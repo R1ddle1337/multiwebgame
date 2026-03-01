@@ -1,5 +1,6 @@
 import {
   assignBackgammonTurnDice,
+  createBattleshipState,
   createCardsDeck,
   createCardsState,
   createCodenamesDuetRolePool,
@@ -73,6 +74,46 @@ describe('deriveRuntimeCompletion', () => {
           borneOff: {
             white: 15,
             black: 10
+          }
+        }
+      }
+    });
+  });
+
+  it('maps battleship completion to winner and payload', () => {
+    const state = createBattleshipState();
+    state.status = 'completed';
+    state.phase = 'completed';
+    state.winner = 'white';
+    state.moveCount = 31;
+    state.sunkShips.black = 3;
+    state.sunkShips.white = 5;
+    state.ships.black = [{ x: 0, y: 0, orientation: 'h', length: 5 }];
+    state.ships.white = [{ x: 0, y: 1, orientation: 'h', length: 5 }];
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'battleship',
+      state,
+      players: {
+        black: 'u51',
+        white: 'u52'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u52',
+      status: 'completed',
+      resultPayload: {
+        battleship: {
+          winner: 'white',
+          moveCount: 31,
+          sunkShips: {
+            black: 3,
+            white: 5
+          },
+          placementsSubmitted: {
+            black: true,
+            white: true
           }
         }
       }

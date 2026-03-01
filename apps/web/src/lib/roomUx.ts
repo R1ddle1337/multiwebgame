@@ -1,4 +1,5 @@
 import type {
+  BattleshipMove,
   CodenamesDuetMove,
   Connect4Move,
   DotsMove,
@@ -85,6 +86,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'battleship',
+  move: BattleshipMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'love_letter',
   move: LoveLetterMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -130,6 +136,7 @@ export function describeLastMove(
     | 'connect4'
     | 'santorini'
     | 'onitama'
+    | 'battleship'
     | 'love_letter'
     | 'codenames_duet'
     | 'go'
@@ -143,6 +150,7 @@ export function describeLastMove(
     | Connect4Move
     | SantoriniMove
     | OnitamaMove
+    | BattleshipMove
     | LoveLetterMove
     | CodenamesDuetMove
     | GoMove
@@ -210,6 +218,28 @@ export function describeLastMove(
         kind: 'move',
         from: formatBoardPoint(onitamaMove.from.x, onitamaMove.from.y),
         to: formatBoardPoint(onitamaMove.to.x, onitamaMove.to.y)
+      }
+    };
+  }
+
+  if (gameType === 'battleship') {
+    const battleshipMove = move as BattleshipMove;
+    if (battleshipMove.type === 'place_fleet') {
+      return {
+        actor: battleshipMove.player,
+        action: {
+          kind: 'move',
+          from: 'fleet',
+          to: String(battleshipMove.ships.length)
+        }
+      };
+    }
+
+    return {
+      actor: battleshipMove.player,
+      action: {
+        kind: 'place',
+        point: formatBoardPoint(battleshipMove.x, battleshipMove.y)
       }
     };
   }

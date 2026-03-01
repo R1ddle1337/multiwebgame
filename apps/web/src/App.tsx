@@ -252,6 +252,9 @@ function Shell({
             {t('enum.game.onitama')} {user.ratings.onitama ?? 1200}
           </span>
           <span className="status-pill">
+            {t('enum.game.battleship')} {user.ratings.battleship ?? 1200}
+          </span>
+          <span className="status-pill">
             {t('enum.game.love_letter')} {user.ratings.love_letter ?? 1200}
           </span>
           <span className="status-pill">

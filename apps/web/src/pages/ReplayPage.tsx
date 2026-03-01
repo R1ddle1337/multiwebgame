@@ -1,5 +1,6 @@
 import {
   apply2048Move,
+  applyBattleshipMove,
   applyCardsMove,
   applyCodenamesDuetMove,
   applyConnect4Move,
@@ -15,6 +16,7 @@ import {
   applyReversiMove,
   applyXiangqiMove,
   create2048State,
+  createBattleshipState,
   createCardsDeck,
   createCardsState,
   createCodenamesDuetRolePool,
@@ -35,6 +37,7 @@ import {
   createReversiState,
   createXiangqiState,
   type CardsRuntimeState,
+  type BattleshipRuntimeState,
   createDeterministicPrng,
   formatXiangqiMoveNotation,
   type CodenamesDuetRuntimeState,
@@ -42,6 +45,7 @@ import {
   type LiarsDiceRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
+  BattleshipMove,
   CardsCard,
   CardsMove,
   CodenamesDuetMove,
@@ -411,6 +415,74 @@ function parseOnitamaMove(
   };
 }
 
+function parseBattleshipMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: BattleshipMove['player']
+): BattleshipMove | null {
+  const source = (payload.move ?? payload) as Partial<BattleshipMove>;
+  if (source.type === 'fire') {
+    if (
+      typeof source.x !== 'number' ||
+      typeof source.y !== 'number' ||
+      !Number.isInteger(source.x) ||
+      !Number.isInteger(source.y)
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'fire',
+      x: source.x,
+      y: source.y,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  if (source.type === 'place_fleet') {
+    if (!Array.isArray(source.ships)) {
+      return null;
+    }
+
+    const ships = source.ships
+      .map((ship) => {
+        if (!ship || typeof ship !== 'object') {
+          return null;
+        }
+        const typed = ship as Partial<Extract<BattleshipMove, { type: 'place_fleet' }>['ships'][number]>;
+        if (
+          typeof typed.x !== 'number' ||
+          !Number.isInteger(typed.x) ||
+          typeof typed.y !== 'number' ||
+          !Number.isInteger(typed.y) ||
+          (typed.orientation !== 'h' && typed.orientation !== 'v') ||
+          typeof typed.length !== 'number' ||
+          !Number.isInteger(typed.length)
+        ) {
+          return null;
+        }
+        return {
+          x: typed.x,
+          y: typed.y,
+          orientation: typed.orientation,
+          length: typed.length
+        };
+      })
+      .filter((ship): ship is NonNullable<typeof ship> => Boolean(ship));
+
+    if (ships.length !== source.ships.length) {
+      return null;
+    }
+
+    return {
+      type: 'place_fleet',
+      ships,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  return null;
+}
+
 function parseCodenamesDuetMove(
   payload: Record<string, unknown>,
   fallbackPlayer: CodenamesDuetMove['player']
@@ -561,6 +633,11 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [onitamaStates, setOnitamaStates] = useState<OnitamaState[]>([
     createOnitamaState({
       openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+    })
+  ]);
+  const [battleshipStates, setBattleshipStates] = useState<BattleshipRuntimeState[]>([
+    createBattleshipState({
+      boardSize: 10
     })
   ]);
   const [codenamesStates, setCodenamesStates] = useState<CodenamesDuetRuntimeState[]>([
@@ -748,6 +825,37 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setOnitamaStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'battleship') {
+          let current = createBattleshipState({
+            boardSize: 10
+          });
+          const snapshots: BattleshipRuntimeState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseBattleshipMove(
+              move.payload as Record<string, unknown>,
+              current.nextPlayer
+            );
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyBattleshipMove(current, parsedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setBattleshipStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -1231,6 +1339,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'onitama') {
       return Math.max(0, onitamaStates.length - 1);
     }
+    if (gameType === 'battleship') {
+      return Math.max(0, battleshipStates.length - 1);
+    }
     if (gameType === 'codenames_duet') {
       return Math.max(0, codenamesStates.length - 1);
     }
@@ -1275,6 +1386,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     gomokuStates.length,
     santoriniStates.length,
     onitamaStates.length,
+    battleshipStates.length,
     codenamesStates.length,
     quoridorStates.length,
     connect4States.length,
@@ -1428,6 +1540,63 @@ export function ReplayPage({ api, viewerUserId }: Props) {
                 </div>
               ))
             )}
+          </div>
+        </>
+      ) : null}
+      {gameType === 'battleship' ? (
+        <>
+          <p>
+            phase: {battleshipStates[clampedStep].phase} | next: {battleshipStates[clampedStep].nextPlayer}
+          </p>
+          <div className="replay-cards-hands">
+            {(['black', 'white'] as const).map((player) => (
+              <div key={`battleship-${player}`}>
+                <strong>{player}</strong>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${battleshipStates[clampedStep].boardSize}, minmax(1.8rem, 1fr))`,
+                    gap: '0.2rem',
+                    maxWidth: '26rem'
+                  }}
+                >
+                  {battleshipStates[clampedStep].shots[player === 'black' ? 'white' : 'black'].flatMap(
+                    (row, y) =>
+                      row.map((incoming, x) => {
+                        const ship = battleshipStates[clampedStep].ships[player]?.some((entry) => {
+                          for (let offset = 0; offset < entry.length; offset += 1) {
+                            const cellX = entry.x + (entry.orientation === 'h' ? offset : 0);
+                            const cellY = entry.y + (entry.orientation === 'v' ? offset : 0);
+                            if (cellX === x && cellY === y) {
+                              return true;
+                            }
+                          }
+                          return false;
+                        });
+
+                        const marker =
+                          incoming === 'hit' ? 'X' : ship ? 'S' : incoming === 'miss' ? 'o' : '·';
+
+                        return (
+                          <div
+                            key={`battleship-replay-${player}-${x}-${y}`}
+                            style={{
+                              border: '1px solid var(--border)',
+                              borderRadius: '6px',
+                              textAlign: 'center',
+                              minHeight: '1.9rem',
+                              lineHeight: '1.9rem',
+                              fontSize: '0.8rem'
+                            }}
+                          >
+                            {marker}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </>
       ) : null}
