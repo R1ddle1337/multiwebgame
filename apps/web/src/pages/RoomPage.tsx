@@ -6,6 +6,7 @@ import {
   createGoState,
   createGomokuState,
   createOnitamaState,
+  createYahtzeeState,
   createSantoriniState,
   createQuoridorState,
   createReversiState,
@@ -16,6 +17,10 @@ import type {
   BattleshipMoveInput,
   BattleshipShipPlacement,
   BattleshipState,
+  YahtzeeCategory,
+  YahtzeeMove,
+  YahtzeeMoveInput,
+  YahtzeeState,
   CardsCard,
   CardsMoveInput,
   CardsState,
@@ -86,6 +91,7 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
 function formatResultText(
   state:
     | BattleshipState
+    | YahtzeeState
     | Connect4State
     | DotsState
     | GomokuState
@@ -140,6 +146,22 @@ const DEFAULT_BATTLESHIP_FLEET: BattleshipShipPlacement[] = [
   { x: 0, y: 2, orientation: 'h', length: 3 },
   { x: 0, y: 3, orientation: 'h', length: 3 },
   { x: 0, y: 4, orientation: 'h', length: 2 }
+];
+const DEFAULT_YAHTZEE_HOLD = [false, false, false, false, false];
+const YAHTZEE_CATEGORIES: YahtzeeCategory[] = [
+  'ones',
+  'twos',
+  'threes',
+  'fours',
+  'fives',
+  'sixes',
+  'three_of_a_kind',
+  'four_of_a_kind',
+  'full_house',
+  'small_straight',
+  'large_straight',
+  'yahtzee',
+  'chance'
 ];
 
 function santoriniWorkerAt(state: SantoriniState, x: number, y: number): string | null {
@@ -220,6 +242,8 @@ export function RoomPage({ api, user }: Props) {
   const [battleshipFleet, setBattleshipFleet] = useState<BattleshipShipPlacement[]>(DEFAULT_BATTLESHIP_FLEET);
   const [battleshipShotX, setBattleshipShotX] = useState(0);
   const [battleshipShotY, setBattleshipShotY] = useState(0);
+  const [yahtzeeHold, setYahtzeeHold] = useState<boolean[]>(DEFAULT_YAHTZEE_HOLD);
+  const [yahtzeeCategory, setYahtzeeCategory] = useState<YahtzeeCategory>('chance');
   const [codenamesClueWord, setCodenamesClueWord] = useState('ocean');
   const [codenamesClueCount, setCodenamesClueCount] = useState(1);
   const [codenamesGuessIndex, setCodenamesGuessIndex] = useState(0);
@@ -276,6 +300,8 @@ export function RoomPage({ api, user }: Props) {
         });
   const battleshipState =
     snapshot?.gameType === 'battleship' ? (snapshot.state as BattleshipState) : defaultBattleshipState;
+  const yahtzeeState =
+    snapshot?.gameType === 'yahtzee' ? (snapshot.state as YahtzeeState) : createYahtzeeState();
   const codenamesState =
     snapshot?.gameType === 'codenames_duet' ? (snapshot.state as CodenamesDuetState | null) : null;
   const connect4State =
@@ -337,6 +363,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'battleship' &&
     viewerRole === 'player' &&
     battleshipState.status === 'playing';
+  const yahtzeeTurn =
+    hasActiveMatch &&
+    room?.gameType === 'yahtzee' &&
+    viewerRole === 'player' &&
+    yahtzeeState.status === 'playing';
   const codenamesTurn =
     hasActiveMatch &&
     room?.gameType === 'codenames_duet' &&
@@ -399,6 +430,10 @@ export function RoomPage({ api, user }: Props) {
     battleshipTurn &&
     ((seat === 1 && battleshipState.nextPlayer === 'black') ||
       (seat === 2 && battleshipState.nextPlayer === 'white'));
+  const canPlayYahtzee =
+    yahtzeeTurn &&
+    ((seat === 1 && yahtzeeState.nextPlayer === 'black') ||
+      (seat === 2 && yahtzeeState.nextPlayer === 'white'));
   const codenamesSide = seat === 1 ? 'black' : seat === 2 ? 'white' : null;
   const canPlayCodenames =
     Boolean(codenamesTurn) &&
@@ -444,6 +479,7 @@ export function RoomPage({ api, user }: Props) {
     canPlaySantorini ||
     canPlayOnitama ||
     canPlayBattleship ||
+    canPlayYahtzee ||
     canPlayCodenames ||
     canPlayConnect4 ||
     canPlayGo ||
@@ -466,6 +502,13 @@ export function RoomPage({ api, user }: Props) {
   const battleshipOpponent = battleshipSide ? (battleshipSide === 'black' ? 'white' : 'black') : null;
   const battleshipOutgoingShots = battleshipSide ? battleshipState.shots[battleshipSide] : null;
   const battleshipIncomingShots = battleshipOpponent ? battleshipState.shots[battleshipOpponent] : null;
+  const yahtzeeSide = seat === 1 ? 'black' : seat === 2 ? 'white' : null;
+  const yahtzeeAvailableCategories = yahtzeeSide
+    ? YAHTZEE_CATEGORIES.filter((category) => typeof yahtzeeState.scores[yahtzeeSide][category] !== 'number')
+    : YAHTZEE_CATEGORIES;
+  const yahtzeeSelectedCategory = yahtzeeAvailableCategories.includes(yahtzeeCategory)
+    ? yahtzeeCategory
+    : (yahtzeeAvailableCategories[0] ?? 'chance');
 
   const latestMoveSummary = useMemo<LastMoveSummary | null>(() => {
     if (!room || room.gameType === 'single_2048') {
@@ -494,6 +537,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'battleship') {
       return describeLastMove('battleship', snapshot.lastMove as BattleshipMove);
+    }
+
+    if (room.gameType === 'yahtzee') {
+      return describeLastMove('yahtzee', snapshot.lastMove as YahtzeeMove);
     }
 
     if (room.gameType === 'codenames_duet') {
@@ -566,6 +613,10 @@ export function RoomPage({ api, user }: Props) {
       return formatResultText(battleshipState, statusLabel, colorLabel, t);
     }
 
+    if (room.gameType === 'yahtzee') {
+      return formatResultText(yahtzeeState, statusLabel, colorLabel, t);
+    }
+
     if (room.gameType === 'codenames_duet') {
       if (!codenamesState) {
         return null;
@@ -622,6 +673,7 @@ export function RoomPage({ api, user }: Props) {
     santoriniState,
     onitamaState,
     battleshipState,
+    yahtzeeState,
     codenamesState,
     connect4State,
     goState,
@@ -722,6 +774,16 @@ export function RoomPage({ api, user }: Props) {
     realtime.clearLastError();
   }, [hasActiveMatch, realtime, translateError]);
 
+  useEffect(() => {
+    if (room?.gameType !== 'yahtzee') {
+      return;
+    }
+
+    if (yahtzeeState.rollsUsed === 0) {
+      setYahtzeeHold(DEFAULT_YAHTZEE_HOLD);
+    }
+  }, [room?.gameType, yahtzeeState.rollsUsed, yahtzeeState.moveCount]);
+
   const sendGomokuMove = (x: number, y: number) => {
     if (!canPlayGomoku) {
       return;
@@ -778,6 +840,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'battleship',
+        move
+      }
+    });
+  };
+
+  const sendYahtzeeMove = (move: YahtzeeMoveInput) => {
+    if (!canPlayYahtzee) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'yahtzee',
         move
       }
     });
@@ -1737,6 +1814,98 @@ export function RoomPage({ api, user }: Props) {
               <p>
                 {battleshipState.winner
                   ? t('room.result.winner', { winner: colorLabel(battleshipState.winner) })
+                  : t('room.result.draw')}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'yahtzee' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(yahtzeeState.nextPlayer),
+                  status: statusLabel(yahtzeeState.status)
+                })}
+              </p>
+            ) : null}
+            <p>{t('room.yahtzee.rolls_used', { count: yahtzeeState.rollsUsed })}</p>
+            <p>
+              {t('room.yahtzee.totals', {
+                black: yahtzeeState.totals.black,
+                white: yahtzeeState.totals.white
+              })}
+            </p>
+            <p>
+              {t('enum.color.black')}: {yahtzeeState.completedCategories.black}/13 | {t('enum.color.white')}:{' '}
+              {yahtzeeState.completedCategories.white}/13
+            </p>
+
+            <div className="button-row">
+              {yahtzeeState.dice.map((die, index) => (
+                <button
+                  key={`yahtzee-die-${index}`}
+                  type="button"
+                  className={yahtzeeHold[index] ? '' : 'secondary'}
+                  onClick={() =>
+                    setYahtzeeHold((current) =>
+                      current.map((held, heldIndex) => (heldIndex === index ? !held : held))
+                    )
+                  }
+                  disabled={!canPlayYahtzee || yahtzeeState.rollsUsed === 0 || yahtzeeState.rollsUsed >= 3}
+                >
+                  {die}
+                </button>
+              ))}
+            </div>
+            <div className="button-row">
+              <button
+                type="button"
+                onClick={() =>
+                  sendYahtzeeMove({
+                    type: 'roll',
+                    hold: yahtzeeState.rollsUsed > 0 ? yahtzeeHold : undefined
+                  })
+                }
+                disabled={!canPlayYahtzee || yahtzeeState.rollsUsed >= 3}
+              >
+                {t('room.yahtzee.roll')}
+              </button>
+              <label>
+                {t('room.yahtzee.category')}{' '}
+                <select
+                  value={yahtzeeSelectedCategory}
+                  onChange={(event) => setYahtzeeCategory(event.target.value as YahtzeeCategory)}
+                  disabled={!canPlayYahtzee || yahtzeeAvailableCategories.length === 0}
+                >
+                  {YAHTZEE_CATEGORIES.map((category) => (
+                    <option key={`yahtzee-category-${category}`} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() =>
+                  sendYahtzeeMove({
+                    type: 'score',
+                    category: yahtzeeSelectedCategory
+                  })
+                }
+                disabled={
+                  !canPlayYahtzee || yahtzeeState.rollsUsed === 0 || yahtzeeAvailableCategories.length === 0
+                }
+              >
+                {t('room.yahtzee.score')}
+              </button>
+            </div>
+
+            {yahtzeeState.status === 'completed' ? (
+              <p>
+                {yahtzeeState.winner
+                  ? t('room.result.winner', { winner: colorLabel(yahtzeeState.winner) })
                   : t('room.result.draw')}
               </p>
             ) : null}

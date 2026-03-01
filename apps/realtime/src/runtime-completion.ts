@@ -3,7 +3,8 @@ import type {
   CardsRuntimeState,
   CodenamesDuetRuntimeState,
   LoveLetterRuntimeState,
-  LiarsDiceRuntimeState
+  LiarsDiceRuntimeState,
+  YahtzeeRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
   BackgammonState,
@@ -31,6 +32,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'battleship';
       state: BattleshipRuntimeState;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'yahtzee';
+      state: YahtzeeRuntimeState;
       players: {
         black: string;
         white: string;
@@ -207,6 +216,33 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
             black: Boolean(runtime.state.ships.black),
             white: Boolean(runtime.state.ships.white)
           }
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'yahtzee') {
+    if (runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        yahtzee: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          turnCount: runtime.state.turnCount,
+          totals: runtime.state.totals,
+          completedCategories: runtime.state.completedCategories
         }
       }
     };

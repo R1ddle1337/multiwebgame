@@ -14,6 +14,7 @@
   - Santorini (5x5 no-god-power rules, setup + move/build + no-legal-move loss)
   - Onitama (5x5 fixed-card rules, master capture/temple win, verifiable RNG opening cards)
   - Battleship (10x10 fleet placement + turn-based fire resolution, hidden-fleet projection, end-of-match reveal)
+  - Yahtzee (2-player score race, up to 3 rolls per turn with hold/reroll, verifiable RNG dice)
   - Codenames Duet (5x5 co-op clues/guesses, hidden key projection, verifiable RNG words + key maps)
   - Go (capture/ko/suicide + Chinese area scoring + komi)
   - Xiangqi (full movement, check safety, mate/stalemate, repetition policy)

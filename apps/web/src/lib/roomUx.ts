@@ -11,6 +11,7 @@ import type {
   SantoriniMove,
   QuoridorMove,
   ReversiMove,
+  YahtzeeMove,
   XiangqiMove,
   XiangqiPosition
 } from '@multiwebgame/shared-types';
@@ -91,6 +92,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'yahtzee',
+  move: YahtzeeMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'love_letter',
   move: LoveLetterMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -137,6 +143,7 @@ export function describeLastMove(
     | 'santorini'
     | 'onitama'
     | 'battleship'
+    | 'yahtzee'
     | 'love_letter'
     | 'codenames_duet'
     | 'go'
@@ -151,6 +158,7 @@ export function describeLastMove(
     | SantoriniMove
     | OnitamaMove
     | BattleshipMove
+    | YahtzeeMove
     | LoveLetterMove
     | CodenamesDuetMove
     | GoMove
@@ -240,6 +248,29 @@ export function describeLastMove(
       action: {
         kind: 'place',
         point: formatBoardPoint(battleshipMove.x, battleshipMove.y)
+      }
+    };
+  }
+
+  if (gameType === 'yahtzee') {
+    const yahtzeeMove = move as YahtzeeMove;
+    if (yahtzeeMove.type === 'roll') {
+      return {
+        actor: yahtzeeMove.player,
+        action: {
+          kind: 'move',
+          from: 'roll',
+          to: yahtzeeMove.hold ? String(yahtzeeMove.hold.filter(Boolean).length) : '0'
+        }
+      };
+    }
+
+    return {
+      actor: yahtzeeMove.player,
+      action: {
+        kind: 'move',
+        from: 'score',
+        to: yahtzeeMove.category
       }
     };
   }

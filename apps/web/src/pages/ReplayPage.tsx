@@ -1,6 +1,7 @@
 import {
   apply2048Move,
   applyBattleshipMove,
+  applyYahtzeeMove,
   applyCardsMove,
   applyCodenamesDuetMove,
   applyConnect4Move,
@@ -17,6 +18,7 @@ import {
   applyXiangqiMove,
   create2048State,
   createBattleshipState,
+  createYahtzeeState,
   createCardsDeck,
   createCardsState,
   createCodenamesDuetRolePool,
@@ -42,7 +44,8 @@ import {
   formatXiangqiMoveNotation,
   type CodenamesDuetRuntimeState,
   type LoveLetterRuntimeState,
-  type LiarsDiceRuntimeState
+  type LiarsDiceRuntimeState,
+  type YahtzeeRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
   BattleshipMove,
@@ -72,6 +75,7 @@ import type {
   QuoridorState,
   ReversiMove,
   ReversiState,
+  YahtzeeMove,
   XiangqiColor,
   XiangqiMove,
   XiangqiState
@@ -483,6 +487,58 @@ function parseBattleshipMove(
   return null;
 }
 
+function parseYahtzeeMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: YahtzeeMove['player']
+): YahtzeeMove | null {
+  const source = (payload.move ?? payload) as Partial<YahtzeeMove>;
+  if (source.type === 'roll') {
+    if (
+      source.hold !== undefined &&
+      (!Array.isArray(source.hold) ||
+        source.hold.length !== 5 ||
+        source.hold.some((entry) => typeof entry !== 'boolean'))
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'roll',
+      hold: source.hold ? source.hold.map((entry) => Boolean(entry)) : undefined,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  if (source.type === 'score') {
+    const category = source.category;
+    if (
+      category !== 'ones' &&
+      category !== 'twos' &&
+      category !== 'threes' &&
+      category !== 'fours' &&
+      category !== 'fives' &&
+      category !== 'sixes' &&
+      category !== 'three_of_a_kind' &&
+      category !== 'four_of_a_kind' &&
+      category !== 'full_house' &&
+      category !== 'small_straight' &&
+      category !== 'large_straight' &&
+      category !== 'yahtzee' &&
+      category !== 'chance'
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'score',
+      category,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  return null;
+}
+
 function parseCodenamesDuetMove(
   payload: Record<string, unknown>,
   fallbackPlayer: CodenamesDuetMove['player']
@@ -640,6 +696,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
       boardSize: 10
     })
   ]);
+  const [yahtzeeStates, setYahtzeeStates] = useState<YahtzeeRuntimeState[]>([createYahtzeeState()]);
   const [codenamesStates, setCodenamesStates] = useState<CodenamesDuetRuntimeState[]>([
     createCodenamesDuetState({
       words: createCodenamesDuetWordPool().slice(0, 25),
@@ -856,6 +913,48 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setBattleshipStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'yahtzee') {
+          const payload = result.match.resultPayload as { rng?: { rngSeed?: unknown } } | null;
+          let rngSeed = typeof payload?.rng?.rngSeed === 'string' ? payload.rng.rngSeed : null;
+
+          if (!rngSeed) {
+            const fromMove = result.match.moves
+              .map((entry) => entry.payload as { rngSeed?: unknown })
+              .find((entry) => typeof entry.rngSeed === 'string');
+            rngSeed = typeof fromMove?.rngSeed === 'string' ? fromMove.rngSeed : null;
+          }
+
+          if (!rngSeed) {
+            setError(t('common.error_generic'));
+            return;
+          }
+
+          const prng = createDeterministicPrng(rngSeed);
+          let current = createYahtzeeState();
+          const snapshots: YahtzeeRuntimeState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseYahtzeeMove(move.payload as Record<string, unknown>, current.nextPlayer);
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyYahtzeeMove(current, parsedMove, () => prng.nextDie());
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setYahtzeeStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -1342,6 +1441,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'battleship') {
       return Math.max(0, battleshipStates.length - 1);
     }
+    if (gameType === 'yahtzee') {
+      return Math.max(0, yahtzeeStates.length - 1);
+    }
     if (gameType === 'codenames_duet') {
       return Math.max(0, codenamesStates.length - 1);
     }
@@ -1387,6 +1489,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     santoriniStates.length,
     onitamaStates.length,
     battleshipStates.length,
+    yahtzeeStates.length,
     codenamesStates.length,
     quoridorStates.length,
     connect4States.length,
@@ -1596,6 +1699,33 @@ export function ReplayPage({ api, viewerUserId }: Props) {
                   )}
                 </div>
               </div>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {gameType === 'yahtzee' ? (
+        <>
+          <p>
+            turn: {yahtzeeStates[clampedStep].turnCount} | rolls: {yahtzeeStates[clampedStep].rollsUsed}/3
+          </p>
+          <p>
+            {t('room.yahtzee.totals', {
+              black: yahtzeeStates[clampedStep].totals.black,
+              white: yahtzeeStates[clampedStep].totals.white
+            })}
+          </p>
+          <p>
+            {t('enum.color.black')}: {yahtzeeStates[clampedStep].completedCategories.black}/13 |{' '}
+            {t('enum.color.white')}: {yahtzeeStates[clampedStep].completedCategories.white}/13
+          </p>
+          <div className="button-row">
+            {yahtzeeStates[clampedStep].dice.map((die, index) => (
+              <span
+                key={`yahtzee-replay-die-${index}`}
+                className={`status-pill ${yahtzeeStates[clampedStep].held[index] ? '' : 'secondary'}`}
+              >
+                {die}
+              </span>
             ))}
           </div>
         </>

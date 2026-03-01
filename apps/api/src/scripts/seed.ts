@@ -39,6 +39,7 @@ async function run(): Promise<void> {
           'santorini',
           'onitama',
           'battleship',
+          'yahtzee',
           'love_letter',
           'codenames_duet',
           'xiangqi',

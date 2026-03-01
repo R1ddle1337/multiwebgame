@@ -62,6 +62,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.create.santorini': '创建圣托里尼房间',
     'lobby.create.onitama': '创建御圣棋房间',
     'lobby.create.battleship': '创建海战房间',
+    'lobby.create.yahtzee': '创建快艇骰子房间',
     'lobby.create.love_letter': '创建情书房间',
     'lobby.create.codenames_duet': '创建代号：双人版房间',
     'lobby.create.backgammon': '创建双陆棋房间',
@@ -161,6 +162,12 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.battleship.fire': '开火',
     'room.battleship.placement_status': '舰队提交: 黑 {black} / 白 {white}',
     'room.battleship.hidden_enemy_ships': '对手舰队布局隐藏中。',
+    'room.yahtzee.waiting_rng': '等待双方完成随机承诺与揭示后开始掷骰',
+    'room.yahtzee.roll': '掷骰',
+    'room.yahtzee.score': '计分',
+    'room.yahtzee.rolls_used': '本回合掷骰: {count}/3',
+    'room.yahtzee.totals': '总分 • 黑: {black} • 白: {white}',
+    'room.yahtzee.category': '类别',
     'room.love_letter.waiting_rng': '等待双方完成随机承诺与揭示后洗牌发牌',
     'room.love_letter.play': '出牌',
     'room.love_letter.draw_pile': '牌堆剩余: {count}',
@@ -247,6 +254,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.santorini': '圣托里尼',
     'enum.game.onitama': '御圣棋',
     'enum.game.battleship': '海战',
+    'enum.game.yahtzee': '快艇骰子',
     'enum.game.love_letter': '情书',
     'enum.game.codenames_duet': '代号：双人版',
     'enum.game.backgammon': '双陆棋',
@@ -349,6 +357,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.create.santorini': 'Create Santorini Room',
     'lobby.create.onitama': 'Create Onitama Room',
     'lobby.create.battleship': 'Create Battleship Room',
+    'lobby.create.yahtzee': 'Create Yahtzee Room',
     'lobby.create.love_letter': 'Create Love Letter Room',
     'lobby.create.codenames_duet': 'Create Codenames Duet Room',
     'lobby.create.backgammon': 'Create Backgammon Room',
@@ -448,6 +457,12 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.battleship.fire': 'Fire',
     'room.battleship.placement_status': 'Fleet submissions: Black {black} / White {white}',
     'room.battleship.hidden_enemy_ships': 'Opponent fleet positions are hidden.',
+    'room.yahtzee.waiting_rng': 'Waiting for commit-reveal to finish before rolling dice.',
+    'room.yahtzee.roll': 'Roll',
+    'room.yahtzee.score': 'Score',
+    'room.yahtzee.rolls_used': 'Rolls this turn: {count}/3',
+    'room.yahtzee.totals': 'Totals • Black: {black} • White: {white}',
+    'room.yahtzee.category': 'Category',
     'room.love_letter.waiting_rng': 'Waiting for commit-reveal to finish before shuffling and dealing.',
     'room.love_letter.play': 'Play Card',
     'room.love_letter.draw_pile': 'Deck left: {count}',
@@ -534,6 +549,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.santorini': 'santorini',
     'enum.game.onitama': 'onitama',
     'enum.game.battleship': 'battleship',
+    'enum.game.yahtzee': 'yahtzee',
     'enum.game.love_letter': 'love_letter',
     'enum.game.codenames_duet': 'codenames_duet',
     'enum.game.backgammon': 'backgammon',
@@ -733,7 +749,13 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
         normalized.includes('choose_suit_required') ||
         normalized.includes('draw_not_allowed_when_playable') ||
         normalized.includes('must_resolve_draw_play') ||
-        normalized.includes('end_turn_not_allowed')
+        normalized.includes('end_turn_not_allowed') ||
+        normalized.includes('must_roll_before_score') ||
+        normalized.includes('category_already_scored') ||
+        normalized.includes('invalid_hold_mask') ||
+        normalized.includes('no_rolls_remaining') ||
+        normalized.includes('unknown_category') ||
+        normalized.includes('invalid_die_roll')
       ) {
         return withCode('error.invalid_move');
       }

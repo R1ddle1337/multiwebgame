@@ -46,6 +46,9 @@ Message shape:
 - `room.move` (Battleship)
   - `{ roomId: string, gameType: "battleship", move: { type: "place_fleet", ships: [{ x, y, orientation: "h" | "v", length }] } | { type: "fire", x, y } }`
 
+- `room.move` (Yahtzee)
+  - `{ roomId: string, gameType: "yahtzee", move: { type: "roll", hold?: [boolean, boolean, boolean, boolean, boolean] } | { type: "score", category: "ones" | "twos" | "threes" | "fours" | "fives" | "sixes" | "three_of_a_kind" | "four_of_a_kind" | "full_house" | "small_straight" | "large_straight" | "yahtzee" | "chance" } }`
+
 - `room.move` (Love Letter)
   - `{ roomId: string, gameType: "love_letter", move: { type: "play", card: "guard" | "priest" | "baron" | "handmaid" | "prince" | "king" | "countess" | "princess", target?: "black" | "white", guess?: cardName } }`
 
@@ -77,7 +80,7 @@ Message shape:
   - `{ roomId: string, gameType: "liars_dice", move: { type: "bid", quantity: number, face: 1..6 } | { type: "call_liar" } }`
 
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "santorini" | "onitama" | "battleship" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
+  - `{ gameType: "gomoku" | "santorini" | "onitama" | "battleship" | "yahtzee" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -104,6 +107,7 @@ Message shape:
   - Santorini: `{ room, gameType: "santorini", state, viewerRole }`
   - Onitama: `{ room, gameType: "onitama", state, viewerRole }`
   - Battleship: `{ room, gameType: "battleship", state, viewerRole }`
+  - Yahtzee: `{ room, gameType: "yahtzee", state, viewerRole }`
   - Love Letter: `{ room, gameType: "love_letter", state, viewerRole }`
   - Codenames Duet: `{ room, gameType: "codenames_duet", state, viewerRole }`
   - Connect Four: `{ room, gameType: "connect4", state, viewerRole }`
@@ -190,6 +194,7 @@ Message shape:
   - Until reveal is complete, gameplay moves may be rejected with `rng_reveal_pending`.
   - Reveal timeout may abandon the active match (`abandonedReason: "rng_reveal_timeout"` in match result payload).
   - Onitama uses RNG commit-reveal to sample opening action cards and publishes proof in completed payload for replay verification.
+  - Yahtzee uses RNG commit-reveal for all dice rolls and publishes proof in completed payload for replay verification.
 
 - Matchmaking queue:
   - `matchmaking.leave` cancels queue membership.

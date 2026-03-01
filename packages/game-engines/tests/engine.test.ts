@@ -11,6 +11,7 @@ import {
   applyHexMove,
   applyLiarsDiceMove,
   applyLoveLetterMove,
+  applyYahtzeeMove,
   applyGoMove,
   applyGomokuMove,
   applyOnitamaMove,
@@ -34,6 +35,7 @@ import {
   createLiarsDiceState,
   createLoveLetterDeck,
   createLoveLetterState,
+  createYahtzeeState,
   createGoState,
   createGomokuState,
   createOnitamaState,
@@ -612,6 +614,141 @@ describe('battleship engine', () => {
     expect(finalShot.nextState.status).toBe('completed');
     expect(finalShot.nextState.winner).toBe('black');
     expect(finalShot.nextState.lastShot?.result).toBe('sunk');
+  });
+});
+
+describe('yahtzee engine', () => {
+  it('requires at least one roll before scoring', () => {
+    const state = createYahtzeeState();
+    const scored = applyYahtzeeMove(state, {
+      type: 'score',
+      category: 'chance',
+      player: 'black'
+    });
+
+    expect(scored.accepted).toBe(false);
+    expect(scored.reason).toBe('must_roll_before_score');
+  });
+
+  it('rerolls only unheld dice', () => {
+    const queuedRolls = [1, 2, 3, 4, 5, 6, 6];
+    const rollDie = () => queuedRolls.shift() ?? 1;
+
+    const initial = createYahtzeeState();
+    const first = applyYahtzeeMove(
+      initial,
+      {
+        type: 'roll',
+        player: 'black'
+      },
+      rollDie
+    );
+    expect(first.accepted).toBe(true);
+    expect(first.nextState.dice).toEqual([1, 2, 3, 4, 5]);
+
+    const second = applyYahtzeeMove(
+      first.nextState,
+      {
+        type: 'roll',
+        hold: [true, false, true, false, true],
+        player: 'black'
+      },
+      rollDie
+    );
+    expect(second.accepted).toBe(true);
+    expect(second.nextState.dice).toEqual([1, 6, 3, 6, 5]);
+  });
+
+  it('scores a category once and passes turn', () => {
+    const queuedRolls = [6, 6, 6, 2, 1];
+    const rollDie = () => queuedRolls.shift() ?? 1;
+
+    const initial = createYahtzeeState();
+    const rolled = applyYahtzeeMove(
+      initial,
+      {
+        type: 'roll',
+        player: 'black'
+      },
+      rollDie
+    );
+    const scored = applyYahtzeeMove(rolled.nextState, {
+      type: 'score',
+      category: 'three_of_a_kind',
+      player: 'black'
+    });
+
+    expect(scored.accepted).toBe(true);
+    expect(scored.nextState.scores.black.three_of_a_kind).toBe(21);
+    expect(scored.nextState.nextPlayer).toBe('white');
+    expect(scored.nextState.rollsUsed).toBe(0);
+  });
+
+  it('completes once both players fill all categories', () => {
+    const categories = [
+      'ones',
+      'twos',
+      'threes',
+      'fours',
+      'fives',
+      'sixes',
+      'three_of_a_kind',
+      'four_of_a_kind',
+      'full_house',
+      'small_straight',
+      'large_straight',
+      'yahtzee'
+    ] as const;
+
+    const blackFilled = Object.fromEntries(categories.map((category) => [category, 1]));
+    const whiteFilled = Object.fromEntries(categories.map((category) => [category, 1]));
+
+    const initial = createYahtzeeState();
+    const readyForBlack = {
+      ...initial,
+      scores: {
+        black: blackFilled,
+        white: whiteFilled
+      },
+      totals: {
+        black: 12,
+        white: 12
+      },
+      completedCategories: {
+        black: 12,
+        white: 12
+      },
+      moveCount: 24,
+      turnCount: 25,
+      rollsUsed: 1,
+      dice: [6, 6, 6, 6, 6]
+    };
+
+    const blackFinal = applyYahtzeeMove(readyForBlack, {
+      type: 'score',
+      category: 'chance',
+      player: 'black'
+    });
+    expect(blackFinal.accepted).toBe(true);
+    expect(blackFinal.nextState.status).toBe('playing');
+    expect(blackFinal.nextState.nextPlayer).toBe('white');
+    expect(blackFinal.nextState.completedCategories.black).toBe(13);
+
+    const whiteReady = {
+      ...blackFinal.nextState,
+      rollsUsed: 1,
+      dice: [1, 1, 1, 1, 1]
+    };
+    const whiteFinal = applyYahtzeeMove(whiteReady, {
+      type: 'score',
+      category: 'chance',
+      player: 'white'
+    });
+
+    expect(whiteFinal.accepted).toBe(true);
+    expect(whiteFinal.nextState.status).toBe('completed');
+    expect(whiteFinal.nextState.winner).toBe('black');
+    expect(whiteFinal.nextState.completedCategories.white).toBe(13);
   });
 });
 

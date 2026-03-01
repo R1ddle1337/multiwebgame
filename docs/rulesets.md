@@ -85,6 +85,30 @@ Visibility policy:
 - spectators do not receive either fleet layout while match is active
 - completed replay/state projection can reveal both full fleets
 
+## Yahtzee (2-player score duel)
+
+Implemented rules:
+
+- each player has the same 13 score categories:
+  - upper: `ones..sixes`
+  - lower: `three_of_a_kind`, `four_of_a_kind`, `full_house`, `small_straight`, `large_straight`, `yahtzee`, `chance`
+- on a turn:
+  - current player may roll up to 3 times
+  - after first roll, player may submit a 5-slot hold mask to keep selected dice and reroll the rest
+  - then player must score exactly one unused category
+- category scoring is deterministic and standard:
+  - kind/chance sum dice as applicable
+  - full house = `25`, small straight = `30`, large straight = `40`, yahtzee = `50`
+- each category can be used once per player
+- match ends when both players fill all 13 categories
+- winner is higher total score (tie allowed)
+
+Randomness + verification:
+
+- all dice rolls use commit-reveal verifiable RNG
+- gameplay is blocked until RNG phase is `ready`
+- completed payload includes totals/category completion and RNG proof transcript for replay verification
+
 ## Codenames Duet (2-player co-op, 5x5)
 
 Implemented rules (v1 simplified co-op loop):

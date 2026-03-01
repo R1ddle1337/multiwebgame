@@ -3,6 +3,7 @@ export type MatchmakingGameType =
   | 'santorini'
   | 'onitama'
   | 'battleship'
+  | 'yahtzee'
   | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'

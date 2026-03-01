@@ -1,6 +1,7 @@
 import {
   applyBackgammonMove,
   applyBattleshipMove,
+  applyYahtzeeMove,
   applyCardsMove,
   applyCodenamesDuetMove,
   applyConnect4Move,
@@ -17,6 +18,7 @@ import {
   applyXiangqiMove,
   assignBackgammonTurnDice,
   createBattleshipState,
+  createYahtzeeState,
   createBackgammonState,
   createCardsDeck,
   createCardsState,
@@ -42,6 +44,7 @@ import {
   formatXiangqiMoveNotation,
   normalizeOnitamaMove,
   normalizeBattleshipMove,
+  normalizeYahtzeeMove,
   normalizeLoveLetterMove,
   normalizeCodenamesDuetMove,
   normalizeSantoriniMove,
@@ -52,6 +55,7 @@ import {
   toLiarsDicePublicState,
   type CardsRuntimeState,
   type BattleshipRuntimeState,
+  type YahtzeeRuntimeState,
   type CodenamesDuetRuntimeState,
   type LoveLetterRuntimeState,
   type LiarsDiceRuntimeState,
@@ -65,6 +69,9 @@ import type {
   BattleshipPlayer,
   BattleshipShipPlacement,
   BattleshipState,
+  YahtzeeMove,
+  YahtzeeMoveInput,
+  YahtzeePlayer,
   BoardGameType,
   CardsCard,
   CardsMove,
@@ -210,6 +217,19 @@ interface BattleshipRuntime {
   matchId: string;
   state: BattleshipRuntimeState;
   rngSession?: VerifiableRngSession;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface YahtzeeRuntime {
+  gameType: 'yahtzee';
+  roomId: string;
+  matchId: string;
+  state: YahtzeeRuntimeState;
+  rngSession: VerifiableRngSession;
+  rngPrng: DeterministicPrng | null;
   players: {
     black: string;
     white: string;
@@ -375,6 +395,7 @@ type ActiveRuntime =
   | SantoriniRuntime
   | OnitamaRuntime
   | BattleshipRuntime
+  | YahtzeeRuntime
   | Connect4Runtime
   | GoRuntime
   | ReversiRuntime
@@ -519,6 +540,37 @@ const roomMoveSchema = z.union([
           type: z.literal('fire'),
           x: z.number().int().min(0).max(9),
           y: z.number().int().min(0).max(9)
+        })
+      ])
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('yahtzee'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('roll'),
+          hold: z.array(z.boolean()).length(5).optional()
+        }),
+        z.object({
+          type: z.literal('score'),
+          category: z.enum([
+            'ones',
+            'twos',
+            'threes',
+            'fours',
+            'fives',
+            'sixes',
+            'three_of_a_kind',
+            'four_of_a_kind',
+            'full_house',
+            'small_straight',
+            'large_straight',
+            'yahtzee',
+            'chance'
+          ])
         })
       ])
     })
@@ -703,6 +755,7 @@ const matchmakingJoinSchema = z.object({
       'santorini',
       'onitama',
       'battleship',
+      'yahtzee',
       'love_letter',
       'codenames_duet',
       'go',
@@ -748,6 +801,7 @@ function playerSlotsForGame(gameType: BoardGameType): number {
     gameType === 'santorini' ||
     gameType === 'onitama' ||
     gameType === 'battleship' ||
+    gameType === 'yahtzee' ||
     gameType === 'love_letter' ||
     gameType === 'codenames_duet' ||
     gameType === 'go' ||
@@ -898,6 +952,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
     runtime.gameType === 'liars_dice' ||
     runtime.gameType === 'onitama' ||
     runtime.gameType === 'battleship' ||
+    runtime.gameType === 'yahtzee' ||
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'santorini' ||
     runtime.gameType === 'go' ||
@@ -1184,6 +1239,19 @@ function ensureLiarsDiceRuntimeState(runtime: LiarsDiceRuntime): LiarsDiceRuntim
     rollDie: () => prng.nextDie()
   });
   return runtime.state;
+}
+
+function ensureYahtzeePrng(runtime: YahtzeeRuntime): DeterministicPrng | null {
+  if (!runtime.rngSession.rngSeed) {
+    return null;
+  }
+
+  if (runtime.rngPrng) {
+    return runtime.rngPrng;
+  }
+
+  runtime.rngPrng = createDeterministicPrng(runtime.rngSession.rngSeed);
+  return runtime.rngPrng;
 }
 
 function viewerCardsSide(runtime: CardsRuntime, userId: string | null): CardsPlayer | null {
@@ -1702,6 +1770,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'yahtzee') {
+    return {
+      gameType: 'yahtzee',
+      roomId: room.id,
+      matchId,
+      state: createYahtzeeState(),
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerOneUserId: players.first,
+        playerTwoUserId: players.second
+      }),
+      rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'codenames_duet') {
     return {
       gameType: 'codenames_duet',
@@ -2175,6 +2262,56 @@ function readBattleshipMovePayload(payload: Record<string, unknown>): Battleship
   return isBattleshipMoveRecord(payload) ? payload : null;
 }
 
+function isYahtzeeCategory(value: unknown): boolean {
+  return (
+    value === 'ones' ||
+    value === 'twos' ||
+    value === 'threes' ||
+    value === 'fours' ||
+    value === 'fives' ||
+    value === 'sixes' ||
+    value === 'three_of_a_kind' ||
+    value === 'four_of_a_kind' ||
+    value === 'full_house' ||
+    value === 'small_straight' ||
+    value === 'large_straight' ||
+    value === 'yahtzee' ||
+    value === 'chance'
+  );
+}
+
+function isYahtzeeMoveRecord(value: unknown): value is YahtzeeMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<YahtzeeMove>;
+  if (typed.type === 'roll') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      (typed.hold === undefined ||
+        (Array.isArray(typed.hold) &&
+          typed.hold.length === 5 &&
+          typed.hold.every((entry) => typeof entry === 'boolean')))
+    );
+  }
+
+  if (typed.type === 'score') {
+    return (typed.player === 'black' || typed.player === 'white') && isYahtzeeCategory(typed.category);
+  }
+
+  return false;
+}
+
+function readYahtzeeMovePayload(payload: Record<string, unknown>): YahtzeeMove | null {
+  const nested = payload.move;
+  if (isYahtzeeMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isYahtzeeMoveRecord(payload) ? payload : null;
+}
+
 function isCodenamesDuetMoveRecord(value: unknown): value is CodenamesDuetMove {
   if (!value || typeof value !== 'object') {
     return false;
@@ -2373,6 +2510,46 @@ function replayMoves(
       }
 
       const applied = applyBattleshipMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'yahtzee') {
+      const payload = move.payload as {
+        move?: Record<string, unknown>;
+        rngSeed?: string;
+      };
+      if (typeof payload.rngSeed === 'string' && payload.rngSeed.length > 0) {
+        current = {
+          ...current,
+          rngSession: {
+            ...current.rngSession,
+            phase: 'ready',
+            rngSeed: payload.rngSeed,
+            revealDeadlineAt: null
+          },
+          rngPrng: null
+        };
+      }
+
+      const parsedMove = readYahtzeeMovePayload(move.payload);
+      if (!parsedMove) {
+        continue;
+      }
+
+      const prng = ensureYahtzeePrng(current);
+      if (!prng) {
+        continue;
+      }
+
+      const applied = applyYahtzeeMove(current.state, parsedMove, () => prng.nextDie());
       if (!applied.accepted) {
         continue;
       }
@@ -2751,6 +2928,9 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   if (replayed.gameType === 'liars_dice' && replayed.rngSession.phase === 'ready') {
     ensureLiarsDiceRuntimeState(replayed);
   }
+  if (replayed.gameType === 'yahtzee' && replayed.rngSession.phase === 'ready') {
+    ensureYahtzeePrng(replayed);
+  }
 
   if (match.status === 'active') {
     if (hasRngSession(replayed) && isRevealTimedOut(replayed.rngSession)) {
@@ -2978,6 +3158,22 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
         viewerRole
       }
     });
+    return;
+  }
+
+  if (room.gameType === 'yahtzee') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'yahtzee',
+        state: runtime?.gameType === 'yahtzee' ? runtime.state : createYahtzeeState(),
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'yahtzee') {
+      send(client, rngUpdatedMessage(runtime));
+    }
     return;
   }
 
@@ -3375,6 +3571,61 @@ async function handleBattleshipMove(
 
   const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
   broadcastBattleshipMoveApplied(runtime, targets, normalizedMove);
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleYahtzeeMove(
+  client: ClientContext,
+  runtime: YahtzeeRuntime,
+  move: YahtzeeMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: YahtzeePlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const prng = ensureYahtzeePrng(runtime);
+  if (!prng) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  const normalizedMove = normalizeYahtzeeMove(move, player);
+  const applied = applyYahtzeeMove(runtime.state, normalizedMove, () => prng.nextDie());
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: `yahtzee.${normalizedMove.type}`,
+    payload: {
+      move: normalizedMove,
+      rngSeed: runtime.rngSession.rngSeed
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'yahtzee',
+      state: runtime.state,
+      lastMove: normalizedMove
+    }
+  });
 
   await finishMatchIfCompleted(runtime, targets);
 }
@@ -4228,6 +4479,21 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       });
     }
   }
+  if (runtime.gameType === 'yahtzee' && runtime.rngSession.phase === 'ready') {
+    runtime.rngPrng = null;
+    ensureYahtzeePrng(runtime);
+    if (becameReady) {
+      await createMatchMove({
+        matchId: runtime.matchId,
+        actorUserId: client.user.id,
+        moveIndex: 0,
+        moveType: 'yahtzee.rng_ready',
+        payload: {
+          rngSeed: runtime.rngSession.rngSeed
+        }
+      });
+    }
+  }
   activeRuntimes.set(runtime.roomId, runtime);
   broadcast(targets, rngUpdatedMessage(runtime));
   if (
@@ -4236,7 +4502,8 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       runtime.gameType === 'love_letter' ||
       runtime.gameType === 'onitama' ||
       runtime.gameType === 'codenames_duet' ||
-      runtime.gameType === 'liars_dice') &&
+      runtime.gameType === 'liars_dice' ||
+      runtime.gameType === 'yahtzee') &&
     runtime.rngSession.phase === 'ready'
   ) {
     await broadcastRoomStateToSubscribers(runtime.roomId);
@@ -4249,6 +4516,7 @@ async function handleMove(
     | { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     | { roomId: string; gameType: 'cards'; move: CardsMoveInput }
     | { roomId: string; gameType: 'battleship'; move: BattleshipMoveInput }
+    | { roomId: string; gameType: 'yahtzee'; move: YahtzeeMoveInput }
     | { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }
     | { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
@@ -4301,6 +4569,11 @@ async function handleMove(
 
   if (message.gameType === 'battleship' && runtime.gameType === 'battleship') {
     await handleBattleshipMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'yahtzee' && runtime.gameType === 'yahtzee') {
+    await handleYahtzeeMove(client, runtime, message.move);
     return;
   }
 
@@ -4613,6 +4886,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'battleship',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'yahtzee') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'yahtzee',
             move: msg.payload.move
           });
           return;

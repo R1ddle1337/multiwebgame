@@ -33,6 +33,12 @@ export {
   type BattleshipRuntimeState
 } from './battleship.js';
 export {
+  applyYahtzeeMove,
+  createYahtzeeState,
+  normalizeYahtzeeMove,
+  type YahtzeeRuntimeState
+} from './yahtzee.js';
+export {
   applyCodenamesDuetMove,
   createCodenamesDuetRolePool,
   createCodenamesDuetState,

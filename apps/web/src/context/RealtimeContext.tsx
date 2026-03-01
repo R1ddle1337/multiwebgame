@@ -75,6 +75,7 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
     santorini: 0,
     onitama: 0,
     battleship: 0,
+    yahtzee: 0,
     love_letter: 0,
     codenames_duet: 0,
     connect4: 0,

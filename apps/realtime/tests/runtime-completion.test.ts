@@ -12,6 +12,7 @@ import {
   createLiarsDiceState,
   createLoveLetterDeck,
   createLoveLetterState,
+  createYahtzeeState,
   createOnitamaState,
   createGoState,
   createBackgammonState,
@@ -114,6 +115,47 @@ describe('deriveRuntimeCompletion', () => {
           placementsSubmitted: {
             black: true,
             white: true
+          }
+        }
+      }
+    });
+  });
+
+  it('maps yahtzee completion to winner and payload', () => {
+    const state = createYahtzeeState();
+    state.status = 'completed';
+    state.winner = 'black';
+    state.moveCount = 27;
+    state.turnCount = 14;
+    state.totals.black = 231;
+    state.totals.white = 198;
+    state.completedCategories.black = 13;
+    state.completedCategories.white = 13;
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'yahtzee',
+      state,
+      players: {
+        black: 'u61',
+        white: 'u62'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u61',
+      status: 'completed',
+      resultPayload: {
+        yahtzee: {
+          winner: 'black',
+          moveCount: 27,
+          turnCount: 14,
+          totals: {
+            black: 231,
+            white: 198
+          },
+          completedCategories: {
+            black: 13,
+            white: 13
           }
         }
       }

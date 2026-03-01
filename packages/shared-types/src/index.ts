@@ -4,6 +4,7 @@ export type GameType =
   | 'santorini'
   | 'onitama'
   | 'battleship'
+  | 'yahtzee'
   | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
@@ -21,6 +22,7 @@ export type BoardGameType =
   | 'santorini'
   | 'onitama'
   | 'battleship'
+  | 'yahtzee'
   | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
@@ -476,6 +478,68 @@ export interface BattleshipState {
   } | null;
 }
 
+export type YahtzeePlayer = 'black' | 'white';
+export type YahtzeeCategory =
+  | 'ones'
+  | 'twos'
+  | 'threes'
+  | 'fours'
+  | 'fives'
+  | 'sixes'
+  | 'three_of_a_kind'
+  | 'four_of_a_kind'
+  | 'full_house'
+  | 'small_straight'
+  | 'large_straight'
+  | 'yahtzee'
+  | 'chance';
+
+export type YahtzeeMoveInput =
+  | {
+      type: 'roll';
+      hold?: boolean[];
+    }
+  | {
+      type: 'score';
+      category: YahtzeeCategory;
+    };
+
+export type YahtzeeMove =
+  | {
+      type: 'roll';
+      hold?: boolean[];
+      player: YahtzeePlayer;
+    }
+  | {
+      type: 'score';
+      category: YahtzeeCategory;
+      player: YahtzeePlayer;
+    };
+
+export interface YahtzeeState {
+  categories: YahtzeeCategory[];
+  dice: number[];
+  held: boolean[];
+  nextPlayer: YahtzeePlayer;
+  status: 'playing' | 'completed';
+  winner: YahtzeePlayer | null;
+  moveCount: number;
+  turnCount: number;
+  rollsUsed: number;
+  scores: {
+    black: Partial<Record<YahtzeeCategory, number>>;
+    white: Partial<Record<YahtzeeCategory, number>>;
+  };
+  totals: {
+    black: number;
+    white: number;
+  };
+  completedCategories: {
+    black: number;
+    white: number;
+  };
+}
+
 export type Connect4Disc = 'red' | 'yellow';
 
 export interface Connect4Move {
@@ -913,6 +977,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'yahtzee';
+      state: YahtzeeState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'codenames_duet';
       state: CodenamesDuetState | null;
       viewerRole: RoomPlayerRole;
@@ -1017,6 +1087,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'yahtzee';
+      state: YahtzeeState;
+      lastMove: YahtzeeMove;
+    }
+  | {
+      roomId: string;
       gameType: 'codenames_duet';
       state: CodenamesDuetState;
       lastMove: CodenamesDuetMove;
@@ -1099,6 +1175,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.move', { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'battleship'; move: BattleshipMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'yahtzee'; move: YahtzeeMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
