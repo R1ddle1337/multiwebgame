@@ -2,6 +2,7 @@ export type GameType =
   | 'single_2048'
   | 'gomoku'
   | 'santorini'
+  | 'onitama'
   | 'xiangqi'
   | 'go'
   | 'connect4'
@@ -15,6 +16,7 @@ export type GameType =
 export type BoardGameType =
   | 'gomoku'
   | 'santorini'
+  | 'onitama'
   | 'xiangqi'
   | 'go'
   | 'connect4'
@@ -223,6 +225,66 @@ export interface SantoriniState {
   status: 'setup' | 'playing' | 'completed';
   winner: SantoriniPlayer | null;
   loserReason: 'no_legal_move' | null;
+  moveCount: number;
+}
+
+export type OnitamaPlayer = 'black' | 'white';
+export type OnitamaCardName =
+  | 'tiger'
+  | 'dragon'
+  | 'frog'
+  | 'rabbit'
+  | 'crab'
+  | 'elephant'
+  | 'goose'
+  | 'rooster';
+
+export interface OnitamaPosition {
+  x: number;
+  y: number;
+}
+
+export interface OnitamaCardVector {
+  dx: number;
+  dy: number;
+}
+
+export interface OnitamaCard {
+  name: OnitamaCardName;
+  vectors: OnitamaCardVector[];
+}
+
+export type OnitamaPieceKind = 'master' | 'student';
+
+export interface OnitamaPiece {
+  player: OnitamaPlayer;
+  kind: OnitamaPieceKind;
+}
+
+export interface OnitamaMoveInput {
+  from: OnitamaPosition;
+  to: OnitamaPosition;
+  card: OnitamaCardName;
+}
+
+export interface OnitamaMove {
+  from: OnitamaPosition;
+  to: OnitamaPosition;
+  card: OnitamaCardName;
+  player: OnitamaPlayer;
+}
+
+export interface OnitamaState {
+  boardSize: number;
+  board: (OnitamaPiece | null)[][];
+  cards: {
+    black: OnitamaCardName[];
+    white: OnitamaCardName[];
+    side: OnitamaCardName;
+  };
+  nextPlayer: OnitamaPlayer;
+  status: 'playing' | 'completed';
+  winner: OnitamaPlayer | null;
   moveCount: number;
 }
 
@@ -651,6 +713,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'onitama';
+      state: OnitamaState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'connect4';
       state: Connect4State | null;
       viewerRole: RoomPlayerRole;
@@ -731,6 +799,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'onitama';
+      state: OnitamaState;
+      lastMove: OnitamaMove;
+    }
+  | {
+      roomId: string;
       gameType: 'connect4';
       state: Connect4State;
       lastMove: Connect4Move;
@@ -799,6 +873,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.rng.reveal', { roomId: string; nonce: string }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'reversi'; x: number; y: number }>
   | WsEnvelope<

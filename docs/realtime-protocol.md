@@ -40,6 +40,9 @@ Message shape:
 - `room.move` (Santorini)
   - `{ roomId: string, gameType: "santorini", move: { type: "place", worker: "a" | "b", x, y } | { type: "turn", worker: "a" | "b", to: {x, y}, build: {x, y} } }`
 
+- `room.move` (Onitama)
+  - `{ roomId: string, gameType: "onitama", move: { from: {x, y}, to: {x, y}, card: "tiger" | "dragon" | "frog" | "rabbit" | "crab" | "elephant" | "goose" | "rooster" } }`
+
 - `room.move` (Reversi)
   - `{ roomId: string, gameType: "reversi", x: number, y: number }`
 
@@ -65,7 +68,7 @@ Message shape:
   - `{ roomId: string, gameType: "liars_dice", move: { type: "bid", quantity: number, face: 1..6 } | { type: "call_liar" } }`
 
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "santorini" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
+  - `{ gameType: "gomoku" | "santorini" | "onitama" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -90,6 +93,7 @@ Message shape:
 - `room.state`
   - Gomoku: `{ room, gameType: "gomoku", state, viewerRole }`
   - Santorini: `{ room, gameType: "santorini", state, viewerRole }`
+  - Onitama: `{ room, gameType: "onitama", state, viewerRole }`
   - Connect Four: `{ room, gameType: "connect4", state, viewerRole }`
   - Reversi: `{ room, gameType: "reversi", state, viewerRole }`
   - Dots and Boxes: `{ room, gameType: "dots", state, viewerRole }`
@@ -162,6 +166,7 @@ Message shape:
   - RNG-enabled matches can require both players to submit `room.rng.commit` then `room.rng.reveal`.
   - Until reveal is complete, gameplay moves may be rejected with `rng_reveal_pending`.
   - Reveal timeout may abandon the active match (`abandonedReason: "rng_reveal_timeout"` in match result payload).
+  - Onitama uses RNG commit-reveal to sample opening action cards and publishes proof in completed payload for replay verification.
 
 - Matchmaking queue:
   - `matchmaking.leave` cancels queue membership.

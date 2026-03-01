@@ -10,6 +10,7 @@ import {
   applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
+  applyOnitamaMove,
   applySantoriniMove,
   applyQuoridorMove,
   applyReversiMove,
@@ -26,6 +27,7 @@ import {
   createLiarsDiceState,
   createGoState,
   createGomokuState,
+  createOnitamaState,
   createSantoriniState,
   createQuoridorState,
   createReversiState,
@@ -317,6 +319,68 @@ describe('santorini engine', () => {
       worker: 'a',
       to: { x: 2, y: 2 },
       build: { x: 1, y: 2 },
+      player: 'black'
+    });
+
+    expect(winning.accepted).toBe(true);
+    expect(winning.nextState.status).toBe('completed');
+    expect(winning.nextState.winner).toBe('black');
+  });
+});
+
+describe('onitama engine', () => {
+  it('initializes board and cards from deterministic opening set', () => {
+    const state = createOnitamaState({
+      openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+    });
+
+    expect(state.cards.black).toEqual(['tiger', 'dragon']);
+    expect(state.cards.white).toEqual(['frog', 'rabbit']);
+    expect(state.cards.side).toBe('crab');
+    expect(state.board[4][2]).toEqual({ player: 'black', kind: 'master' });
+    expect(state.board[0][2]).toEqual({ player: 'white', kind: 'master' });
+  });
+
+  it('rejects moves that do not match card vectors', () => {
+    const state = createOnitamaState({
+      openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+    });
+
+    const invalid = applyOnitamaMove(state, {
+      from: { x: 2, y: 4 },
+      to: { x: 2, y: 3 },
+      card: 'tiger',
+      player: 'black'
+    });
+
+    expect(invalid.accepted).toBe(false);
+    expect(invalid.reason).toBe('illegal_card_vector');
+  });
+
+  it('wins by capturing opponent master', () => {
+    const base = createOnitamaState({
+      openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+    });
+    const board = base.board.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
+    board[2][2] = { player: 'black', kind: 'master' };
+    board[0][2] = { player: 'white', kind: 'master' };
+    board[4][2] = null;
+
+    const state = {
+      ...base,
+      board,
+      cards: {
+        black: ['tiger', 'dragon'],
+        white: ['frog', 'rabbit'],
+        side: 'crab' as const
+      },
+      nextPlayer: 'black' as const
+    };
+
+    const winning = applyOnitamaMove(state, {
+      from: { x: 2, y: 2 },
+      to: { x: 2, y: 0 },
+      card: 'tiger',
       player: 'black'
     });
 

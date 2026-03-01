@@ -7,6 +7,7 @@ import {
   applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
+  applyOnitamaMove,
   applySantoriniMove,
   applyQuoridorMove,
   applyReversiMove,
@@ -22,12 +23,15 @@ import {
   createLiarsDiceState,
   createGoState,
   createGomokuState,
+  createOnitamaCardPool,
+  createOnitamaState,
   createSantoriniState,
   createQuoridorState,
   hasAnyLegalBackgammonMove,
   createReversiState,
   createXiangqiState,
   formatXiangqiMoveNotation,
+  normalizeOnitamaMove,
   normalizeSantoriniMove,
   toCardsPublicState,
   toLiarsDicePublicState,
@@ -58,6 +62,10 @@ import type {
   GoState,
   GomokuMark,
   GomokuState,
+  OnitamaMove,
+  OnitamaMoveInput,
+  OnitamaPlayer,
+  OnitamaState,
   SantoriniMove,
   SantoriniMoveInput,
   SantoriniPlayer,
@@ -146,6 +154,19 @@ interface SantoriniRuntime {
   matchId: string;
   state: SantoriniState;
   rngSession?: VerifiableRngSession;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface OnitamaRuntime {
+  gameType: 'onitama';
+  roomId: string;
+  matchId: string;
+  state: OnitamaState | null;
+  rngSession: VerifiableRngSession;
+  rngPrng: DeterministicPrng | null;
   players: {
     black: string;
     white: string;
@@ -281,6 +302,7 @@ type ActiveRuntime =
   | LiarsDiceRuntime
   | GomokuRuntime
   | SantoriniRuntime
+  | OnitamaRuntime
   | Connect4Runtime
   | GoRuntime
   | ReversiRuntime
@@ -382,6 +404,24 @@ const roomMoveSchema = z.union([
           })
         })
       ])
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('onitama'),
+      move: z.object({
+        from: z.object({
+          x: z.number().int().min(0).max(4),
+          y: z.number().int().min(0).max(4)
+        }),
+        to: z.object({
+          x: z.number().int().min(0).max(4),
+          y: z.number().int().min(0).max(4)
+        }),
+        card: z.enum(['tiger', 'dragon', 'frog', 'rabbit', 'crab', 'elephant', 'goose', 'rooster'])
+      })
     })
   }),
   z.object({
@@ -526,6 +566,7 @@ const matchmakingJoinSchema = z.object({
     gameType: z.enum([
       'gomoku',
       'santorini',
+      'onitama',
       'go',
       'xiangqi',
       'connect4',
@@ -567,6 +608,7 @@ const pendingInactiveRoomLeaves = new Map<string, Map<string, ReturnType<typeof 
 function playerSlotsForGame(gameType: BoardGameType): number {
   return gameType === 'gomoku' ||
     gameType === 'santorini' ||
+    gameType === 'onitama' ||
     gameType === 'go' ||
     gameType === 'xiangqi' ||
     gameType === 'connect4' ||
@@ -711,6 +753,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
     runtime.gameType === 'backgammon' ||
     runtime.gameType === 'cards' ||
     runtime.gameType === 'liars_dice' ||
+    runtime.gameType === 'onitama' ||
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'santorini' ||
     runtime.gameType === 'go' ||
@@ -860,6 +903,37 @@ function ensureCardsRuntimeState(runtime: CardsRuntime): CardsRuntimeState | nul
   runtime.state = createCardsState({
     deck,
     startingPlayer: 'black'
+  });
+  return runtime.state;
+}
+
+function ensureOnitamaPrng(runtime: OnitamaRuntime): DeterministicPrng | null {
+  if (!runtime.rngSession.rngSeed) {
+    return null;
+  }
+
+  if (runtime.rngPrng) {
+    return runtime.rngPrng;
+  }
+
+  runtime.rngPrng = createDeterministicPrng(runtime.rngSession.rngSeed);
+  return runtime.rngPrng;
+}
+
+function ensureOnitamaRuntimeState(runtime: OnitamaRuntime): OnitamaState | null {
+  if (runtime.state) {
+    return runtime.state;
+  }
+
+  const prng = ensureOnitamaPrng(runtime);
+  if (!prng) {
+    return null;
+  }
+
+  const pool = createOnitamaCardPool();
+  prng.shuffleInPlace(pool);
+  runtime.state = createOnitamaState({
+    openingCards: pool.slice(0, 5)
   });
   return runtime.state;
 }
@@ -1214,6 +1288,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'onitama') {
+    return {
+      gameType: 'onitama',
+      roomId: room.id,
+      matchId,
+      state: null,
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerOneUserId: players.first,
+        playerTwoUserId: players.second
+      }),
+      rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'liars_dice') {
     return {
       gameType: 'liars_dice',
@@ -1527,6 +1620,56 @@ function readSantoriniMovePayload(payload: Record<string, unknown>): SantoriniMo
   return isSantoriniMoveRecord(payload) ? payload : null;
 }
 
+function isOnitamaPositionRecord(value: unknown): value is OnitamaMove['from'] {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<OnitamaMove['from']>;
+  return (
+    typeof typed.x === 'number' &&
+    Number.isInteger(typed.x) &&
+    typeof typed.y === 'number' &&
+    Number.isInteger(typed.y)
+  );
+}
+
+function isOnitamaCardRecord(value: unknown): value is OnitamaMove['card'] {
+  return (
+    value === 'tiger' ||
+    value === 'dragon' ||
+    value === 'frog' ||
+    value === 'rabbit' ||
+    value === 'crab' ||
+    value === 'elephant' ||
+    value === 'goose' ||
+    value === 'rooster'
+  );
+}
+
+function isOnitamaMoveRecord(value: unknown): value is OnitamaMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<OnitamaMove>;
+  return (
+    (typed.player === 'black' || typed.player === 'white') &&
+    isOnitamaPositionRecord(typed.from) &&
+    isOnitamaPositionRecord(typed.to) &&
+    isOnitamaCardRecord(typed.card)
+  );
+}
+
+function readOnitamaMovePayload(payload: Record<string, unknown>): OnitamaMove | null {
+  const nested = payload.move;
+  if (isOnitamaMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isOnitamaMoveRecord(payload) ? payload : null;
+}
+
 function replayMoves(
   runtime: ActiveRuntime,
   moves: Array<{ payload: Record<string, unknown> }>
@@ -1585,6 +1728,45 @@ function replayMoves(
       }
 
       const applied = applyCardsMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'onitama') {
+      const payload = move.payload as {
+        move?: Record<string, unknown>;
+        rngSeed?: string;
+      };
+      if (typeof payload.rngSeed === 'string' && payload.rngSeed.length > 0) {
+        current = {
+          ...current,
+          rngSession: {
+            ...current.rngSession,
+            phase: 'ready',
+            rngSeed: payload.rngSeed,
+            revealDeadlineAt: null
+          },
+          rngPrng: null
+        };
+      }
+
+      if (current.rngSession.phase === 'ready') {
+        ensureOnitamaRuntimeState(current);
+      }
+
+      const parsedMove = readOnitamaMovePayload(move.payload);
+      if (!parsedMove || !current.state) {
+        continue;
+      }
+
+      const applied = applyOnitamaMove(current.state, parsedMove);
       if (!applied.accepted) {
         continue;
       }
@@ -1912,6 +2094,9 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   if (replayed.gameType === 'cards' && replayed.rngSession.phase === 'ready') {
     ensureCardsRuntimeState(replayed);
   }
+  if (replayed.gameType === 'onitama' && replayed.rngSession.phase === 'ready') {
+    ensureOnitamaRuntimeState(replayed);
+  }
   if (replayed.gameType === 'liars_dice' && replayed.rngSession.phase === 'ready') {
     ensureLiarsDiceRuntimeState(replayed);
   }
@@ -1969,10 +2154,13 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
   const existing = await getOrLoadRuntime(roomId);
   if (
     existing &&
-    (((existing.gameType === 'cards' || existing.gameType === 'liars_dice') &&
+    (((existing.gameType === 'cards' ||
+      existing.gameType === 'liars_dice' ||
+      existing.gameType === 'onitama') &&
       existing.state?.status === 'playing') ||
       (existing.gameType === 'santorini' && existing.state.status !== 'completed') ||
       (existing.gameType !== 'cards' &&
+        existing.gameType !== 'onitama' &&
         existing.gameType !== 'santorini' &&
         existing.gameType !== 'liars_dice' &&
         existing.state.status === 'playing'))
@@ -2077,6 +2265,26 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
       }
     });
     if (runtime?.gameType === 'cards') {
+      send(client, rngUpdatedMessage(runtime));
+    }
+    return;
+  }
+
+  if (room.gameType === 'onitama') {
+    if (runtime?.gameType === 'onitama' && runtime.rngSession.phase === 'ready') {
+      ensureOnitamaRuntimeState(runtime);
+    }
+
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'onitama',
+        state: runtime?.gameType === 'onitama' ? runtime.state : null,
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'onitama') {
       send(client, rngUpdatedMessage(runtime));
     }
     return;
@@ -2358,6 +2566,60 @@ async function handleSantoriniMove(
     payload: {
       roomId: runtime.roomId,
       gameType: 'santorini',
+      state: runtime.state,
+      lastMove: normalizedMove
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleOnitamaMove(
+  client: ClientContext,
+  runtime: OnitamaRuntime,
+  move: OnitamaMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: OnitamaPlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const state = ensureOnitamaRuntimeState(runtime);
+  if (!state) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  const normalizedMove = normalizeOnitamaMove(move, player);
+  const applied = applyOnitamaMove(state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'onitama.move',
+    payload: {
+      move: normalizedMove
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'onitama',
       state: runtime.state,
       lastMove: normalizedMove
     }
@@ -3063,6 +3325,21 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       });
     }
   }
+  if (runtime.gameType === 'onitama' && runtime.rngSession.phase === 'ready') {
+    runtime.rngPrng = null;
+    ensureOnitamaRuntimeState(runtime);
+    if (becameReady) {
+      await createMatchMove({
+        matchId: runtime.matchId,
+        actorUserId: client.user.id,
+        moveIndex: 0,
+        moveType: 'onitama.rng_ready',
+        payload: {
+          rngSeed: runtime.rngSession.rngSeed
+        }
+      });
+    }
+  }
   if (runtime.gameType === 'liars_dice' && runtime.rngSession.phase === 'ready') {
     runtime.rngPrng = null;
     ensureLiarsDiceRuntimeState(runtime);
@@ -3083,6 +3360,7 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
   if (
     (runtime.gameType === 'backgammon' ||
       runtime.gameType === 'cards' ||
+      runtime.gameType === 'onitama' ||
       runtime.gameType === 'liars_dice') &&
     runtime.rngSession.phase === 'ready'
   ) {
@@ -3098,6 +3376,7 @@ async function handleMove(
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }
+    | { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }
     | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
     | { roomId: string; gameType: 'dots'; move: Pick<DotsMove, 'orientation' | 'x' | 'y'> }
@@ -3154,6 +3433,11 @@ async function handleMove(
 
   if (message.gameType === 'santorini' && runtime.gameType === 'santorini') {
     await handleSantoriniMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'onitama' && runtime.gameType === 'onitama') {
+    await handleOnitamaMove(client, runtime, message.move);
     return;
   }
 
@@ -3455,6 +3739,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'santorini',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'onitama') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'onitama',
             move: msg.payload.move
           });
           return;

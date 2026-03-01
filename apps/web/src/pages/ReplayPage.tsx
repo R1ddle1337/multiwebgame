@@ -7,6 +7,7 @@ import {
   applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
+  applyOnitamaMove,
   applySantoriniMove,
   applyQuoridorMove,
   applyReversiMove,
@@ -20,6 +21,8 @@ import {
   createLiarsDiceState,
   createGoState,
   createGomokuState,
+  createOnitamaCardPool,
+  createOnitamaState,
   createSantoriniState,
   createQuoridorState,
   createReversiState,
@@ -48,6 +51,8 @@ import type {
   HexMove,
   HexState,
   LiarsDiceMove,
+  OnitamaMove,
+  OnitamaState,
   QuoridorMove,
   QuoridorState,
   ReversiMove,
@@ -347,6 +352,54 @@ function parseSantoriniMove(
   return null;
 }
 
+function parseOnitamaMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: OnitamaMove['player']
+): OnitamaMove | null {
+  const source = (payload.move ?? payload) as Partial<OnitamaMove>;
+  if (
+    !source.from ||
+    !source.to ||
+    typeof source.from.x !== 'number' ||
+    typeof source.from.y !== 'number' ||
+    typeof source.to.x !== 'number' ||
+    typeof source.to.y !== 'number' ||
+    !Number.isInteger(source.from.x) ||
+    !Number.isInteger(source.from.y) ||
+    !Number.isInteger(source.to.x) ||
+    !Number.isInteger(source.to.y)
+  ) {
+    return null;
+  }
+
+  const card = source.card;
+  if (
+    card !== 'tiger' &&
+    card !== 'dragon' &&
+    card !== 'frog' &&
+    card !== 'rabbit' &&
+    card !== 'crab' &&
+    card !== 'elephant' &&
+    card !== 'goose' &&
+    card !== 'rooster'
+  ) {
+    return null;
+  }
+
+  return {
+    from: {
+      x: source.from.x,
+      y: source.from.y
+    },
+    to: {
+      x: source.to.x,
+      y: source.to.y
+    },
+    card,
+    player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+  };
+}
+
 function formatCardsCard(card: { rank: string; suit: string }): string {
   return `${card.rank}${card.suit.slice(0, 1).toUpperCase()}`;
 }
@@ -364,6 +417,17 @@ function replaySantoriniWorkerAt(state: SantoriniState, x: number, y: number): s
   return null;
 }
 
+function replayOnitamaPieceAt(state: OnitamaState, x: number, y: number): string | null {
+  const piece = state.board[y][x];
+  if (!piece) {
+    return null;
+  }
+
+  const prefix = piece.player === 'black' ? 'B' : 'W';
+  const suffix = piece.kind === 'master' ? 'M' : 'S';
+  return `${prefix}${suffix}`;
+}
+
 export function ReplayPage({ api, viewerUserId }: Props) {
   const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
@@ -371,6 +435,11 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
   const [santoriniStates, setSantoriniStates] = useState<SantoriniState[]>([
     createSantoriniState({ boardSize: 5 })
+  ]);
+  const [onitamaStates, setOnitamaStates] = useState<OnitamaState[]>([
+    createOnitamaState({
+      openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+    })
   ]);
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [dotsStates, setDotsStates] = useState<DotsState[]>([createDotsState()]);
@@ -498,6 +567,53 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setSantoriniStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'onitama') {
+          const payload = result.match.resultPayload as { rng?: { rngSeed?: unknown } } | null;
+          let rngSeed = typeof payload?.rng?.rngSeed === 'string' ? payload.rng.rngSeed : null;
+
+          if (!rngSeed) {
+            const fromMove = result.match.moves
+              .map((entry) => entry.payload as { rngSeed?: unknown })
+              .find((entry) => typeof entry.rngSeed === 'string');
+            rngSeed = typeof fromMove?.rngSeed === 'string' ? fromMove.rngSeed : null;
+          }
+
+          if (!rngSeed) {
+            setError(t('common.error_generic'));
+            return;
+          }
+
+          const prng = createDeterministicPrng(rngSeed);
+          const pool = createOnitamaCardPool();
+          prng.shuffleInPlace(pool);
+
+          let current = createOnitamaState({
+            openingCards: pool.slice(0, 5)
+          });
+          const snapshots: OnitamaState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseOnitamaMove(move.payload as Record<string, unknown>, current.nextPlayer);
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyOnitamaMove(current, parsedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setOnitamaStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -868,6 +984,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'santorini') {
       return Math.max(0, santoriniStates.length - 1);
     }
+    if (gameType === 'onitama') {
+      return Math.max(0, onitamaStates.length - 1);
+    }
     if (gameType === 'connect4') {
       return Math.max(0, connect4States.length - 1);
     }
@@ -905,6 +1024,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     hexStates.length,
     gomokuStates.length,
     santoriniStates.length,
+    onitamaStates.length,
     quoridorStates.length,
     connect4States.length,
     dotsStates.length,
@@ -1024,6 +1144,40 @@ export function ReplayPage({ api, viewerUserId }: Props) {
             ))
           )}
         </div>
+      ) : null}
+      {gameType === 'onitama' ? (
+        <>
+          <p>
+            Black: {onitamaStates[clampedStep].cards.black.join(', ')} | White:{' '}
+            {onitamaStates[clampedStep].cards.white.join(', ')} | Side:{' '}
+            {onitamaStates[clampedStep].cards.side}
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${onitamaStates[clampedStep].boardSize}, minmax(2.3rem, 1fr))`,
+              gap: '0.3rem',
+              maxWidth: '24rem'
+            }}
+          >
+            {onitamaStates[clampedStep].board.flatMap((row, y) =>
+              row.map((_, x) => (
+                <div
+                  key={`onitama-replay-${x}-${y}`}
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: '8px',
+                    padding: '0.4rem',
+                    textAlign: 'center',
+                    fontSize: '0.82rem'
+                  }}
+                >
+                  {replayOnitamaPieceAt(onitamaStates[clampedStep], x, y) ?? '·'}
+                </div>
+              ))
+            )}
+          </div>
+        </>
       ) : null}
       {gameType === 'connect4' ? <Connect4Board state={connect4States[clampedStep]} disabled /> : null}
       {gameType === 'dots' ? (

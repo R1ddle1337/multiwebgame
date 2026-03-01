@@ -4,6 +4,7 @@ import {
   createHexState,
   createGoState,
   createGomokuState,
+  createOnitamaState,
   createSantoriniState,
   createQuoridorState,
   createReversiState,
@@ -25,6 +26,9 @@ import type {
   HexState,
   LiarsDiceMoveInput,
   LiarsDiceState,
+  OnitamaMove,
+  OnitamaMoveInput,
+  OnitamaState,
   QuoridorMove,
   QuoridorMoveInput,
   QuoridorState,
@@ -75,6 +79,7 @@ function formatResultText(
     | GomokuState
     | GoState
     | HexState
+    | OnitamaState
     | QuoridorState
     | ReversiState
     | XiangqiState,
@@ -130,6 +135,17 @@ function santoriniWorkerAt(state: SantoriniState, x: number, y: number): string 
   return null;
 }
 
+function onitamaPieceAt(state: OnitamaState, x: number, y: number): string | null {
+  const piece = state.board[y][x];
+  if (!piece) {
+    return null;
+  }
+
+  const prefix = piece.player === 'black' ? 'B' : 'W';
+  const suffix = piece.kind === 'master' ? 'M' : 'S';
+  return `${prefix}${suffix}`;
+}
+
 function formatCardsCard(card: CardsCard): string {
   const suitInitial = card.suit.slice(0, 1).toUpperCase();
   return `${card.rank}${suitInitial}`;
@@ -154,6 +170,11 @@ export function RoomPage({ api, user }: Props) {
   const [santoriniMoveY, setSantoriniMoveY] = useState(0);
   const [santoriniBuildX, setSantoriniBuildX] = useState(0);
   const [santoriniBuildY, setSantoriniBuildY] = useState(0);
+  const [onitamaCard, setOnitamaCard] = useState<OnitamaMoveInput['card']>('tiger');
+  const [onitamaFromX, setOnitamaFromX] = useState(2);
+  const [onitamaFromY, setOnitamaFromY] = useState(4);
+  const [onitamaToX, setOnitamaToX] = useState(2);
+  const [onitamaToY, setOnitamaToY] = useState(2);
   const [liarsBidQuantity, setLiarsBidQuantity] = useState(1);
   const [liarsBidFace, setLiarsBidFace] = useState(1);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -184,6 +205,12 @@ export function RoomPage({ api, user }: Props) {
     snapshot?.gameType === 'santorini'
       ? (snapshot.state as SantoriniState)
       : createSantoriniState({ boardSize: 5 });
+  const onitamaState =
+    snapshot?.gameType === 'onitama'
+      ? (snapshot.state as OnitamaState | null)
+      : createOnitamaState({
+          openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+        });
   const connect4State =
     snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
   const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
@@ -231,6 +258,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'santorini' &&
     viewerRole === 'player' &&
     santoriniState.status !== 'completed';
+  const onitamaTurn =
+    hasActiveMatch &&
+    room?.gameType === 'onitama' &&
+    viewerRole === 'player' &&
+    onitamaState?.status === 'playing';
   const goTurn =
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
   const hexTurn =
@@ -275,6 +307,10 @@ export function RoomPage({ api, user }: Props) {
     santoriniTurn &&
     ((seat === 1 && santoriniState.nextPlayer === 'black') ||
       (seat === 2 && santoriniState.nextPlayer === 'white'));
+  const canPlayOnitama =
+    Boolean(onitamaTurn) &&
+    ((seat === 1 && onitamaState?.nextPlayer === 'black') ||
+      (seat === 2 && onitamaState?.nextPlayer === 'white'));
   const canPlayGo =
     goTurn &&
     ((seat === 1 && goState.nextPlayer === 'black') || (seat === 2 && goState.nextPlayer === 'white'));
@@ -307,6 +343,7 @@ export function RoomPage({ api, user }: Props) {
   const canPlayCurrentTurn =
     canPlayGomoku ||
     canPlaySantorini ||
+    canPlayOnitama ||
     canPlayConnect4 ||
     canPlayGo ||
     canPlayHex ||
@@ -338,6 +375,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'santorini') {
       return describeLastMove('santorini', snapshot.lastMove as SantoriniMove);
+    }
+
+    if (room.gameType === 'onitama') {
+      return describeLastMove('onitama', snapshot.lastMove as OnitamaMove);
     }
 
     if (room.gameType === 'go') {
@@ -394,6 +435,10 @@ export function RoomPage({ api, user }: Props) {
       return statusLabel('playing');
     }
 
+    if (room.gameType === 'onitama') {
+      return onitamaState ? formatResultText(onitamaState, statusLabel, colorLabel, t) : null;
+    }
+
     if (room.gameType === 'go') {
       return formatResultText(goState, statusLabel, colorLabel, t);
     }
@@ -428,6 +473,7 @@ export function RoomPage({ api, user }: Props) {
     latestMoveSummary,
     gomokuState,
     santoriniState,
+    onitamaState,
     connect4State,
     goState,
     hexState,
@@ -552,6 +598,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'santorini',
+        move
+      }
+    });
+  };
+
+  const sendOnitamaMove = (move: OnitamaMoveInput) => {
+    if (!canPlayOnitama) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'onitama',
         move
       }
     });
@@ -1121,6 +1182,138 @@ export function RoomPage({ api, user }: Props) {
                   : t('room.result.draw')}
               </p>
             ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'onitama' ? (
+          <>
+            {!onitamaState ? (
+              <p>{t('room.onitama.waiting_rng')}</p>
+            ) : (
+              <>
+                {hasActiveMatch ? (
+                  <p>
+                    {t('room.next_turn', {
+                      player: colorLabel(onitamaState.nextPlayer),
+                      status: statusLabel(onitamaState.status)
+                    })}
+                  </p>
+                ) : null}
+                <p>
+                  Black: {onitamaState.cards.black.join(', ')} | White: {onitamaState.cards.white.join(', ')}{' '}
+                  | Side: {onitamaState.cards.side}
+                </p>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${onitamaState.boardSize}, minmax(2.3rem, 1fr))`,
+                    gap: '0.3rem',
+                    maxWidth: '24rem'
+                  }}
+                >
+                  {onitamaState.board.flatMap((row, y) =>
+                    row.map((_, x) => (
+                      <div
+                        key={`onitama-${x}-${y}`}
+                        style={{
+                          border: '1px solid var(--border)',
+                          borderRadius: '8px',
+                          padding: '0.4rem',
+                          textAlign: 'center',
+                          fontSize: '0.82rem'
+                        }}
+                      >
+                        {onitamaPieceAt(onitamaState, x, y) ?? '·'}
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="button-row">
+                  <label>
+                    Card{' '}
+                    <select
+                      value={onitamaCard}
+                      onChange={(event) => setOnitamaCard(event.target.value as OnitamaMoveInput['card'])}
+                      disabled={!canPlayOnitama}
+                    >
+                      {(seat === 1 ? onitamaState.cards.black : onitamaState.cards.white).map((card) => (
+                        <option key={card} value={card}>
+                          {card}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="button-row">
+                  <label>
+                    From X{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={4}
+                      value={onitamaFromX}
+                      onChange={(event) => setOnitamaFromX(Number(event.target.value) || 0)}
+                      disabled={!canPlayOnitama}
+                    />
+                  </label>
+                  <label>
+                    From Y{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={4}
+                      value={onitamaFromY}
+                      onChange={(event) => setOnitamaFromY(Number(event.target.value) || 0)}
+                      disabled={!canPlayOnitama}
+                    />
+                  </label>
+                </div>
+                <div className="button-row">
+                  <label>
+                    To X{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={4}
+                      value={onitamaToX}
+                      onChange={(event) => setOnitamaToX(Number(event.target.value) || 0)}
+                      disabled={!canPlayOnitama}
+                    />
+                  </label>
+                  <label>
+                    To Y{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={4}
+                      value={onitamaToY}
+                      onChange={(event) => setOnitamaToY(Number(event.target.value) || 0)}
+                      disabled={!canPlayOnitama}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      sendOnitamaMove({
+                        from: { x: onitamaFromX, y: onitamaFromY },
+                        to: { x: onitamaToX, y: onitamaToY },
+                        card: onitamaCard
+                      })
+                    }
+                    disabled={!canPlayOnitama}
+                  >
+                    {t('room.onitama.move')}
+                  </button>
+                </div>
+                {onitamaState.status === 'completed' ? (
+                  <p>
+                    {onitamaState.winner
+                      ? t('room.result.winner', { winner: colorLabel(onitamaState.winner) })
+                      : t('room.result.draw')}
+                  </p>
+                ) : null}
+              </>
+            )}
           </>
         ) : null}
 

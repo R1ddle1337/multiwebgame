@@ -6,6 +6,7 @@ import {
   createDotsState,
   createHexState,
   createLiarsDiceState,
+  createOnitamaState,
   createGoState,
   createBackgammonState,
   createGomokuState,
@@ -164,6 +165,37 @@ describe('deriveRuntimeCompletion', () => {
           winner: 'white',
           moveCount: 22,
           loserReason: 'no_legal_move'
+        }
+      }
+    });
+  });
+
+  it('maps onitama completion to winner and payload', () => {
+    const base = createOnitamaState({
+      openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+    });
+    const completion = deriveRuntimeCompletion({
+      gameType: 'onitama',
+      state: {
+        ...base,
+        status: 'completed',
+        winner: 'black',
+        moveCount: 19
+      },
+      players: {
+        black: 'u301',
+        white: 'u302'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u301',
+      status: 'completed',
+      resultPayload: {
+        onitama: {
+          winner: 'black',
+          moveCount: 19,
+          sideCard: 'crab'
         }
       }
     });

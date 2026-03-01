@@ -18,6 +18,13 @@ export { applyDotsMove, createDotsState } from './dots.js';
 export { applyGoMove, calculateGoScore, createGoState } from './go.js';
 export { applyGomokuMove, createGomokuState } from './gomoku.js';
 export { applyHexMove, createHexState } from './hex.js';
+export {
+  applyOnitamaMove,
+  createOnitamaCardPool,
+  createOnitamaState,
+  normalizeOnitamaMove,
+  ONITAMA_CARDS
+} from './onitama.js';
 export { applySantoriniMove, createSantoriniState, normalizeSantoriniMove } from './santorini.js';
 export {
   applyLiarsDiceMove,

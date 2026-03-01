@@ -18,6 +18,7 @@ const ALL_GAME_TYPES: GameType[] = [
   'single_2048',
   'gomoku',
   'santorini',
+  'onitama',
   'xiangqi',
   'go',
   'connect4',
@@ -34,6 +35,7 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   single_2048: 24,
   gomoku: 24,
   santorini: 24,
+  onitama: 24,
   xiangqi: 24,
   go: 24,
   connect4: 24,
@@ -55,6 +57,7 @@ function createDefaultRatings(): RatingMap {
     single_2048: INITIAL_RATING,
     gomoku: INITIAL_RATING,
     santorini: INITIAL_RATING,
+    onitama: INITIAL_RATING,
     xiangqi: INITIAL_RATING,
     go: INITIAL_RATING,
     connect4: INITIAL_RATING,
@@ -536,6 +539,7 @@ export async function createMatchmakingRoom(
     GameType,
     | 'gomoku'
     | 'santorini'
+    | 'onitama'
     | 'xiangqi'
     | 'go'
     | 'connect4'

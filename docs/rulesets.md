@@ -39,6 +39,30 @@ Implemented rules:
 - moving onto level `3` wins immediately
 - if the next player has no legal move, they lose (`loserReason: "no_legal_move"`)
 
+## Onitama (2-player, fixed starter card pool)
+
+Implemented rules:
+
+- default board `5x5`
+- each side starts with 5 pieces (`4` students + `1` master)
+- opening move cards are sampled from a fixed v1 card set:
+  - each player receives 2 cards
+  - one side card is shared on table
+- turn action:
+  - pick one of current player's two cards
+  - move one own piece from `from` to `to` by a legal vector for that card
+  - cannot move out of bounds or onto own piece
+  - then used card swaps with side card
+- win conditions:
+  - capture opponent master
+  - or move own master to opponent temple square
+
+Randomness + verification:
+
+- opening card sampling uses commit-reveal verifiable RNG
+- gameplay is blocked until RNG phase is `ready`
+- completed payload includes RNG proof transcript and sampled opening cards for replay verification
+
 ## Xiangqi (Chinese Chess)
 
 Implemented movement/legality:

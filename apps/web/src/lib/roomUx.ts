@@ -4,6 +4,7 @@ import type {
   GoMove,
   GomokuMove,
   HexMove,
+  OnitamaMove,
   SantoriniMove,
   QuoridorMove,
   ReversiMove,
@@ -77,6 +78,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'onitama',
+  move: OnitamaMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'go',
   move: GoMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -107,11 +113,22 @@ export function describeLastMove(
   xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
-  gameType: 'gomoku' | 'connect4' | 'santorini' | 'go' | 'reversi' | 'dots' | 'hex' | 'quoridor' | 'xiangqi',
+  gameType:
+    | 'gomoku'
+    | 'connect4'
+    | 'santorini'
+    | 'onitama'
+    | 'go'
+    | 'reversi'
+    | 'dots'
+    | 'hex'
+    | 'quoridor'
+    | 'xiangqi',
   move:
     | GomokuMove
     | Connect4Move
     | SantoriniMove
+    | OnitamaMove
     | GoMove
     | ReversiMove
     | DotsMove
@@ -165,6 +182,18 @@ export function describeLastMove(
         kind: 'move',
         from,
         to
+      }
+    };
+  }
+
+  if (gameType === 'onitama') {
+    const onitamaMove = move as OnitamaMove;
+    return {
+      actor: onitamaMove.player,
+      action: {
+        kind: 'move',
+        from: formatBoardPoint(onitamaMove.from.x, onitamaMove.from.y),
+        to: formatBoardPoint(onitamaMove.to.x, onitamaMove.to.y)
       }
     };
   }
