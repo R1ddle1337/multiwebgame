@@ -34,6 +34,14 @@ export {
   toCodenamesDuetPublicState,
   type CodenamesDuetRuntimeState
 } from './codenames-duet.js';
+export {
+  applyLoveLetterMove,
+  createLoveLetterDeck,
+  createLoveLetterState,
+  normalizeLoveLetterMove,
+  toLoveLetterPublicState,
+  type LoveLetterRuntimeState
+} from './love-letter.js';
 export { applySantoriniMove, createSantoriniState, normalizeSantoriniMove } from './santorini.js';
 export {
   applyLiarsDiceMove,

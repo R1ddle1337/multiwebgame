@@ -2,6 +2,7 @@ export type MatchmakingGameType =
   | 'gomoku'
   | 'santorini'
   | 'onitama'
+  | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
   | 'go'

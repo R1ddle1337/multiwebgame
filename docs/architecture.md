@@ -9,6 +9,7 @@
   - Reversi (8x8 directional flips with forced-pass handling)
   - Dots and Boxes (5x5 dots default, scoring + extra-turn chaining)
   - Cards / Crazy Eights (2-player, verifiable shuffle, hidden-information projection)
+  - Love Letter (2-player hidden-hand card play, verifiable shuffle/deal, spectator-safe projection)
   - Gomoku (`freestyle` + restricted Renju policy support)
   - Santorini (5x5 no-god-power rules, setup + move/build + no-legal-move loss)
   - Onitama (5x5 fixed-card rules, master capture/temple win, verifiable RNG opening cards)

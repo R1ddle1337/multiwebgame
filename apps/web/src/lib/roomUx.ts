@@ -5,6 +5,7 @@ import type {
   GoMove,
   GomokuMove,
   HexMove,
+  LoveLetterMove,
   OnitamaMove,
   SantoriniMove,
   QuoridorMove,
@@ -84,6 +85,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'love_letter',
+  move: LoveLetterMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'codenames_duet',
   move: CodenamesDuetMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -124,6 +130,7 @@ export function describeLastMove(
     | 'connect4'
     | 'santorini'
     | 'onitama'
+    | 'love_letter'
     | 'codenames_duet'
     | 'go'
     | 'reversi'
@@ -136,6 +143,7 @@ export function describeLastMove(
     | Connect4Move
     | SantoriniMove
     | OnitamaMove
+    | LoveLetterMove
     | CodenamesDuetMove
     | GoMove
     | ReversiMove
@@ -202,6 +210,18 @@ export function describeLastMove(
         kind: 'move',
         from: formatBoardPoint(onitamaMove.from.x, onitamaMove.from.y),
         to: formatBoardPoint(onitamaMove.to.x, onitamaMove.to.y)
+      }
+    };
+  }
+
+  if (gameType === 'love_letter') {
+    const loveLetterMove = move as LoveLetterMove;
+    return {
+      actor: loveLetterMove.player,
+      action: {
+        kind: 'move',
+        from: loveLetterMove.card,
+        to: loveLetterMove.target ?? '-'
       }
     };
   }

@@ -43,6 +43,9 @@ Message shape:
 - `room.move` (Onitama)
   - `{ roomId: string, gameType: "onitama", move: { from: {x, y}, to: {x, y}, card: "tiger" | "dragon" | "frog" | "rabbit" | "crab" | "elephant" | "goose" | "rooster" } }`
 
+- `room.move` (Love Letter)
+  - `{ roomId: string, gameType: "love_letter", move: { type: "play", card: "guard" | "priest" | "baron" | "handmaid" | "prince" | "king" | "countess" | "princess", target?: "black" | "white", guess?: cardName } }`
+
 - `room.move` (Codenames Duet)
   - `{ roomId: string, gameType: "codenames_duet", move: { type: "clue", word: string, count: 1..9 } | { type: "guess", index: 0..24 } | { type: "end_guesses" } }`
 
@@ -71,7 +74,7 @@ Message shape:
   - `{ roomId: string, gameType: "liars_dice", move: { type: "bid", quantity: number, face: 1..6 } | { type: "call_liar" } }`
 
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "santorini" | "onitama" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
+  - `{ gameType: "gomoku" | "santorini" | "onitama" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -97,6 +100,7 @@ Message shape:
   - Gomoku: `{ room, gameType: "gomoku", state, viewerRole }`
   - Santorini: `{ room, gameType: "santorini", state, viewerRole }`
   - Onitama: `{ room, gameType: "onitama", state, viewerRole }`
+  - Love Letter: `{ room, gameType: "love_letter", state, viewerRole }`
   - Codenames Duet: `{ room, gameType: "codenames_duet", state, viewerRole }`
   - Connect Four: `{ room, gameType: "connect4", state, viewerRole }`
   - Reversi: `{ room, gameType: "reversi", state, viewerRole }`
@@ -157,6 +161,9 @@ Message shape:
   - Cards hidden information policy:
     - active players only receive their own hand;
     - spectators do not receive hand cards or draw-pile visibility during active play.
+  - Love Letter hidden information policy:
+    - active players only receive their own current hand;
+    - spectators do not receive either player's hand during active play.
   - Liar's Dice hidden information policy:
     - active players only receive their own current dice;
     - spectators do not receive any current dice values during active play.

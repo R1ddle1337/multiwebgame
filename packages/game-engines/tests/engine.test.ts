@@ -9,6 +9,7 @@ import {
   applyDotsMove,
   applyHexMove,
   applyLiarsDiceMove,
+  applyLoveLetterMove,
   applyGoMove,
   applyGomokuMove,
   applyOnitamaMove,
@@ -29,6 +30,8 @@ import {
   createDotsState,
   createHexState,
   createLiarsDiceState,
+  createLoveLetterDeck,
+  createLoveLetterState,
   createGoState,
   createGomokuState,
   createOnitamaState,
@@ -464,6 +467,50 @@ describe('codenames duet engine', () => {
     expect(outcome.accepted).toBe(true);
     expect(outcome.nextState.status).toBe('completed');
     expect(outcome.nextState.outcome).toBe('assassin');
+  });
+});
+
+describe('love letter engine', () => {
+  it('creates an initial two-card hand for starting player', () => {
+    const state = createLoveLetterState({
+      deck: createLoveLetterDeck()
+    });
+
+    expect(state.nextPlayer).toBe('black');
+    expect(state.hands.black).toHaveLength(2);
+    expect(state.hands.white).toHaveLength(1);
+  });
+
+  it('rejects playing a card not in hand', () => {
+    const state = createLoveLetterState({
+      deck: createLoveLetterDeck()
+    });
+
+    const result = applyLoveLetterMove(state, {
+      type: 'play',
+      card: 'princess',
+      player: 'black'
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('card_not_in_hand');
+  });
+
+  it('eliminates self when princess is played', () => {
+    const state = createLoveLetterState({
+      deck: ['guard', 'priest', 'baron', 'handmaid', 'princess', ...createLoveLetterDeck()]
+    });
+    state.hands.black = ['princess', 'guard'];
+    state.hands.white = ['priest'];
+    state.nextPlayer = 'black';
+
+    const result = applyLoveLetterMove(state, {
+      type: 'play',
+      card: 'princess',
+      player: 'black'
+    });
+    expect(result.accepted).toBe(true);
+    expect(result.nextState.status).toBe('completed');
+    expect(result.nextState.winner).toBe('white');
   });
 });
 

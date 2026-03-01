@@ -3,6 +3,7 @@ export type GameType =
   | 'gomoku'
   | 'santorini'
   | 'onitama'
+  | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
   | 'go'
@@ -18,6 +19,7 @@ export type BoardGameType =
   | 'gomoku'
   | 'santorini'
   | 'onitama'
+  | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
   | 'go'
@@ -350,6 +352,58 @@ export interface CodenamesDuetState {
   targetCounts: {
     total: number;
     found: number;
+  };
+}
+
+export type LoveLetterPlayer = 'black' | 'white';
+export type LoveLetterCardName =
+  | 'guard'
+  | 'priest'
+  | 'baron'
+  | 'handmaid'
+  | 'prince'
+  | 'king'
+  | 'countess'
+  | 'princess';
+
+export interface LoveLetterMoveInput {
+  type: 'play';
+  card: LoveLetterCardName;
+  target?: LoveLetterPlayer;
+  guess?: LoveLetterCardName;
+}
+
+export interface LoveLetterMove {
+  type: 'play';
+  card: LoveLetterCardName;
+  target?: LoveLetterPlayer;
+  guess?: LoveLetterCardName;
+  player: LoveLetterPlayer;
+}
+
+export interface LoveLetterState {
+  nextPlayer: LoveLetterPlayer;
+  status: 'playing' | 'completed';
+  winner: LoveLetterPlayer | null;
+  moveCount: number;
+  turnCount: number;
+  drawPileCount: number;
+  handCounts: {
+    black: number;
+    white: number;
+  };
+  hand: LoveLetterCardName[] | null;
+  discardPiles: {
+    black: LoveLetterCardName[];
+    white: LoveLetterCardName[];
+  };
+  eliminated: {
+    black: boolean;
+    white: boolean;
+  };
+  protected: {
+    black: boolean;
+    white: boolean;
   };
 }
 
@@ -790,6 +844,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'love_letter';
+      state: LoveLetterState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'connect4';
       state: Connect4State | null;
       viewerRole: RoomPlayerRole;
@@ -882,6 +942,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'love_letter';
+      state: LoveLetterState;
+      lastMove: LoveLetterMove;
+    }
+  | {
+      roomId: string;
       gameType: 'connect4';
       state: Connect4State;
       lastMove: Connect4Move;
@@ -951,6 +1017,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'reversi'; x: number; y: number }>

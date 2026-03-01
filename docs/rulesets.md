@@ -88,6 +88,41 @@ Visibility policy:
 - spectators do not receive key maps during active play
 - completed replay can reveal both key maps
 
+## Love Letter (2-player MVP)
+
+Implemented rules (v1 simplified 2-player flow):
+
+- base 16-card deck (`guard/priest/baron/handmaid/prince/king/countess/princess`)
+- round setup:
+  - commit-reveal RNG shuffles deck
+  - one facedown card removed
+  - each player receives one card; starting player receives one extra card
+- turn action: player with two cards plays one card and resolves effect
+- implemented card effects:
+  - Guard: guess opponent hand (cannot guess Guard)
+  - Priest: target validation only (peek is hidden-info side effect)
+  - Baron: compare remaining hand value; lower is eliminated
+  - Handmaid: grants temporary protection
+  - Prince: chosen target discards hand and redraws (Princess discard eliminates)
+  - King: swaps hands
+  - Countess: mandatory play when held with King/Prince
+  - Princess: self-elimination when played/discarded
+- terminal:
+  - one player eliminated -> opponent wins
+  - deck exhausted -> compare remaining hand value; tie allowed
+
+Randomness + verification:
+
+- shuffle/deal uses commit-reveal verifiable RNG
+- gameplay is blocked until RNG phase is `ready`
+- completed payload includes RNG proof transcript for replay verification
+
+Visibility policy:
+
+- active player only sees own hand
+- spectators do not see hidden hands during active play
+- replay after completion can reveal full hands/discard progression
+
 ## Xiangqi (Chinese Chess)
 
 Implemented movement/legality:

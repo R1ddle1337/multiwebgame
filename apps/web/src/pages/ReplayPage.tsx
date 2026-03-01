@@ -6,6 +6,7 @@ import {
   applyDotsMove,
   applyHexMove,
   applyLiarsDiceMove,
+  applyLoveLetterMove,
   applyGoMove,
   applyGomokuMove,
   applyOnitamaMove,
@@ -23,6 +24,8 @@ import {
   createDotsState,
   createHexState,
   createLiarsDiceState,
+  createLoveLetterDeck,
+  createLoveLetterState,
   createGoState,
   createGomokuState,
   createOnitamaCardPool,
@@ -35,6 +38,7 @@ import {
   createDeterministicPrng,
   formatXiangqiMoveNotation,
   type CodenamesDuetRuntimeState,
+  type LoveLetterRuntimeState,
   type LiarsDiceRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
@@ -57,6 +61,7 @@ import type {
   HexMove,
   HexState,
   LiarsDiceMove,
+  LoveLetterMove,
   OnitamaMove,
   OnitamaState,
   QuoridorMove,
@@ -456,6 +461,51 @@ function parseCodenamesDuetMove(
   return null;
 }
 
+function parseLoveLetterMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: LoveLetterMove['player']
+): LoveLetterMove | null {
+  const source = (payload.move ?? payload) as Partial<LoveLetterMove>;
+  if (source.type !== 'play') {
+    return null;
+  }
+
+  const card = source.card;
+  if (
+    card !== 'guard' &&
+    card !== 'priest' &&
+    card !== 'baron' &&
+    card !== 'handmaid' &&
+    card !== 'prince' &&
+    card !== 'king' &&
+    card !== 'countess' &&
+    card !== 'princess'
+  ) {
+    return null;
+  }
+
+  const target = source.target === 'black' || source.target === 'white' ? source.target : undefined;
+  const guess =
+    source.guess === 'guard' ||
+    source.guess === 'priest' ||
+    source.guess === 'baron' ||
+    source.guess === 'handmaid' ||
+    source.guess === 'prince' ||
+    source.guess === 'king' ||
+    source.guess === 'countess' ||
+    source.guess === 'princess'
+      ? source.guess
+      : undefined;
+
+  return {
+    type: 'play',
+    card,
+    target,
+    guess,
+    player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+  };
+}
+
 function formatCardsCard(card: { rank: string; suit: string }): string {
   return `${card.rank}${card.suit.slice(0, 1).toUpperCase()}`;
 }
@@ -540,6 +590,11 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [cardsStates, setCardsStates] = useState<CardsRuntimeState[]>([
     createCardsState({
       deck: createCardsDeck()
+    })
+  ]);
+  const [loveLetterStates, setLoveLetterStates] = useState<LoveLetterRuntimeState[]>([
+    createLoveLetterState({
+      deck: createLoveLetterDeck()
     })
   ]);
   const [xiangqiMoveLog, setXiangqiMoveLog] = useState<XiangqiReplayMoveLogEntry[]>([]);
@@ -1008,6 +1063,54 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           return;
         }
 
+        if (result.match.gameType === 'love_letter') {
+          const payload = result.match.resultPayload as { rng?: { rngSeed?: unknown } } | null;
+          let rngSeed = typeof payload?.rng?.rngSeed === 'string' ? payload.rng.rngSeed : null;
+
+          if (!rngSeed) {
+            const fromMove = result.match.moves
+              .map((entry) => entry.payload as { rngSeed?: unknown })
+              .find((entry) => typeof entry.rngSeed === 'string');
+            rngSeed = typeof fromMove?.rngSeed === 'string' ? fromMove.rngSeed : null;
+          }
+
+          if (!rngSeed) {
+            setError(t('common.error_generic'));
+            return;
+          }
+
+          const prng = createDeterministicPrng(rngSeed);
+          const deck = createLoveLetterDeck();
+          prng.shuffleInPlace(deck);
+
+          let current = createLoveLetterState({ deck });
+          const snapshots: LoveLetterRuntimeState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseLoveLetterMove(
+              move.payload as Record<string, unknown>,
+              current.nextPlayer
+            );
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyLoveLetterMove(current, parsedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setLoveLetterStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
         if (result.match.gameType === 'liars_dice') {
           const payload = result.match.resultPayload as { rng?: { rngSeed?: unknown } } | null;
           let rngSeed = typeof payload?.rng?.rngSeed === 'string' ? payload.rng.rngSeed : null;
@@ -1155,6 +1258,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'cards') {
       return Math.max(0, cardsStates.length - 1);
     }
+    if (gameType === 'love_letter') {
+      return Math.max(0, loveLetterStates.length - 1);
+    }
     if (gameType === 'liars_dice') {
       return Math.max(0, liarsDiceStates.length - 1);
     }
@@ -1176,6 +1282,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     reversiStates.length,
     xiangqiStates.length,
     cardsStates.length,
+    loveLetterStates.length,
     liarsDiceStates.length,
     game2048States.length
   ]);
@@ -1451,6 +1558,33 @@ export function ReplayPage({ api, viewerUserId }: Props) {
               </div>
             </div>
           </div>
+        </>
+      ) : null}
+      {gameType === 'love_letter' ? (
+        <>
+          <p>
+            {t('room.love_letter.draw_pile', {
+              count:
+                loveLetterStates[clampedStep].drawPile.length +
+                (loveLetterStates[clampedStep].facedownCard ? 1 : 0)
+            })}
+          </p>
+          <p>
+            {t('room.love_letter.hand_counts', {
+              black: loveLetterStates[clampedStep].hands.black.length,
+              white: loveLetterStates[clampedStep].hands.white.length
+            })}
+          </p>
+          <p>
+            {t('enum.color.black')}: {loveLetterStates[clampedStep].hands.black.join(', ') || '-'}
+          </p>
+          <p>
+            {t('enum.color.white')}: {loveLetterStates[clampedStep].hands.white.join(', ') || '-'}
+          </p>
+          <p>
+            discard black: {loveLetterStates[clampedStep].discardPiles.black.join(', ') || '-'} | discard
+            white: {loveLetterStates[clampedStep].discardPiles.white.join(', ') || '-'}
+          </p>
         </>
       ) : null}
       {gameType === 'liars_dice' && liarsDiceStates.length > 0 ? (

@@ -9,6 +9,8 @@ import {
   createDotsState,
   createHexState,
   createLiarsDiceState,
+  createLoveLetterDeck,
+  createLoveLetterState,
   createOnitamaState,
   createGoState,
   createBackgammonState,
@@ -148,6 +150,43 @@ describe('deriveRuntimeCompletion', () => {
             total: 9,
             found: 9
           }
+        }
+      }
+    });
+  });
+
+  it('maps love letter completion to winner and payload', () => {
+    const state = createLoveLetterState({
+      deck: createLoveLetterDeck()
+    });
+    state.status = 'completed';
+    state.winner = 'white';
+    state.moveCount = 14;
+    state.turnCount = 8;
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'love_letter',
+      state,
+      players: {
+        black: 'u401',
+        white: 'u402'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u402',
+      status: 'completed',
+      resultPayload: {
+        love_letter: {
+          winner: 'white',
+          moveCount: 14,
+          turnCount: 8,
+          drawPileCount: state.drawPile.length + (state.facedownCard ? 1 : 0),
+          handCounts: {
+            black: state.hands.black.length,
+            white: state.hands.white.length
+          },
+          eliminated: state.eliminated
         }
       }
     });

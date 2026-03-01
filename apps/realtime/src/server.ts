@@ -6,6 +6,7 @@ import {
   applyDotsMove,
   applyHexMove,
   applyLiarsDiceMove,
+  applyLoveLetterMove,
   applyGoMove,
   applyGomokuMove,
   applyOnitamaMove,
@@ -25,6 +26,8 @@ import {
   createDotsState,
   createHexState,
   createLiarsDiceState,
+  createLoveLetterDeck,
+  createLoveLetterState,
   createGoState,
   createGomokuState,
   createOnitamaCardPool,
@@ -36,13 +39,16 @@ import {
   createXiangqiState,
   formatXiangqiMoveNotation,
   normalizeOnitamaMove,
+  normalizeLoveLetterMove,
   normalizeCodenamesDuetMove,
   normalizeSantoriniMove,
   toCardsPublicState,
   toCodenamesDuetPublicState,
+  toLoveLetterPublicState,
   toLiarsDicePublicState,
   type CardsRuntimeState,
   type CodenamesDuetRuntimeState,
+  type LoveLetterRuntimeState,
   type LiarsDiceRuntimeState,
   type DeterministicPrng
 } from '@multiwebgame/game-engines';
@@ -69,6 +75,10 @@ import type {
   LiarsDiceMoveInput,
   LiarsDicePlayer,
   LiarsDiceState,
+  LoveLetterMove,
+  LoveLetterMoveInput,
+  LoveLetterPlayer,
+  LoveLetterState,
   GoMove,
   GoState,
   GomokuMark,
@@ -189,6 +199,19 @@ interface CodenamesDuetRuntime {
   roomId: string;
   matchId: string;
   state: CodenamesDuetRuntimeState | null;
+  rngSession: VerifiableRngSession;
+  rngPrng: DeterministicPrng | null;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface LoveLetterRuntime {
+  gameType: 'love_letter';
+  roomId: string;
+  matchId: string;
+  state: LoveLetterRuntimeState | null;
   rngSession: VerifiableRngSession;
   rngPrng: DeterministicPrng | null;
   players: {
@@ -323,6 +346,7 @@ interface HexRuntime {
 type ActiveRuntime =
   | BackgammonRuntime
   | CardsRuntime
+  | LoveLetterRuntime
   | CodenamesDuetRuntime
   | LiarsDiceRuntime
   | GomokuRuntime
@@ -446,6 +470,21 @@ const roomMoveSchema = z.union([
           y: z.number().int().min(0).max(4)
         }),
         card: z.enum(['tiger', 'dragon', 'frog', 'rabbit', 'crab', 'elephant', 'goose', 'rooster'])
+      })
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('love_letter'),
+      move: z.object({
+        type: z.literal('play'),
+        card: z.enum(['guard', 'priest', 'baron', 'handmaid', 'prince', 'king', 'countess', 'princess']),
+        target: z.enum(['black', 'white']).optional(),
+        guess: z
+          .enum(['guard', 'priest', 'baron', 'handmaid', 'prince', 'king', 'countess', 'princess'])
+          .optional()
       })
     })
   }),
@@ -613,6 +652,7 @@ const matchmakingJoinSchema = z.object({
       'gomoku',
       'santorini',
       'onitama',
+      'love_letter',
       'codenames_duet',
       'go',
       'xiangqi',
@@ -656,6 +696,7 @@ function playerSlotsForGame(gameType: BoardGameType): number {
   return gameType === 'gomoku' ||
     gameType === 'santorini' ||
     gameType === 'onitama' ||
+    gameType === 'love_letter' ||
     gameType === 'codenames_duet' ||
     gameType === 'go' ||
     gameType === 'xiangqi' ||
@@ -800,6 +841,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
   if (
     runtime.gameType === 'backgammon' ||
     runtime.gameType === 'cards' ||
+    runtime.gameType === 'love_letter' ||
     runtime.gameType === 'codenames_duet' ||
     runtime.gameType === 'liars_dice' ||
     runtime.gameType === 'onitama' ||
@@ -956,6 +998,38 @@ function ensureCardsRuntimeState(runtime: CardsRuntime): CardsRuntimeState | nul
   return runtime.state;
 }
 
+function ensureLoveLetterPrng(runtime: LoveLetterRuntime): DeterministicPrng | null {
+  if (!runtime.rngSession.rngSeed) {
+    return null;
+  }
+
+  if (runtime.rngPrng) {
+    return runtime.rngPrng;
+  }
+
+  runtime.rngPrng = createDeterministicPrng(runtime.rngSession.rngSeed);
+  return runtime.rngPrng;
+}
+
+function ensureLoveLetterRuntimeState(runtime: LoveLetterRuntime): LoveLetterRuntimeState | null {
+  if (runtime.state) {
+    return runtime.state;
+  }
+
+  const prng = ensureLoveLetterPrng(runtime);
+  if (!prng) {
+    return null;
+  }
+
+  const deck = createLoveLetterDeck();
+  prng.shuffleInPlace(deck);
+  runtime.state = createLoveLetterState({
+    deck,
+    startingPlayer: 'black'
+  });
+  return runtime.state;
+}
+
 function ensureOnitamaPrng(runtime: OnitamaRuntime): DeterministicPrng | null {
   if (!runtime.rngSession.rngSeed) {
     return null;
@@ -1091,6 +1165,22 @@ function viewerLiarsDiceSide(runtime: LiarsDiceRuntime, userId: string | null): 
   return null;
 }
 
+function viewerLoveLetterSide(runtime: LoveLetterRuntime, userId: string | null): LoveLetterPlayer | null {
+  if (!userId) {
+    return null;
+  }
+
+  if (runtime.players.black === userId) {
+    return 'black';
+  }
+
+  if (runtime.players.white === userId) {
+    return 'white';
+  }
+
+  return null;
+}
+
 function viewerCodenamesDuetSide(
   runtime: CodenamesDuetRuntime,
   userId: string | null
@@ -1129,6 +1219,15 @@ function liarsDiceStateForClient(runtime: LiarsDiceRuntime, client: ClientContex
 
   const side = viewerLiarsDiceSide(runtime, client.user?.id ?? null);
   return toLiarsDicePublicState(runtime.state, side);
+}
+
+function loveLetterStateForClient(runtime: LoveLetterRuntime, client: ClientContext): LoveLetterState | null {
+  if (!runtime.state) {
+    return null;
+  }
+
+  const side = viewerLoveLetterSide(runtime, client.user?.id ?? null);
+  return toLoveLetterPublicState(runtime.state, side);
 }
 
 function codenamesDuetStateForClient(
@@ -1183,6 +1282,29 @@ function broadcastLiarsDiceMoveApplied(
       payload: {
         roomId: runtime.roomId,
         gameType: 'liars_dice',
+        state,
+        lastMove
+      }
+    });
+  }
+}
+
+function broadcastLoveLetterMoveApplied(
+  runtime: LoveLetterRuntime,
+  targets: Set<ClientContext>,
+  lastMove: LoveLetterMove
+): void {
+  for (const target of targets) {
+    const state = loveLetterStateForClient(runtime, target);
+    if (!state) {
+      continue;
+    }
+
+    send(target, {
+      type: 'match.move_applied',
+      payload: {
+        roomId: runtime.roomId,
+        gameType: 'love_letter',
         state,
         lastMove
       }
@@ -1417,6 +1539,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
   if (room.gameType === 'cards') {
     return {
       gameType: 'cards',
+      roomId: room.id,
+      matchId,
+      state: null,
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerOneUserId: players.first,
+        playerTwoUserId: players.second
+      }),
+      rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
+  if (room.gameType === 'love_letter') {
+    return {
+      gameType: 'love_letter',
       roomId: room.id,
       matchId,
       state: null,
@@ -1697,6 +1838,43 @@ function readCardsMovePayload(payload: Record<string, unknown>): CardsMove | nul
   return isCardsMoveRecord(payload) ? payload : null;
 }
 
+function isLoveLetterCardRecord(value: unknown): value is LoveLetterMove['card'] {
+  return (
+    value === 'guard' ||
+    value === 'priest' ||
+    value === 'baron' ||
+    value === 'handmaid' ||
+    value === 'prince' ||
+    value === 'king' ||
+    value === 'countess' ||
+    value === 'princess'
+  );
+}
+
+function isLoveLetterMoveRecord(value: unknown): value is LoveLetterMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<LoveLetterMove>;
+  return (
+    typed.type === 'play' &&
+    (typed.player === 'black' || typed.player === 'white') &&
+    isLoveLetterCardRecord(typed.card) &&
+    (typed.target === undefined || typed.target === 'black' || typed.target === 'white') &&
+    (typed.guess === undefined || isLoveLetterCardRecord(typed.guess))
+  );
+}
+
+function readLoveLetterMovePayload(payload: Record<string, unknown>): LoveLetterMove | null {
+  const nested = payload.move;
+  if (isLoveLetterMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isLoveLetterMoveRecord(payload) ? payload : null;
+}
+
 function isLiarsDiceMoveRecord(value: unknown): value is LiarsDiceMove {
   if (!value || typeof value !== 'object') {
     return false;
@@ -1936,6 +2114,45 @@ function replayMoves(
       }
 
       const applied = applyCardsMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'love_letter') {
+      const payload = move.payload as {
+        move?: Record<string, unknown>;
+        rngSeed?: string;
+      };
+      if (typeof payload.rngSeed === 'string' && payload.rngSeed.length > 0) {
+        current = {
+          ...current,
+          rngSession: {
+            ...current.rngSession,
+            phase: 'ready',
+            rngSeed: payload.rngSeed,
+            revealDeadlineAt: null
+          },
+          rngPrng: null
+        };
+      }
+
+      if (current.rngSession.phase === 'ready') {
+        ensureLoveLetterRuntimeState(current);
+      }
+
+      const parsedMove = readLoveLetterMovePayload(move.payload);
+      if (!parsedMove || !current.state) {
+        continue;
+      }
+
+      const applied = applyLoveLetterMove(current.state, parsedMove);
       if (!applied.accepted) {
         continue;
       }
@@ -2341,6 +2558,9 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   if (replayed.gameType === 'cards' && replayed.rngSession.phase === 'ready') {
     ensureCardsRuntimeState(replayed);
   }
+  if (replayed.gameType === 'love_letter' && replayed.rngSession.phase === 'ready') {
+    ensureLoveLetterRuntimeState(replayed);
+  }
   if (replayed.gameType === 'onitama' && replayed.rngSession.phase === 'ready') {
     ensureOnitamaRuntimeState(replayed);
   }
@@ -2405,12 +2625,14 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
   if (
     existing &&
     (((existing.gameType === 'cards' ||
+      existing.gameType === 'love_letter' ||
       existing.gameType === 'liars_dice' ||
       existing.gameType === 'onitama' ||
       existing.gameType === 'codenames_duet') &&
       existing.state?.status === 'playing') ||
       (existing.gameType === 'santorini' && existing.state.status !== 'completed') ||
       (existing.gameType !== 'cards' &&
+        existing.gameType !== 'love_letter' &&
         existing.gameType !== 'codenames_duet' &&
         existing.gameType !== 'onitama' &&
         existing.gameType !== 'santorini' &&
@@ -2517,6 +2739,26 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
       }
     });
     if (runtime?.gameType === 'cards') {
+      send(client, rngUpdatedMessage(runtime));
+    }
+    return;
+  }
+
+  if (room.gameType === 'love_letter') {
+    if (runtime?.gameType === 'love_letter' && runtime.rngSession.phase === 'ready') {
+      ensureLoveLetterRuntimeState(runtime);
+    }
+
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'love_letter',
+        state: runtime?.gameType === 'love_letter' ? loveLetterStateForClient(runtime, client) : null,
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'love_letter') {
       send(client, rngUpdatedMessage(runtime));
     }
     return;
@@ -3125,6 +3367,52 @@ async function handleCardsMove(
   await finishMatchIfCompleted(runtime, targets);
 }
 
+async function handleLoveLetterMove(
+  client: ClientContext,
+  runtime: LoveLetterRuntime,
+  move: LoveLetterMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: LoveLetterPlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const state = ensureLoveLetterRuntimeState(runtime);
+  if (!state) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  const normalizedMove = normalizeLoveLetterMove(move, player);
+  const applied = applyLoveLetterMove(state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'love_letter.play',
+    payload: {
+      move: normalizedMove,
+      rngSeed: runtime.rngSession.rngSeed
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcastLoveLetterMoveApplied(runtime, targets, normalizedMove);
+  await finishMatchIfCompleted(runtime, targets);
+}
+
 async function handleLiarsDiceMove(
   client: ClientContext,
   runtime: LiarsDiceRuntime,
@@ -3643,6 +3931,21 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       });
     }
   }
+  if (runtime.gameType === 'love_letter' && runtime.rngSession.phase === 'ready') {
+    runtime.rngPrng = null;
+    ensureLoveLetterRuntimeState(runtime);
+    if (becameReady) {
+      await createMatchMove({
+        matchId: runtime.matchId,
+        actorUserId: client.user.id,
+        moveIndex: 0,
+        moveType: 'love_letter.rng_ready',
+        payload: {
+          rngSeed: runtime.rngSession.rngSeed
+        }
+      });
+    }
+  }
   if (runtime.gameType === 'onitama' && runtime.rngSession.phase === 'ready') {
     runtime.rngPrng = null;
     ensureOnitamaRuntimeState(runtime);
@@ -3693,6 +3996,7 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
   if (
     (runtime.gameType === 'backgammon' ||
       runtime.gameType === 'cards' ||
+      runtime.gameType === 'love_letter' ||
       runtime.gameType === 'onitama' ||
       runtime.gameType === 'codenames_duet' ||
       runtime.gameType === 'liars_dice') &&
@@ -3707,6 +4011,7 @@ async function handleMove(
   message:
     | { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     | { roomId: string; gameType: 'cards'; move: CardsMoveInput }
+    | { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }
     | { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
@@ -3753,6 +4058,11 @@ async function handleMove(
 
   if (message.gameType === 'cards' && runtime.gameType === 'cards') {
     await handleCardsMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'love_letter' && runtime.gameType === 'love_letter') {
+    await handleLoveLetterMove(client, runtime, message.move);
     return;
   }
 
@@ -4051,6 +4361,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'cards',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'love_letter') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'love_letter',
             move: msg.payload.move
           });
           return;

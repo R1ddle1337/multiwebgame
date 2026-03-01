@@ -29,6 +29,9 @@ import type {
   HexState,
   LiarsDiceMoveInput,
   LiarsDiceState,
+  LoveLetterMove,
+  LoveLetterMoveInput,
+  LoveLetterState,
   OnitamaMove,
   OnitamaMoveInput,
   OnitamaState,
@@ -82,6 +85,7 @@ function formatResultText(
     | GomokuState
     | GoState
     | HexState
+    | LoveLetterState
     | OnitamaState
     | QuoridorState
     | ReversiState
@@ -181,6 +185,9 @@ export function RoomPage({ api, user }: Props) {
   const [codenamesClueWord, setCodenamesClueWord] = useState('ocean');
   const [codenamesClueCount, setCodenamesClueCount] = useState(1);
   const [codenamesGuessIndex, setCodenamesGuessIndex] = useState(0);
+  const [loveLetterCard, setLoveLetterCard] = useState<LoveLetterMoveInput['card']>('guard');
+  const [loveLetterTarget, setLoveLetterTarget] = useState<LoveLetterMoveInput['target']>('white');
+  const [loveLetterGuess, setLoveLetterGuess] = useState<LoveLetterMoveInput['guess']>('priest');
   const [liarsBidQuantity, setLiarsBidQuantity] = useState(1);
   const [liarsBidFace, setLiarsBidFace] = useState(1);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -243,6 +250,8 @@ export function RoomPage({ api, user }: Props) {
   const xiangqiState =
     snapshot?.gameType === 'xiangqi' ? (snapshot.state as XiangqiState) : createXiangqiState();
   const cardsState = snapshot?.gameType === 'cards' ? (snapshot.state as CardsState | null) : null;
+  const loveLetterState =
+    snapshot?.gameType === 'love_letter' ? (snapshot.state as LoveLetterState | null) : null;
 
   const seat = useMemo(() => playerSeat(room, user.id), [room, user.id]);
   const viewerRole =
@@ -307,6 +316,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'cards' &&
     viewerRole === 'player' &&
     cardsState?.status === 'playing';
+  const loveLetterTurn =
+    hasActiveMatch &&
+    room?.gameType === 'love_letter' &&
+    viewerRole === 'player' &&
+    loveLetterState?.status === 'playing';
 
   const canPlayGomoku =
     gomokuTurn &&
@@ -360,6 +374,10 @@ export function RoomPage({ api, user }: Props) {
     Boolean(cardsTurn) &&
     ((seat === 1 && cardsState?.nextPlayer === 'black') ||
       (seat === 2 && cardsState?.nextPlayer === 'white'));
+  const canPlayLoveLetter =
+    Boolean(loveLetterTurn) &&
+    ((seat === 1 && loveLetterState?.nextPlayer === 'black') ||
+      (seat === 2 && loveLetterState?.nextPlayer === 'white'));
   const canPlayCurrentTurn =
     canPlayGomoku ||
     canPlaySantorini ||
@@ -373,7 +391,12 @@ export function RoomPage({ api, user }: Props) {
     canPlayReversi ||
     canPlayDots ||
     canPlayXiangqi ||
-    canPlayCards;
+    canPlayCards ||
+    canPlayLoveLetter;
+  const loveLetterHand = loveLetterState?.hand ?? [];
+  const loveLetterSelectedCard = loveLetterHand.includes(loveLetterCard)
+    ? loveLetterCard
+    : (loveLetterHand[0] ?? 'guard');
   const xiangqiPerspective: XiangqiColor = seat === 2 ? 'black' : 'red';
   const previousCanPlayRef = useRef(false);
 
@@ -432,6 +455,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'cards') {
       return null;
+    }
+
+    if (room.gameType === 'love_letter') {
+      return describeLastMove('love_letter', snapshot.lastMove as LoveLetterMove);
     }
 
     return describeLastMove('xiangqi', snapshot.lastMove as XiangqiMove, xiangqiPerspective);
@@ -508,6 +535,10 @@ export function RoomPage({ api, user }: Props) {
       return null;
     }
 
+    if (room.gameType === 'love_letter') {
+      return loveLetterState ? formatResultText(loveLetterState, statusLabel, colorLabel, t) : null;
+    }
+
     return formatResultText(xiangqiState, statusLabel, colorLabel, t);
   }, [
     room,
@@ -523,6 +554,7 @@ export function RoomPage({ api, user }: Props) {
     reversiState,
     dotsState,
     xiangqiState,
+    loveLetterState,
     statusLabel,
     colorLabel,
     t
@@ -792,6 +824,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'cards',
+        move
+      }
+    });
+  };
+
+  const sendLoveLetterMove = (move: LoveLetterMoveInput) => {
+    if (!canPlayLoveLetter) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'love_letter',
         move
       }
     });
@@ -1954,6 +2001,111 @@ export function RoomPage({ api, user }: Props) {
                   <p>
                     {cardsState.winner
                       ? t('room.result.winner', { winner: colorLabel(cardsState.winner) })
+                      : t('room.result.draw')}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </>
+        ) : null}
+
+        {room.gameType === 'love_letter' ? (
+          <>
+            {!loveLetterState ? (
+              <p>{t('room.love_letter.waiting_rng')}</p>
+            ) : (
+              <>
+                {hasActiveMatch ? (
+                  <p>
+                    {t('room.next_turn', {
+                      player: colorLabel(loveLetterState.nextPlayer),
+                      status: statusLabel(loveLetterState.status)
+                    })}
+                  </p>
+                ) : null}
+                <p>{t('room.love_letter.draw_pile', { count: loveLetterState.drawPileCount })}</p>
+                <p>
+                  {t('room.love_letter.hand_counts', {
+                    black: loveLetterState.handCounts.black,
+                    white: loveLetterState.handCounts.white
+                  })}
+                </p>
+                {loveLetterState.hand ? (
+                  <p>{t('room.love_letter.your_hand', { cards: loveLetterState.hand.join(', ') })}</p>
+                ) : (
+                  <p>{t('room.love_letter.hidden_hand')}</p>
+                )}
+
+                {loveLetterState.hand ? (
+                  <div className="button-row">
+                    <label>
+                      Card{' '}
+                      <select
+                        value={loveLetterCard}
+                        onChange={(event) =>
+                          setLoveLetterCard(event.target.value as LoveLetterMoveInput['card'])
+                        }
+                        disabled={!canPlayLoveLetter}
+                      >
+                        {loveLetterHand.map((card, index) => (
+                          <option key={`love-letter-card-${card}-${index}`} value={card}>
+                            {card}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Target{' '}
+                      <select
+                        value={loveLetterTarget}
+                        onChange={(event) =>
+                          setLoveLetterTarget(event.target.value as LoveLetterMoveInput['target'])
+                        }
+                        disabled={!canPlayLoveLetter}
+                      >
+                        <option value="black">black</option>
+                        <option value="white">white</option>
+                      </select>
+                    </label>
+                    <label>
+                      Guess{' '}
+                      <select
+                        value={loveLetterGuess}
+                        onChange={(event) =>
+                          setLoveLetterGuess(event.target.value as LoveLetterMoveInput['guess'])
+                        }
+                        disabled={!canPlayLoveLetter}
+                      >
+                        <option value="priest">priest</option>
+                        <option value="baron">baron</option>
+                        <option value="handmaid">handmaid</option>
+                        <option value="prince">prince</option>
+                        <option value="king">king</option>
+                        <option value="countess">countess</option>
+                        <option value="princess">princess</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        sendLoveLetterMove({
+                          type: 'play',
+                          card: loveLetterSelectedCard,
+                          target: loveLetterTarget,
+                          guess: loveLetterSelectedCard === 'guard' ? loveLetterGuess : undefined
+                        })
+                      }
+                      disabled={!canPlayLoveLetter || loveLetterHand.length === 0}
+                    >
+                      {t('room.love_letter.play')}
+                    </button>
+                  </div>
+                ) : null}
+
+                {loveLetterState.status === 'completed' ? (
+                  <p>
+                    {loveLetterState.winner
+                      ? t('room.result.winner', { winner: colorLabel(loveLetterState.winner) })
                       : t('room.result.draw')}
                   </p>
                 ) : null}

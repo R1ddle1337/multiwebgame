@@ -1,6 +1,7 @@
 import type {
   CardsRuntimeState,
   CodenamesDuetRuntimeState,
+  LoveLetterRuntimeState,
   LiarsDiceRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
@@ -29,6 +30,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'cards';
       state: CardsRuntimeState | null;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'love_letter';
+      state: LoveLetterRuntimeState | null;
       players: {
         black: string;
         white: string;
@@ -229,6 +238,37 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
             total: totalTargets,
             found: foundTargets
           }
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'love_letter') {
+    if (!runtime.state || runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        love_letter: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          turnCount: runtime.state.turnCount,
+          drawPileCount: runtime.state.drawPile.length + (runtime.state.facedownCard ? 1 : 0),
+          handCounts: {
+            black: runtime.state.hands.black.length,
+            white: runtime.state.hands.white.length
+          },
+          eliminated: runtime.state.eliminated
         }
       }
     };

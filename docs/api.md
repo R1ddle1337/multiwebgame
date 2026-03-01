@@ -57,7 +57,7 @@ Auth uses `Authorization: Bearer <jwt>`.
 
 - `POST /rooms`
   - Auth required
-  - Body: `{ "gameType": "single_2048" | "gomoku" | "santorini" | "onitama" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number }`
+  - Body: `{ "gameType": "single_2048" | "gomoku" | "santorini" | "onitama" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number }`
   - Returns: `{ room }`
 
 - `GET /rooms/:roomId`
@@ -135,6 +135,7 @@ Auth uses `Authorization: Bearer <jwt>`.
     - Gomoku: ruleset and final status metadata.
     - Santorini: winner/moveCount and no-legal-move terminal reason.
     - Onitama: winner/moveCount/opening cards + RNG proof transcript (`serverSeed`, commits/nonces, `rngSeed`).
+    - Love Letter: winner/moveCount/turnCount + elimination/hand-count summary and RNG proof transcript.
     - Codenames Duet: cooperative outcome (`success`/`assassin`/`out_of_turns`) + target progress and RNG proof transcript.
 
 ## Moderation
