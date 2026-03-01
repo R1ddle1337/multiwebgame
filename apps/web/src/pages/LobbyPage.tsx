@@ -218,6 +218,9 @@ export function LobbyPage({ api, user }: Props) {
           <button type="button" onClick={() => createRoom('cards')}>
             {t('lobby.create.cards')}
           </button>
+          <button type="button" onClick={() => createRoom('quoridor')}>
+            {t('lobby.create.quoridor')}
+          </button>
           <button type="button" onClick={() => createRoom('gomoku')}>
             {t('lobby.create.gomoku')}
           </button>
@@ -247,21 +250,31 @@ export function LobbyPage({ api, user }: Props) {
         <div className="matchmaking">
           <h3>{t('lobby.matchmaking')}</h3>
           <div className="button-row">
-            {(['backgammon', 'cards', 'gomoku', 'connect4', 'reversi', 'dots', 'go', 'xiangqi'] as const).map(
-              (gameType) => (
-                <button
-                  key={gameType}
-                  type="button"
-                  className={activeQueueGame === gameType ? '' : 'secondary'}
-                  onClick={() => queueForGame(gameType)}
-                >
-                  {activeQueueGame === gameType
-                    ? t('lobby.queue.leave', { game: gameLabel(gameType) })
-                    : t('lobby.queue.join', { game: gameLabel(gameType) })}{' '}
-                  ({realtime.queueSizes[gameType]})
-                </button>
-              )
-            )}
+            {(
+              [
+                'backgammon',
+                'cards',
+                'quoridor',
+                'gomoku',
+                'connect4',
+                'reversi',
+                'dots',
+                'go',
+                'xiangqi'
+              ] as const
+            ).map((gameType) => (
+              <button
+                key={gameType}
+                type="button"
+                className={activeQueueGame === gameType ? '' : 'secondary'}
+                onClick={() => queueForGame(gameType)}
+              >
+                {activeQueueGame === gameType
+                  ? t('lobby.queue.leave', { game: gameLabel(gameType) })
+                  : t('lobby.queue.join', { game: gameLabel(gameType) })}{' '}
+                ({realtime.queueSizes[gameType]})
+              </button>
+            ))}
           </div>
         </div>
 

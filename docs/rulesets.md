@@ -81,6 +81,22 @@ Persistence:
 
 - Go score breakdown is stored in `matches.result_payload` on match completion.
 
+## Quoridor (2-player, 9x9)
+
+Implemented rules:
+
+- default board `9x9`, each player starts with `10` walls.
+- pawn move legality:
+  - orthogonal step with wall blocking checks
+  - jump over adjacent opponent when space behind is open
+  - diagonal sidestep when direct jump is blocked by wall/edge
+- wall placement legality:
+  - anchor range `0..7` for both axes on a 9x9 board
+  - wall overlap rejected
+  - wall crossing rejected
+  - placement rejected when either player would have no path to goal row
+- match ends immediately when black reaches bottom row or white reaches top row.
+
 ## 2048
 
 Implemented deterministic mechanics:

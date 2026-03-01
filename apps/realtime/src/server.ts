@@ -5,6 +5,7 @@ import {
   applyDotsMove,
   applyGoMove,
   applyGomokuMove,
+  applyQuoridorMove,
   applyReversiMove,
   applyXiangqiMove,
   assignBackgammonTurnDice,
@@ -16,6 +17,7 @@ import {
   createDotsState,
   createGoState,
   createGomokuState,
+  createQuoridorState,
   hasAnyLegalBackgammonMove,
   createReversiState,
   createXiangqiState,
@@ -43,6 +45,9 @@ import type {
   GomokuState,
   ReversiMove,
   ReversiState,
+  QuoridorMove,
+  QuoridorMoveInput,
+  QuoridorState,
   RoomDTO,
   RoomPlayerRole,
   ServerToClientMessage,
@@ -202,6 +207,18 @@ interface XiangqiRuntime {
   };
 }
 
+interface QuoridorRuntime {
+  gameType: 'quoridor';
+  roomId: string;
+  matchId: string;
+  state: QuoridorState;
+  rngSession?: VerifiableRngSession;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
 type ActiveRuntime =
   | BackgammonRuntime
   | CardsRuntime
@@ -210,6 +227,7 @@ type ActiveRuntime =
   | GoRuntime
   | ReversiRuntime
   | DotsRuntime
+  | QuoridorRuntime
   | XiangqiRuntime;
 
 const cardsSuitSchema = z.enum(['clubs', 'diamonds', 'hearts', 'spades']);
@@ -344,6 +362,26 @@ const roomMoveSchema = z.union([
     type: z.literal('room.move'),
     payload: z.object({
       roomId: z.string().uuid(),
+      gameType: z.literal('quoridor'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('pawn'),
+          x: z.number().int().min(0),
+          y: z.number().int().min(0)
+        }),
+        z.object({
+          type: z.literal('wall'),
+          orientation: z.enum(['h', 'v']),
+          x: z.number().int().min(0),
+          y: z.number().int().min(0)
+        })
+      ])
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
       gameType: z.literal('cards'),
       move: z.discriminatedUnion('type', [
         z.object({
@@ -373,7 +411,17 @@ const inviteRespondSchema = z.object({
 const matchmakingJoinSchema = z.object({
   type: z.literal('matchmaking.join'),
   payload: z.object({
-    gameType: z.enum(['gomoku', 'go', 'xiangqi', 'connect4', 'reversi', 'dots', 'backgammon', 'cards'])
+    gameType: z.enum([
+      'gomoku',
+      'go',
+      'xiangqi',
+      'connect4',
+      'reversi',
+      'dots',
+      'backgammon',
+      'cards',
+      'quoridor'
+    ])
   })
 });
 
@@ -408,7 +456,8 @@ function playerSlotsForGame(gameType: BoardGameType): number {
     gameType === 'connect4' ||
     gameType === 'reversi' ||
     gameType === 'dots' ||
-    gameType === 'cards'
+    gameType === 'cards' ||
+    gameType === 'quoridor'
     ? 2
     : 2;
 }
@@ -546,7 +595,8 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'go' ||
     runtime.gameType === 'reversi' ||
-    runtime.gameType === 'dots'
+    runtime.gameType === 'dots' ||
+    runtime.gameType === 'quoridor'
   ) {
     return [runtime.players.black, runtime.players.white];
   }
@@ -1029,6 +1079,22 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'quoridor') {
+    return {
+      gameType: 'quoridor',
+      roomId: room.id,
+      matchId,
+      state: createQuoridorState({
+        boardSize: 9,
+        wallsPerPlayer: 10
+      }),
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'xiangqi') {
     return {
       gameType: 'xiangqi',
@@ -1283,6 +1349,62 @@ function replayMoves(
         player: source.player ?? current.state.nextPlayer
       });
 
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'quoridor') {
+      const payload = move.payload as Partial<QuoridorMove> & { move?: Partial<QuoridorMove> };
+      const source = payload.move ?? payload;
+      if (!source || (source.type !== 'pawn' && source.type !== 'wall')) {
+        continue;
+      }
+
+      let normalizedMove: QuoridorMove | null = null;
+      if (
+        source.type === 'pawn' &&
+        typeof source.x === 'number' &&
+        typeof source.y === 'number' &&
+        Number.isInteger(source.x) &&
+        Number.isInteger(source.y)
+      ) {
+        normalizedMove = {
+          type: 'pawn',
+          x: source.x,
+          y: source.y,
+          player: source.player ?? current.state.nextPlayer
+        };
+      }
+
+      if (
+        source.type === 'wall' &&
+        typeof source.x === 'number' &&
+        typeof source.y === 'number' &&
+        Number.isInteger(source.x) &&
+        Number.isInteger(source.y) &&
+        (source.orientation === 'h' || source.orientation === 'v')
+      ) {
+        normalizedMove = {
+          type: 'wall',
+          orientation: source.orientation,
+          x: source.x,
+          y: source.y,
+          player: source.player ?? current.state.nextPlayer
+        };
+      }
+
+      if (!normalizedMove) {
+        continue;
+      }
+
+      const applied = applyQuoridorMove(current.state, normalizedMove);
       if (!applied.accepted) {
         continue;
       }
@@ -1571,6 +1693,25 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
         room,
         gameType: 'connect4',
         state: runtime?.gameType === 'connect4' ? runtime.state : createConnect4State(),
+        viewerRole
+      }
+    });
+    return;
+  }
+
+  if (room.gameType === 'quoridor') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'quoridor',
+        state:
+          runtime?.gameType === 'quoridor'
+            ? runtime.state
+            : createQuoridorState({
+                boardSize: 9,
+                wallsPerPlayer: 10
+              }),
         viewerRole
       }
     });
@@ -1988,6 +2129,67 @@ async function handleDotsMove(
   await finishMatchIfCompleted(runtime, targets);
 }
 
+async function handleQuoridorMove(
+  client: ClientContext,
+  runtime: QuoridorRuntime,
+  move: QuoridorMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: QuoridorMove['player'] | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove: QuoridorMove =
+    move.type === 'pawn'
+      ? {
+          type: 'pawn',
+          x: move.x,
+          y: move.y,
+          player
+        }
+      : {
+          type: 'wall',
+          orientation: move.orientation,
+          x: move.x,
+          y: move.y,
+          player
+        };
+
+  const applied = applyQuoridorMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: normalizedMove.type === 'pawn' ? 'quoridor.move_pawn' : 'quoridor.place_wall',
+    payload: normalizedMove as unknown as Record<string, unknown>
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'quoridor',
+      state: runtime.state,
+      lastMove: normalizedMove
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
 async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoMove): Promise<void> {
   const userId = client.user!.id;
   const playerStone =
@@ -2231,6 +2433,7 @@ async function handleMove(
     | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
     | { roomId: string; gameType: 'dots'; move: Pick<DotsMove, 'orientation' | 'x' | 'y'> }
+    | { roomId: string; gameType: 'quoridor'; move: QuoridorMoveInput }
     | { roomId: string; gameType: 'go'; move: GoMove }
     | { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }
 ): Promise<void> {
@@ -2287,6 +2490,11 @@ async function handleMove(
 
   if (message.gameType === 'dots' && runtime.gameType === 'dots') {
     await handleDotsMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'quoridor' && runtime.gameType === 'quoridor') {
+    await handleQuoridorMove(client, runtime, message.move);
     return;
   }
 
@@ -2573,6 +2781,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'dots',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'quoridor') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'quoridor',
             move: msg.payload.move
           });
           return;

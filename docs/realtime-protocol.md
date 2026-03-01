@@ -52,8 +52,11 @@ Message shape:
 - `room.move` (Cards / Crazy Eights)
   - `{ roomId: string, gameType: "cards", move: { type: "play", card, chosenSuit? } | { type: "draw" } | { type: "end_turn" } }`
 
+- `room.move` (Quoridor)
+  - `{ roomId: string, gameType: "quoridor", move: { type: "pawn", x, y } | { type: "wall", orientation: "h" | "v", x, y } }`
+
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" }`
+  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -83,6 +86,7 @@ Message shape:
   - Go: `{ room, gameType: "go", state, viewerRole }`
   - Xiangqi: `{ room, gameType: "xiangqi", state, viewerRole }`
   - Cards: `{ room, gameType: "cards", state, viewerRole }`
+  - Quoridor: `{ room, gameType: "quoridor", state, viewerRole }`
   - 2048 room: `{ room, gameType: "single_2048", state: null, viewerRole }`
 
 - `room.player_joined`

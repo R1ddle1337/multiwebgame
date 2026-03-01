@@ -301,6 +301,57 @@ h3 {
   margin-inline: auto;
 }
 
+.quoridor-layout {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.quoridor-grid {
+  display: grid;
+  gap: 2px;
+  background: #c4a36f;
+  border: 2px solid #9d7b4f;
+  border-radius: 12px;
+  padding: 6px;
+  max-width: min(100%, 620px);
+  margin-inline: auto;
+}
+
+.quoridor-cell {
+  aspect-ratio: 1;
+  min-width: 22px;
+  border: none;
+  border-radius: 4px;
+  background: #f4e0bb;
+  padding: 0;
+}
+
+.quoridor-wall-panels {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.quoridor-wall-panels p {
+  margin: 0 0 0.3rem;
+  color: var(--ink-muted);
+}
+
+.quoridor-wall-grid {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.quoridor-wall-anchor {
+  border-radius: 8px;
+  padding: 0.2rem 0.3rem;
+  min-height: 1.7rem;
+}
+
+.quoridor-wall-anchor.occupied {
+  background: #8a6b3f;
+  color: #fff;
+}
+
 .go-cell {
   aspect-ratio: 1;
   min-width: 22px;

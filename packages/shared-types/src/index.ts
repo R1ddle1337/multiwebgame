@@ -7,7 +7,8 @@ export type GameType =
   | 'reversi'
   | 'dots'
   | 'backgammon'
-  | 'cards';
+  | 'cards'
+  | 'quoridor';
 export type BoardGameType =
   | 'gomoku'
   | 'xiangqi'
@@ -16,7 +17,8 @@ export type BoardGameType =
   | 'reversi'
   | 'dots'
   | 'backgammon'
-  | 'cards';
+  | 'cards'
+  | 'quoridor';
 
 export interface UserDTO {
   id: string;
@@ -332,6 +334,64 @@ export interface XiangqiState {
   positionHistory: string[];
 }
 
+export type QuoridorPlayer = 'black' | 'white';
+export type QuoridorWallOrientation = 'h' | 'v';
+
+export type QuoridorMove =
+  | {
+      type: 'pawn';
+      x: number;
+      y: number;
+      player: QuoridorPlayer;
+    }
+  | {
+      type: 'wall';
+      orientation: QuoridorWallOrientation;
+      x: number;
+      y: number;
+      player: QuoridorPlayer;
+    };
+
+export type QuoridorMoveInput =
+  | {
+      type: 'pawn';
+      x: number;
+      y: number;
+    }
+  | {
+      type: 'wall';
+      orientation: QuoridorWallOrientation;
+      x: number;
+      y: number;
+    };
+
+export interface QuoridorState {
+  boardSize: number;
+  wallsPerPlayer: number;
+  pawns: {
+    black: {
+      x: number;
+      y: number;
+    };
+    white: {
+      x: number;
+      y: number;
+    };
+  };
+  walls: {
+    horizontal: boolean[][];
+    vertical: boolean[][];
+  };
+  remainingWalls: {
+    black: number;
+    white: number;
+  };
+  nextPlayer: QuoridorPlayer;
+  status: 'playing' | 'completed';
+  winner: QuoridorPlayer | null;
+  moveCount: number;
+}
+
 export type BackgammonColor = 'white' | 'black';
 export type BackgammonFrom = number | 'bar';
 export type BackgammonTo = number | 'off';
@@ -494,6 +554,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'quoridor';
+      state: QuoridorState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'single_2048';
       state: null;
       viewerRole: RoomPlayerRole;
@@ -547,6 +613,12 @@ export type MatchMoveAppliedPayload =
       gameType: 'cards';
       state: CardsState;
       lastMove: CardsMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'quoridor';
+      state: QuoridorState;
+      lastMove: QuoridorMove;
     };
 
 export type ClientToServerMessage =
@@ -570,6 +642,7 @@ export type ClientToServerMessage =
       { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     >
   | WsEnvelope<'room.move', { roomId: string; gameType: 'cards'; move: CardsMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'quoridor'; move: QuoridorMoveInput }>
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.leave', Record<string, never>>
   | WsEnvelope<'invite.respond', { invitationId: string; action: 'accept' | 'decline' }>

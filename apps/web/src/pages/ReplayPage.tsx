@@ -5,6 +5,7 @@ import {
   applyDotsMove,
   applyGoMove,
   applyGomokuMove,
+  applyQuoridorMove,
   applyReversiMove,
   applyXiangqiMove,
   create2048State,
@@ -14,6 +15,7 @@ import {
   createDotsState,
   createGoState,
   createGomokuState,
+  createQuoridorState,
   createReversiState,
   createXiangqiState,
   type CardsRuntimeState,
@@ -34,6 +36,8 @@ import type {
   GoState,
   GomokuMark,
   GomokuState,
+  QuoridorMove,
+  QuoridorState,
   ReversiMove,
   ReversiState,
   XiangqiColor,
@@ -47,6 +51,7 @@ import { Connect4Board } from '../components/Connect4Board';
 import { DotsBoard } from '../components/DotsBoard';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
+import { QuoridorBoard } from '../components/QuoridorBoard';
 import { ReversiBoard } from '../components/ReversiBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
 import { XiangqiMoveList, type XiangqiReplayMoveLogEntry } from '../components/XiangqiMoveList';
@@ -189,6 +194,50 @@ function parseCardsMove(payload: Record<string, unknown>): CardsMove | null {
   return isCardsMove(payload) ? payload : null;
 }
 
+function parseQuoridorMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: QuoridorMove['player']
+): QuoridorMove | null {
+  const source = (payload.move ?? payload) as Partial<QuoridorMove>;
+  if (source.type === 'pawn') {
+    if (typeof source.x !== 'number' || typeof source.y !== 'number') {
+      return null;
+    }
+    if (!Number.isInteger(source.x) || !Number.isInteger(source.y)) {
+      return null;
+    }
+
+    return {
+      type: 'pawn',
+      x: source.x,
+      y: source.y,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  if (source.type === 'wall') {
+    if (
+      typeof source.x !== 'number' ||
+      typeof source.y !== 'number' ||
+      !Number.isInteger(source.x) ||
+      !Number.isInteger(source.y) ||
+      (source.orientation !== 'h' && source.orientation !== 'v')
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'wall',
+      orientation: source.orientation,
+      x: source.x,
+      y: source.y,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  return null;
+}
+
 function formatCardsCard(card: { rank: string; suit: string }): string {
   return `${card.rank}${card.suit.slice(0, 1).toUpperCase()}`;
 }
@@ -201,6 +250,12 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [dotsStates, setDotsStates] = useState<DotsState[]>([createDotsState()]);
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
+  const [quoridorStates, setQuoridorStates] = useState<QuoridorState[]>([
+    createQuoridorState({
+      boardSize: 9,
+      wallsPerPlayer: 10
+    })
+  ]);
   const [reversiStates, setReversiStates] = useState<ReversiState[]>([createReversiState()]);
   const [xiangqiStates, setXiangqiStates] = useState<XiangqiState[]>([createXiangqiState()]);
   const [cardsStates, setCardsStates] = useState<CardsRuntimeState[]>([
@@ -283,6 +338,35 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setGoStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'quoridor') {
+          let current = createQuoridorState({
+            boardSize: 9,
+            wallsPerPlayer: 10
+          });
+          const snapshots: QuoridorState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseQuoridorMove(move.payload as Record<string, unknown>, current.nextPlayer);
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyQuoridorMove(current, parsedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setQuoridorStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -549,6 +633,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'go') {
       return Math.max(0, goStates.length - 1);
     }
+    if (gameType === 'quoridor') {
+      return Math.max(0, quoridorStates.length - 1);
+    }
     if (gameType === 'reversi') {
       return Math.max(0, reversiStates.length - 1);
     }
@@ -566,6 +653,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     gameType,
     goStates.length,
     gomokuStates.length,
+    quoridorStates.length,
     connect4States.length,
     dotsStates.length,
     reversiStates.length,
@@ -669,6 +757,17 @@ export function ReplayPage({ api, viewerUserId }: Props) {
         </>
       ) : null}
       {gameType === 'go' ? <GoBoard state={goStates[clampedStep]} disabled /> : null}
+      {gameType === 'quoridor' ? (
+        <>
+          <p>
+            {t('room.quoridor.walls_remaining', {
+              black: quoridorStates[clampedStep].remainingWalls.black,
+              white: quoridorStates[clampedStep].remainingWalls.white
+            })}
+          </p>
+          <QuoridorBoard state={quoridorStates[clampedStep]} disabled />
+        </>
+      ) : null}
       {gameType === 'reversi' ? (
         <>
           <ReversiBoard state={reversiStates[clampedStep]} disabled />

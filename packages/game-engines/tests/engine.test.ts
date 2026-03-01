@@ -8,6 +8,7 @@ import {
   applyDotsMove,
   applyGoMove,
   applyGomokuMove,
+  applyQuoridorMove,
   applyReversiMove,
   applyXiangqiMove,
   assignBackgammonTurnDice,
@@ -20,6 +21,7 @@ import {
   createDotsState,
   createGoState,
   createGomokuState,
+  createQuoridorState,
   createReversiState,
   createXiangqiState
 } from '../src/index.js';
@@ -299,6 +301,84 @@ describe('connect4 engine', () => {
 
     expect(state.status).toBe('draw');
     expect(state.winner).toBeNull();
+  });
+});
+
+describe('quoridor engine', () => {
+  it('initializes with centered pawns and default walls', () => {
+    const state = createQuoridorState();
+    expect(state.boardSize).toBe(9);
+    expect(state.wallsPerPlayer).toBe(10);
+    expect(state.pawns.black).toEqual({ x: 4, y: 0 });
+    expect(state.pawns.white).toEqual({ x: 4, y: 8 });
+    expect(state.remainingWalls.black).toBe(10);
+    expect(state.remainingWalls.white).toBe(10);
+  });
+
+  it('rejects out-of-turn pawn moves', () => {
+    const state = createQuoridorState();
+    const result = applyQuoridorMove(state, {
+      type: 'pawn',
+      x: 4,
+      y: 7,
+      player: 'white'
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('out_of_turn');
+  });
+
+  it('accepts legal pawn move and toggles turn', () => {
+    const state = createQuoridorState();
+    const result = applyQuoridorMove(state, {
+      type: 'pawn',
+      x: 4,
+      y: 1,
+      player: 'black'
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.nextState.pawns.black).toEqual({ x: 4, y: 1 });
+    expect(result.nextState.nextPlayer).toBe('white');
+    expect(result.nextState.moveCount).toBe(1);
+  });
+
+  it('enforces wall path constraints', () => {
+    let state = createQuoridorState({ boardSize: 3, wallsPerPlayer: 10 });
+    const sequence = [
+      { type: 'wall', orientation: 'h', x: 0, y: 0, player: 'black' },
+      { type: 'pawn', x: 1, y: 1, player: 'white' },
+      { type: 'wall', orientation: 'h', x: 1, y: 0, player: 'black' }
+    ] as const;
+
+    const first = applyQuoridorMove(state, sequence[0]);
+    expect(first.accepted).toBe(true);
+    state = first.nextState;
+
+    const second = applyQuoridorMove(state, sequence[1]);
+    expect(second.accepted).toBe(true);
+    state = second.nextState;
+
+    const blocked = applyQuoridorMove(state, sequence[2]);
+    expect(blocked.accepted).toBe(false);
+    expect(blocked.reason).toBe('blocks_all_paths');
+  });
+
+  it('completes when a pawn reaches goal row', () => {
+    let state = createQuoridorState({ boardSize: 3, wallsPerPlayer: 0 });
+    const moves = [
+      { type: 'pawn', x: 1, y: 1, player: 'black' as const },
+      { type: 'pawn', x: 0, y: 2, player: 'white' as const },
+      { type: 'pawn', x: 1, y: 2, player: 'black' as const }
+    ];
+
+    for (const move of moves) {
+      const applied = applyQuoridorMove(state, move);
+      expect(applied.accepted).toBe(true);
+      state = applied.nextState;
+    }
+
+    expect(state.status).toBe('completed');
+    expect(state.winner).toBe('black');
   });
 });
 

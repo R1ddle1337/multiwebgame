@@ -3,6 +3,7 @@ import type {
   DotsMove,
   GoMove,
   GomokuMove,
+  QuoridorMove,
   ReversiMove,
   XiangqiMove,
   XiangqiPosition
@@ -84,13 +85,18 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'quoridor',
+  move: QuoridorMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'xiangqi',
   move: XiangqiMove,
   xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
-  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'dots' | 'xiangqi',
-  move: GomokuMove | Connect4Move | GoMove | ReversiMove | DotsMove | XiangqiMove,
+  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'dots' | 'quoridor' | 'xiangqi',
+  move: GomokuMove | Connect4Move | GoMove | ReversiMove | DotsMove | QuoridorMove | XiangqiMove,
   xiangqiPerspective: XiangqiPerspective = 'red'
 ): LastMoveSummary {
   if (gameType === 'gomoku') {
@@ -157,6 +163,37 @@ export function describeLastMove(
 
     return {
       actor: dotsMove.player,
+      action: {
+        kind: 'move',
+        from,
+        to
+      }
+    };
+  }
+
+  if (gameType === 'quoridor') {
+    const quoridorMove = move as QuoridorMove;
+    if (quoridorMove.type === 'pawn') {
+      return {
+        actor: quoridorMove.player,
+        action: {
+          kind: 'place',
+          point: formatBoardPoint(quoridorMove.x, quoridorMove.y)
+        }
+      };
+    }
+
+    const from =
+      quoridorMove.orientation === 'h'
+        ? formatBoardPoint(quoridorMove.x, quoridorMove.y)
+        : formatBoardPoint(quoridorMove.x, quoridorMove.y);
+    const to =
+      quoridorMove.orientation === 'h'
+        ? formatBoardPoint(quoridorMove.x + 1, quoridorMove.y)
+        : formatBoardPoint(quoridorMove.x, quoridorMove.y + 1);
+
+    return {
+      actor: quoridorMove.player,
       action: {
         kind: 'move',
         from,

@@ -76,7 +76,8 @@ class InMemoryStore implements Store {
       reversi: 1200,
       dots: 1200,
       backgammon: 1200,
-      cards: 1200
+      cards: 1200,
+      quoridor: 1200
     };
   }
 
@@ -186,7 +187,8 @@ class InMemoryStore implements Store {
         'reversi',
         'dots',
         'backgammon',
-        'cards'
+        'cards',
+        'quoridor'
       ] as const
     ).map((gameType) => ({
       gameType,

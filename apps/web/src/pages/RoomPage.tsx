@@ -3,6 +3,7 @@ import {
   createDotsState,
   createGoState,
   createGomokuState,
+  createQuoridorState,
   createReversiState,
   createXiangqiState
 } from '@multiwebgame/game-engines';
@@ -18,6 +19,9 @@ import type {
   GoState,
   GomokuMove,
   GomokuState,
+  QuoridorMove,
+  QuoridorMoveInput,
+  QuoridorState,
   ReversiMove,
   ReversiState,
   RoomDTO,
@@ -33,6 +37,7 @@ import { Connect4Board } from '../components/Connect4Board';
 import { DotsBoard } from '../components/DotsBoard';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
+import { QuoridorBoard } from '../components/QuoridorBoard';
 import { ReversiBoard } from '../components/ReversiBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
 import { useI18n } from '../context/I18nContext';
@@ -54,7 +59,7 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
 }
 
 function formatResultText(
-  state: Connect4State | DotsState | GomokuState | GoState | ReversiState | XiangqiState,
+  state: Connect4State | DotsState | GomokuState | GoState | QuoridorState | ReversiState | XiangqiState,
   statusLabel: (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') => string,
   colorLabel: (color: 'black' | 'white' | 'red' | 'yellow') => string,
   t: (key: string, vars?: Record<string, string | number>) => string
@@ -140,6 +145,13 @@ export function RoomPage({ api, user }: Props) {
   const connect4State =
     snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
   const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
+  const quoridorState =
+    snapshot?.gameType === 'quoridor'
+      ? (snapshot.state as QuoridorState)
+      : createQuoridorState({
+          boardSize: 9,
+          wallsPerPlayer: 10
+        });
   const reversiState =
     snapshot?.gameType === 'reversi' ? (snapshot.state as ReversiState) : createReversiState();
   const dotsState = snapshot?.gameType === 'dots' ? (snapshot.state as DotsState) : createDotsState();
@@ -166,6 +178,11 @@ export function RoomPage({ api, user }: Props) {
     connect4State.status === 'playing';
   const goTurn =
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
+  const quoridorTurn =
+    hasActiveMatch &&
+    room?.gameType === 'quoridor' &&
+    viewerRole === 'player' &&
+    quoridorState.status === 'playing';
   const reversiTurn =
     hasActiveMatch &&
     room?.gameType === 'reversi' &&
@@ -195,6 +212,10 @@ export function RoomPage({ api, user }: Props) {
   const canPlayGo =
     goTurn &&
     ((seat === 1 && goState.nextPlayer === 'black') || (seat === 2 && goState.nextPlayer === 'white'));
+  const canPlayQuoridor =
+    quoridorTurn &&
+    ((seat === 1 && quoridorState.nextPlayer === 'black') ||
+      (seat === 2 && quoridorState.nextPlayer === 'white'));
   const canPlayReversi =
     reversiTurn &&
     ((seat === 1 && reversiState.nextPlayer === 'black') ||
@@ -214,6 +235,7 @@ export function RoomPage({ api, user }: Props) {
     canPlayGomoku ||
     canPlayConnect4 ||
     canPlayGo ||
+    canPlayQuoridor ||
     canPlayReversi ||
     canPlayDots ||
     canPlayXiangqi ||
@@ -250,6 +272,10 @@ export function RoomPage({ api, user }: Props) {
       return describeLastMove('dots', snapshot.lastMove as DotsMove);
     }
 
+    if (room.gameType === 'quoridor') {
+      return describeLastMove('quoridor', snapshot.lastMove as QuoridorMove);
+    }
+
     if (room.gameType === 'cards') {
       return null;
     }
@@ -282,6 +308,10 @@ export function RoomPage({ api, user }: Props) {
       return formatResultText(dotsState, statusLabel, colorLabel, t);
     }
 
+    if (room.gameType === 'quoridor') {
+      return formatResultText(quoridorState, statusLabel, colorLabel, t);
+    }
+
     if (room.gameType === 'cards') {
       return null;
     }
@@ -293,6 +323,7 @@ export function RoomPage({ api, user }: Props) {
     gomokuState,
     connect4State,
     goState,
+    quoridorState,
     reversiState,
     dotsState,
     xiangqiState,
@@ -428,6 +459,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'go',
+        move
+      }
+    });
+  };
+
+  const sendQuoridorMove = (move: QuoridorMoveInput) => {
+    if (!canPlayQuoridor) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'quoridor',
         move
       }
     });
@@ -804,6 +850,51 @@ export function RoomPage({ api, user }: Props) {
                   komi: goState.scoring.komi,
                   winner: goState.scoring.winner ? colorLabel(goState.scoring.winner) : t('room.result.draw')
                 })}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'quoridor' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(quoridorState.nextPlayer),
+                  status: statusLabel(quoridorState.status)
+                })}
+              </p>
+            ) : null}
+            <p>
+              {t('room.quoridor.walls_remaining', {
+                black: quoridorState.remainingWalls.black,
+                white: quoridorState.remainingWalls.white
+              })}
+            </p>
+            <QuoridorBoard
+              state={quoridorState}
+              disabled={!canPlayQuoridor}
+              onPawnMove={(x, y) =>
+                sendQuoridorMove({
+                  type: 'pawn',
+                  x,
+                  y
+                })
+              }
+              onWallPlace={(orientation, x, y) =>
+                sendQuoridorMove({
+                  type: 'wall',
+                  orientation,
+                  x,
+                  y
+                })
+              }
+            />
+            {quoridorState.status === 'completed' ? (
+              <p>
+                {quoridorState.winner
+                  ? t('room.result.winner', { winner: colorLabel(quoridorState.winner) })
+                  : t('room.result.draw')}
               </p>
             ) : null}
           </>

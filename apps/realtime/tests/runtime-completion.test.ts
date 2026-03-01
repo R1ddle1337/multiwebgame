@@ -7,6 +7,7 @@ import {
   createGoState,
   createBackgammonState,
   createGomokuState,
+  createQuoridorState,
   createReversiState,
   createXiangqiState
 } from '@multiwebgame/game-engines';
@@ -323,6 +324,45 @@ describe('deriveRuntimeCompletion', () => {
           scores: {
             black: 6,
             white: 10
+          }
+        }
+      }
+    });
+  });
+
+  it('maps quoridor completion to winner and payload', () => {
+    const quoridorCompletion = deriveRuntimeCompletion({
+      gameType: 'quoridor',
+      state: {
+        ...createQuoridorState({
+          boardSize: 9,
+          wallsPerPlayer: 10
+        }),
+        status: 'completed',
+        winner: 'black',
+        moveCount: 51,
+        remainingWalls: {
+          black: 2,
+          white: 1
+        }
+      },
+      players: {
+        black: 'u31',
+        white: 'u32'
+      }
+    });
+
+    expect(quoridorCompletion).toEqual({
+      winnerUserId: 'u31',
+      status: 'completed',
+      resultPayload: {
+        quoridor: {
+          winner: 'black',
+          moveCount: 51,
+          boardSize: 9,
+          remainingWalls: {
+            black: 2,
+            white: 1
           }
         }
       }
