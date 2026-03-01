@@ -9,7 +9,8 @@ export type GameType =
   | 'backgammon'
   | 'cards'
   | 'quoridor'
-  | 'hex';
+  | 'hex'
+  | 'liars_dice';
 export type BoardGameType =
   | 'gomoku'
   | 'xiangqi'
@@ -20,7 +21,8 @@ export type BoardGameType =
   | 'backgammon'
   | 'cards'
   | 'quoridor'
-  | 'hex';
+  | 'hex'
+  | 'liars_dice';
 
 export interface UserDTO {
   id: string;
@@ -497,6 +499,64 @@ export interface CardsState {
   pendingDrawPlay: boolean;
 }
 
+export type LiarsDicePlayer = 'black' | 'white';
+
+export interface LiarsDiceBid {
+  quantity: number;
+  face: number;
+  player: LiarsDicePlayer;
+}
+
+export type LiarsDiceMoveInput =
+  | {
+      type: 'bid';
+      quantity: number;
+      face: number;
+    }
+  | {
+      type: 'call_liar';
+    };
+
+export type LiarsDiceMove =
+  | {
+      type: 'bid';
+      quantity: number;
+      face: number;
+      player: LiarsDicePlayer;
+    }
+  | {
+      type: 'call_liar';
+      player: LiarsDicePlayer;
+    };
+
+export interface LiarsDiceRoundResolution {
+  round: number;
+  starter: LiarsDicePlayer;
+  bids: LiarsDiceBid[];
+  caller: LiarsDicePlayer;
+  calledBid: LiarsDiceBid;
+  totalMatching: number;
+  wasLiar: boolean;
+  loser: LiarsDicePlayer;
+}
+
+export interface LiarsDiceState {
+  dicePerPlayer: number;
+  currentRound: number;
+  nextPlayer: LiarsDicePlayer;
+  status: 'playing' | 'completed';
+  winner: LiarsDicePlayer | null;
+  moveCount: number;
+  diceCounts: {
+    black: number;
+    white: number;
+  };
+  currentBid: LiarsDiceBid | null;
+  bidHistory: LiarsDiceBid[];
+  viewerDice: number[] | null;
+  lastRound: LiarsDiceRoundResolution | null;
+}
+
 export type Direction2048 = 'up' | 'down' | 'left' | 'right';
 
 export interface Game2048State {
@@ -585,6 +645,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'liars_dice';
+      state: LiarsDiceState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'single_2048';
       state: null;
       viewerRole: RoomPlayerRole;
@@ -650,6 +716,12 @@ export type MatchMoveAppliedPayload =
       gameType: 'hex';
       state: HexState;
       lastMove: HexMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'liars_dice';
+      state: LiarsDiceState;
+      lastMove: LiarsDiceMove;
     };
 
 export type ClientToServerMessage =
@@ -675,6 +747,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.move', { roomId: string; gameType: 'cards'; move: CardsMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'quoridor'; move: QuoridorMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'hex'; x: number; y: number }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }>
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.leave', Record<string, never>>
   | WsEnvelope<'invite.respond', { invitationId: string; action: 'accept' | 'decline' }>

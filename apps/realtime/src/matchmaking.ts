@@ -8,7 +8,8 @@ export type MatchmakingGameType =
   | 'backgammon'
   | 'cards'
   | 'quoridor'
-  | 'hex';
+  | 'hex'
+  | 'liars_dice';
 
 export interface QueueEntry {
   userId: string;

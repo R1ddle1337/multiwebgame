@@ -58,8 +58,11 @@ Message shape:
 - `room.move` (Hex)
   - `{ roomId: string, gameType: "hex", x: number, y: number }`
 
+- `room.move` (Liar's Dice)
+  - `{ roomId: string, gameType: "liars_dice", move: { type: "bid", quantity: number, face: 1..6 } | { type: "call_liar" } }`
+
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" }`
+  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -89,6 +92,7 @@ Message shape:
   - Go: `{ room, gameType: "go", state, viewerRole }`
   - Xiangqi: `{ room, gameType: "xiangqi", state, viewerRole }`
   - Cards: `{ room, gameType: "cards", state, viewerRole }`
+  - Liar's Dice: `{ room, gameType: "liars_dice", state, viewerRole }`
   - Quoridor: `{ room, gameType: "quoridor", state, viewerRole }`
   - Hex: `{ room, gameType: "hex", state, viewerRole }`
   - 2048 room: `{ room, gameType: "single_2048", state: null, viewerRole }`
@@ -141,6 +145,9 @@ Message shape:
   - Cards hidden information policy:
     - active players only receive their own hand;
     - spectators do not receive hand cards or draw-pile visibility during active play.
+  - Liar's Dice hidden information policy:
+    - active players only receive their own current dice;
+    - spectators do not receive any current dice values during active play.
 
 - Reconnect:
   - Client stores `reconnectKey` from `auth.ok`.

@@ -4,6 +4,7 @@ import {
   applyConnect4Move,
   applyDotsMove,
   applyHexMove,
+  applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
   applyQuoridorMove,
@@ -17,6 +18,7 @@ import {
   createDeterministicPrng,
   createDotsState,
   createHexState,
+  createLiarsDiceState,
   createGoState,
   createGomokuState,
   createQuoridorState,
@@ -25,7 +27,9 @@ import {
   createXiangqiState,
   formatXiangqiMoveNotation,
   toCardsPublicState,
+  toLiarsDicePublicState,
   type CardsRuntimeState,
+  type LiarsDiceRuntimeState,
   type DeterministicPrng
 } from '@multiwebgame/game-engines';
 import type {
@@ -43,6 +47,10 @@ import type {
   DotsState,
   HexMove,
   HexState,
+  LiarsDiceMove,
+  LiarsDiceMoveInput,
+  LiarsDicePlayer,
+  LiarsDiceState,
   GoMove,
   GoState,
   GomokuMark,
@@ -151,6 +159,19 @@ interface CardsRuntime {
   };
 }
 
+interface LiarsDiceRuntime {
+  gameType: 'liars_dice';
+  roomId: string;
+  matchId: string;
+  state: LiarsDiceRuntimeState | null;
+  rngSession: VerifiableRngSession;
+  rngPrng: DeterministicPrng | null;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
 interface Connect4Runtime {
   gameType: 'connect4';
   roomId: string;
@@ -238,6 +259,7 @@ interface HexRuntime {
 type ActiveRuntime =
   | BackgammonRuntime
   | CardsRuntime
+  | LiarsDiceRuntime
   | GomokuRuntime
   | Connect4Runtime
   | GoRuntime
@@ -408,6 +430,23 @@ const roomMoveSchema = z.union([
     type: z.literal('room.move'),
     payload: z.object({
       roomId: z.string().uuid(),
+      gameType: z.literal('liars_dice'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('bid'),
+          quantity: z.number().int().min(1),
+          face: z.number().int().min(1).max(6)
+        }),
+        z.object({
+          type: z.literal('call_liar')
+        })
+      ])
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
       gameType: z.literal('cards'),
       move: z.discriminatedUnion('type', [
         z.object({
@@ -447,7 +486,8 @@ const matchmakingJoinSchema = z.object({
       'backgammon',
       'cards',
       'quoridor',
-      'hex'
+      'hex',
+      'liars_dice'
     ])
   })
 });
@@ -485,7 +525,8 @@ function playerSlotsForGame(gameType: BoardGameType): number {
     gameType === 'dots' ||
     gameType === 'cards' ||
     gameType === 'quoridor' ||
-    gameType === 'hex'
+    gameType === 'hex' ||
+    gameType === 'liars_dice'
     ? 2
     : 2;
 }
@@ -620,6 +661,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
   if (
     runtime.gameType === 'backgammon' ||
     runtime.gameType === 'cards' ||
+    runtime.gameType === 'liars_dice' ||
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'go' ||
     runtime.gameType === 'reversi' ||
@@ -772,7 +814,54 @@ function ensureCardsRuntimeState(runtime: CardsRuntime): CardsRuntimeState | nul
   return runtime.state;
 }
 
+function ensureLiarsDicePrng(runtime: LiarsDiceRuntime): DeterministicPrng | null {
+  if (!runtime.rngSession.rngSeed) {
+    return null;
+  }
+
+  if (runtime.rngPrng) {
+    return runtime.rngPrng;
+  }
+
+  runtime.rngPrng = createDeterministicPrng(runtime.rngSession.rngSeed);
+  return runtime.rngPrng;
+}
+
+function ensureLiarsDiceRuntimeState(runtime: LiarsDiceRuntime): LiarsDiceRuntimeState | null {
+  if (runtime.state) {
+    return runtime.state;
+  }
+
+  const prng = ensureLiarsDicePrng(runtime);
+  if (!prng) {
+    return null;
+  }
+
+  runtime.state = createLiarsDiceState({
+    dicePerPlayer: 5,
+    startingPlayer: 'black',
+    rollDie: () => prng.nextDie()
+  });
+  return runtime.state;
+}
+
 function viewerCardsSide(runtime: CardsRuntime, userId: string | null): CardsPlayer | null {
+  if (!userId) {
+    return null;
+  }
+
+  if (runtime.players.black === userId) {
+    return 'black';
+  }
+
+  if (runtime.players.white === userId) {
+    return 'white';
+  }
+
+  return null;
+}
+
+function viewerLiarsDiceSide(runtime: LiarsDiceRuntime, userId: string | null): LiarsDicePlayer | null {
   if (!userId) {
     return null;
   }
@@ -800,6 +889,15 @@ function cardsStateForClient(
   return toCardsPublicState(runtime.state, side, Boolean(side));
 }
 
+function liarsDiceStateForClient(runtime: LiarsDiceRuntime, client: ClientContext): LiarsDiceState | null {
+  if (!runtime.state) {
+    return null;
+  }
+
+  const side = viewerLiarsDiceSide(runtime, client.user?.id ?? null);
+  return toLiarsDicePublicState(runtime.state, side);
+}
+
 function broadcastCardsMoveApplied(
   runtime: CardsRuntime,
   targets: Set<ClientContext>,
@@ -816,6 +914,29 @@ function broadcastCardsMoveApplied(
       payload: {
         roomId: runtime.roomId,
         gameType: 'cards',
+        state,
+        lastMove
+      }
+    });
+  }
+}
+
+function broadcastLiarsDiceMoveApplied(
+  runtime: LiarsDiceRuntime,
+  targets: Set<ClientContext>,
+  lastMove: LiarsDiceMove
+): void {
+  for (const target of targets) {
+    const state = liarsDiceStateForClient(runtime, target);
+    if (!state) {
+      continue;
+    }
+
+    send(target, {
+      type: 'match.move_applied',
+      payload: {
+        roomId: runtime.roomId,
+        gameType: 'liars_dice',
         state,
         lastMove
       }
@@ -1043,6 +1164,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'liars_dice') {
+    return {
+      gameType: 'liars_dice',
+      roomId: room.id,
+      matchId,
+      state: null,
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerOneUserId: players.first,
+        playerTwoUserId: players.second
+      }),
+      rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'gomoku') {
     return {
       gameType: 'gomoku',
@@ -1235,6 +1375,41 @@ function readCardsMovePayload(payload: Record<string, unknown>): CardsMove | nul
   return isCardsMoveRecord(payload) ? payload : null;
 }
 
+function isLiarsDiceMoveRecord(value: unknown): value is LiarsDiceMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<LiarsDiceMove>;
+  if (typed.type === 'call_liar') {
+    return typed.player === 'black' || typed.player === 'white';
+  }
+
+  if (typed.type === 'bid') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      typeof typed.quantity === 'number' &&
+      Number.isInteger(typed.quantity) &&
+      typed.quantity > 0 &&
+      typeof typed.face === 'number' &&
+      Number.isInteger(typed.face) &&
+      typed.face >= 1 &&
+      typed.face <= 6
+    );
+  }
+
+  return false;
+}
+
+function readLiarsDiceMovePayload(payload: Record<string, unknown>): LiarsDiceMove | null {
+  const nested = payload.move;
+  if (isLiarsDiceMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isLiarsDiceMoveRecord(payload) ? payload : null;
+}
+
 function replayMoves(
   runtime: ActiveRuntime,
   moves: Array<{ payload: Record<string, unknown> }>
@@ -1293,6 +1468,50 @@ function replayMoves(
       }
 
       const applied = applyCardsMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'liars_dice') {
+      const payload = move.payload as {
+        move?: Record<string, unknown>;
+        rngSeed?: string;
+      };
+      if (typeof payload.rngSeed === 'string' && payload.rngSeed.length > 0) {
+        current = {
+          ...current,
+          rngSession: {
+            ...current.rngSession,
+            phase: 'ready',
+            rngSeed: payload.rngSeed,
+            revealDeadlineAt: null
+          },
+          rngPrng: null
+        };
+      }
+
+      if (current.rngSession.phase === 'ready') {
+        ensureLiarsDiceRuntimeState(current);
+      }
+
+      const parsedMove = readLiarsDiceMovePayload(move.payload);
+      if (!parsedMove || !current.state) {
+        continue;
+      }
+
+      const prng = ensureLiarsDicePrng(current);
+      if (!prng) {
+        continue;
+      }
+
+      const applied = applyLiarsDiceMove(current.state, parsedMove, () => prng.nextDie());
       if (!applied.accepted) {
         continue;
       }
@@ -1558,6 +1777,9 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   if (replayed.gameType === 'cards' && replayed.rngSession.phase === 'ready') {
     ensureCardsRuntimeState(replayed);
   }
+  if (replayed.gameType === 'liars_dice' && replayed.rngSession.phase === 'ready') {
+    ensureLiarsDiceRuntimeState(replayed);
+  }
 
   if (match.status === 'active') {
     if (hasRngSession(replayed) && isRevealTimedOut(replayed.rngSession)) {
@@ -1612,8 +1834,11 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
   const existing = await getOrLoadRuntime(roomId);
   if (
     existing &&
-    ((existing.gameType === 'cards' && existing.state?.status === 'playing') ||
-      (existing.gameType !== 'cards' && existing.state.status === 'playing'))
+    (((existing.gameType === 'cards' || existing.gameType === 'liars_dice') &&
+      existing.state?.status === 'playing') ||
+      (existing.gameType !== 'cards' &&
+        existing.gameType !== 'liars_dice' &&
+        existing.state.status === 'playing'))
   ) {
     return existing;
   }
@@ -1675,6 +1900,26 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
       }
     });
     if (runtime?.gameType === 'backgammon') {
+      send(client, rngUpdatedMessage(runtime));
+    }
+    return;
+  }
+
+  if (room.gameType === 'liars_dice') {
+    if (runtime?.gameType === 'liars_dice' && runtime.rngSession.phase === 'ready') {
+      ensureLiarsDiceRuntimeState(runtime);
+    }
+
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'liars_dice',
+        state: runtime?.gameType === 'liars_dice' ? liarsDiceStateForClient(runtime, client) : null,
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'liars_dice') {
       send(client, rngUpdatedMessage(runtime));
     }
     return;
@@ -2099,6 +2344,70 @@ async function handleCardsMove(
 
   const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
   broadcastCardsMoveApplied(runtime, targets, normalizedMove);
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleLiarsDiceMove(
+  client: ClientContext,
+  runtime: LiarsDiceRuntime,
+  move: LiarsDiceMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: LiarsDicePlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const state = ensureLiarsDiceRuntimeState(runtime);
+  if (!state) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  const prng = ensureLiarsDicePrng(runtime);
+  if (!prng) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  const normalizedMove: LiarsDiceMove =
+    move.type === 'bid'
+      ? {
+          type: 'bid',
+          quantity: move.quantity,
+          face: move.face,
+          player
+        }
+      : {
+          type: 'call_liar',
+          player
+        };
+
+  const applied = applyLiarsDiceMove(state, normalizedMove, () => prng.nextDie());
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: `liars_dice.${normalizedMove.type}`,
+    payload: {
+      move: normalizedMove,
+      rngSeed: runtime.rngSession.rngSeed
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcastLiarsDiceMoveApplied(runtime, targets, normalizedMove);
   await finishMatchIfCompleted(runtime, targets);
 }
 
@@ -2556,10 +2865,27 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       });
     }
   }
+  if (runtime.gameType === 'liars_dice' && runtime.rngSession.phase === 'ready') {
+    runtime.rngPrng = null;
+    ensureLiarsDiceRuntimeState(runtime);
+    if (becameReady) {
+      await createMatchMove({
+        matchId: runtime.matchId,
+        actorUserId: client.user.id,
+        moveIndex: 0,
+        moveType: 'liars_dice.rng_ready',
+        payload: {
+          rngSeed: runtime.rngSession.rngSeed
+        }
+      });
+    }
+  }
   activeRuntimes.set(runtime.roomId, runtime);
   broadcast(targets, rngUpdatedMessage(runtime));
   if (
-    (runtime.gameType === 'backgammon' || runtime.gameType === 'cards') &&
+    (runtime.gameType === 'backgammon' ||
+      runtime.gameType === 'cards' ||
+      runtime.gameType === 'liars_dice') &&
     runtime.rngSession.phase === 'ready'
   ) {
     await broadcastRoomStateToSubscribers(runtime.roomId);
@@ -2571,6 +2897,7 @@ async function handleMove(
   message:
     | { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     | { roomId: string; gameType: 'cards'; move: CardsMoveInput }
+    | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
@@ -2613,6 +2940,11 @@ async function handleMove(
 
   if (message.gameType === 'cards' && runtime.gameType === 'cards') {
     await handleCardsMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'liars_dice' && runtime.gameType === 'liars_dice') {
+    await handleLiarsDiceMove(client, runtime, message.move);
     return;
   }
 
@@ -2891,6 +3223,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'cards',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'liars_dice') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'liars_dice',
             move: msg.payload.move
           });
           return;

@@ -18,6 +18,13 @@ export { applyDotsMove, createDotsState } from './dots.js';
 export { applyGoMove, calculateGoScore, createGoState } from './go.js';
 export { applyGomokuMove, createGomokuState } from './gomoku.js';
 export { applyHexMove, createHexState } from './hex.js';
+export {
+  applyLiarsDiceMove,
+  createLiarsDiceState,
+  toLiarsDicePublicState,
+  type LiarsDiceRoundReveal,
+  type LiarsDiceRuntimeState
+} from './liars-dice.js';
 export { applyQuoridorMove, createQuoridorState } from './quoridor.js';
 export { createDeterministicPrng, type DeterministicPrng } from './random.js';
 export { applyReversiMove, createReversiState } from './reversi.js';

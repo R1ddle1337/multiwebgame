@@ -141,6 +141,34 @@ Randomness + verification:
 - shuffle uses commit-reveal verifiable RNG seed
 - completed match payload includes RNG proof transcript (`serverSeed`, commits/nonces, derived `rngSeed`)
 
+## Liar's Dice (2-player)
+
+Implemented rules (v1 two-player):
+
+- each player starts with 5 dice
+- each round both players roll hidden dice
+- players alternate:
+  - bid (`quantity`, `face`)
+  - or call `liar` against current bid
+- bid must be strictly higher than previous bid (quantity first, then face)
+- `liar` resolution:
+  - if actual matching dice count `< bid.quantity`: bidder is liar and loses one die
+  - otherwise caller loses one die
+- loser of a round starts the next round
+- match ends when one player reaches 0 dice
+
+Randomness + verification:
+
+- round dice are generated from existing commit-reveal verifiable RNG
+- gameplay remains blocked until RNG phase is `ready`
+- completed payload includes RNG proof transcript and full per-round reveal log (dice + bid chain) for replay verification
+
+Visibility policy:
+
+- during live play, each player only sees their own current dice
+- spectators do not see current dice
+- replay after completion can reveal full round dice and bid chain
+
 ## Rating Formula
 
 Per-mode rating update uses ELO:

@@ -4,6 +4,7 @@ import {
   applyConnect4Move,
   applyDotsMove,
   applyHexMove,
+  applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
   applyQuoridorMove,
@@ -15,6 +16,7 @@ import {
   createConnect4State,
   createDotsState,
   createHexState,
+  createLiarsDiceState,
   createGoState,
   createGomokuState,
   createQuoridorState,
@@ -22,7 +24,8 @@ import {
   createXiangqiState,
   type CardsRuntimeState,
   createDeterministicPrng,
-  formatXiangqiMoveNotation
+  formatXiangqiMoveNotation,
+  type LiarsDiceRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
   CardsCard,
@@ -40,6 +43,7 @@ import type {
   GomokuState,
   HexMove,
   HexState,
+  LiarsDiceMove,
   QuoridorMove,
   QuoridorState,
   ReversiMove,
@@ -243,6 +247,42 @@ function parseQuoridorMove(
   return null;
 }
 
+function parseLiarsDiceMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: LiarsDiceMove['player']
+): LiarsDiceMove | null {
+  const source = (payload.move ?? payload) as Partial<LiarsDiceMove>;
+  if (source.type === 'call_liar') {
+    return {
+      type: 'call_liar',
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  if (source.type === 'bid') {
+    if (
+      typeof source.quantity !== 'number' ||
+      !Number.isInteger(source.quantity) ||
+      source.quantity <= 0 ||
+      typeof source.face !== 'number' ||
+      !Number.isInteger(source.face) ||
+      source.face < 1 ||
+      source.face > 6
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'bid',
+      quantity: source.quantity,
+      face: source.face,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  return null;
+}
+
 function formatCardsCard(card: { rank: string; suit: string }): string {
   return `${card.rank}${card.suit.slice(0, 1).toUpperCase()}`;
 }
@@ -260,6 +300,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
       boardSize: 11
     })
   ]);
+  const [liarsDiceStates, setLiarsDiceStates] = useState<LiarsDiceRuntimeState[]>([]);
   const [quoridorStates, setQuoridorStates] = useState<QuoridorState[]>([
     createQuoridorState({
       boardSize: 9,
@@ -601,6 +642,55 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           return;
         }
 
+        if (result.match.gameType === 'liars_dice') {
+          const payload = result.match.resultPayload as { rng?: { rngSeed?: unknown } } | null;
+          let rngSeed = typeof payload?.rng?.rngSeed === 'string' ? payload.rng.rngSeed : null;
+
+          if (!rngSeed) {
+            const fromMove = result.match.moves
+              .map((entry) => entry.payload as { rngSeed?: unknown })
+              .find((entry) => typeof entry.rngSeed === 'string');
+            rngSeed = typeof fromMove?.rngSeed === 'string' ? fromMove.rngSeed : null;
+          }
+
+          if (!rngSeed) {
+            setError(t('common.error_generic'));
+            return;
+          }
+
+          const prng = createDeterministicPrng(rngSeed);
+          let current = createLiarsDiceState({
+            dicePerPlayer: 5,
+            startingPlayer: 'black',
+            rollDie: () => prng.nextDie()
+          });
+          const snapshots: LiarsDiceRuntimeState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseLiarsDiceMove(
+              move.payload as Record<string, unknown>,
+              current.nextPlayer
+            );
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyLiarsDiceMove(current, parsedMove, () => prng.nextDie());
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setLiarsDiceStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
         if (result.match.gameType === 'backgammon') {
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
@@ -690,6 +780,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'cards') {
       return Math.max(0, cardsStates.length - 1);
     }
+    if (gameType === 'liars_dice') {
+      return Math.max(0, liarsDiceStates.length - 1);
+    }
     if (gameType === 'single_2048') {
       return Math.max(0, game2048States.length - 1);
     }
@@ -705,6 +798,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     reversiStates.length,
     xiangqiStates.length,
     cardsStates.length,
+    liarsDiceStates.length,
     game2048States.length
   ]);
 
@@ -886,6 +980,62 @@ export function ReplayPage({ api, viewerUserId }: Props) {
               </div>
             </div>
           </div>
+        </>
+      ) : null}
+      {gameType === 'liars_dice' && liarsDiceStates.length > 0 ? (
+        <>
+          <p>
+            {t('room.liars.dice_counts', {
+              black: liarsDiceStates[clampedStep].diceCounts.black,
+              white: liarsDiceStates[clampedStep].diceCounts.white
+            })}
+          </p>
+          <p>
+            {t('enum.color.black')}: {liarsDiceStates[clampedStep].dice.black.join(', ')}
+          </p>
+          <p>
+            {t('enum.color.white')}: {liarsDiceStates[clampedStep].dice.white.join(', ')}
+          </p>
+          {liarsDiceStates[clampedStep].currentBid ? (
+            <p>
+              {t('room.liars.current_bid', {
+                quantity: liarsDiceStates[clampedStep].currentBid.quantity,
+                face: liarsDiceStates[clampedStep].currentBid.face
+              })}
+            </p>
+          ) : (
+            <p>{t('room.liars.no_bid')}</p>
+          )}
+          {liarsDiceStates[clampedStep].roundHistory.length > 0 ? (
+            <div className="replay-cards-hands">
+              {liarsDiceStates[clampedStep].roundHistory.map((round) => (
+                <div key={`liars-round-${round.round}`} className="card">
+                  <p>
+                    {t('replay.liars.round', {
+                      round: round.round,
+                      quantity: round.calledBid.quantity,
+                      face: round.calledBid.face,
+                      total: round.totalMatching
+                    })}
+                  </p>
+                  <p>
+                    {t('replay.liars.dice', {
+                      black: round.dice.black.join(', '),
+                      white: round.dice.white.join(', ')
+                    })}
+                  </p>
+                  <p>
+                    {t('replay.liars.bids', {
+                      chain:
+                        round.bids
+                          .map((bid) => `${t(`enum.color.${bid.player}`)}:${bid.quantity}x${bid.face}`)
+                          .join(' -> ') || '—'
+                    })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </>
       ) : null}
       {gameType === 'single_2048' ? (

@@ -78,7 +78,8 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
     go: 0,
     xiangqi: 0,
     quoridor: 0,
-    hex: 0
+    hex: 0,
+    liars_dice: 0
   });
   const [roomStates, setRoomStates] = useState<Record<string, RoomSnapshot>>({});
   const [matchedRoom, setMatchedRoom] = useState<{ room: RoomDTO; matchId: string } | null>(null);

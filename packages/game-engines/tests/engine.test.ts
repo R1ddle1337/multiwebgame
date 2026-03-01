@@ -7,6 +7,7 @@ import {
   applyConnect4Move,
   applyDotsMove,
   applyHexMove,
+  applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
   applyQuoridorMove,
@@ -21,6 +22,7 @@ import {
   createConnect4State,
   createDotsState,
   createHexState,
+  createLiarsDiceState,
   createGoState,
   createGomokuState,
   createQuoridorState,
@@ -814,6 +816,148 @@ describe('cards engine', () => {
     expect(win.nextState.status).toBe('completed');
     expect(win.nextState.winner).toBe('black');
     expect(win.nextState.hands.black).toHaveLength(0);
+  });
+});
+
+describe('liars_dice engine', () => {
+  const rolls = [1, 1, 5, 6, 2, 2, 3, 4, 5, 6];
+
+  function createState() {
+    let index = 0;
+    return createLiarsDiceState({
+      dicePerPlayer: 5,
+      rollDie: () => {
+        const value = rolls[index];
+        index += 1;
+        return value;
+      }
+    });
+  }
+
+  it('rejects out-of-turn moves', () => {
+    const state = createState();
+    const result = applyLiarsDiceMove(
+      state,
+      {
+        type: 'bid',
+        quantity: 2,
+        face: 3,
+        player: 'white'
+      },
+      () => 1
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('out_of_turn');
+  });
+
+  it('enforces strictly increasing bids', () => {
+    let state = createState();
+
+    const first = applyLiarsDiceMove(
+      state,
+      {
+        type: 'bid',
+        quantity: 2,
+        face: 3,
+        player: 'black'
+      },
+      () => 1
+    );
+    expect(first.accepted).toBe(true);
+    state = first.nextState;
+
+    const second = applyLiarsDiceMove(
+      state,
+      {
+        type: 'bid',
+        quantity: 2,
+        face: 3,
+        player: 'white'
+      },
+      () => 1
+    );
+    expect(second.accepted).toBe(false);
+    expect(second.reason).toBe('bid_not_higher');
+  });
+
+  it('resolves call liar and starts next round from loser', () => {
+    let state = createState();
+
+    const bidOne = applyLiarsDiceMove(
+      state,
+      {
+        type: 'bid',
+        quantity: 3,
+        face: 1,
+        player: 'black'
+      },
+      () => 1
+    );
+    expect(bidOne.accepted).toBe(true);
+    state = bidOne.nextState;
+
+    const call = applyLiarsDiceMove(
+      state,
+      {
+        type: 'call_liar',
+        player: 'white'
+      },
+      () => 2
+    );
+    expect(call.accepted).toBe(true);
+    state = call.nextState;
+
+    expect(state.currentRound).toBe(2);
+    expect(state.currentRoundStarter).toBe('black');
+    expect(state.nextPlayer).toBe('black');
+    expect(state.diceCounts.black).toBe(4);
+    expect(state.lastRound).toMatchObject({
+      totalMatching: 2,
+      wasLiar: true,
+      loser: 'black'
+    });
+  });
+
+  it('completes game when a player loses final die', () => {
+    const state = {
+      ...createState(),
+      diceCounts: {
+        black: 1,
+        white: 1
+      },
+      dice: {
+        black: [2],
+        white: [3]
+      },
+      currentBid: {
+        quantity: 2,
+        face: 6,
+        player: 'black' as const
+      },
+      bidHistory: [
+        {
+          quantity: 2,
+          face: 6,
+          player: 'black' as const
+        }
+      ],
+      nextPlayer: 'white' as const
+    };
+
+    const call = applyLiarsDiceMove(
+      state,
+      {
+        type: 'call_liar',
+        player: 'white'
+      },
+      () => 1
+    );
+
+    expect(call.accepted).toBe(true);
+    expect(call.nextState.status).toBe('completed');
+    expect(call.nextState.winner).toBe('white');
+    expect(call.nextState.diceCounts.black).toBe(0);
   });
 });
 

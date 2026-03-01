@@ -218,6 +218,9 @@ export function LobbyPage({ api, user }: Props) {
           <button type="button" onClick={() => createRoom('cards')}>
             {t('lobby.create.cards')}
           </button>
+          <button type="button" onClick={() => createRoom('liars_dice')}>
+            {t('lobby.create.liars_dice')}
+          </button>
           <button type="button" onClick={() => createRoom('quoridor')}>
             {t('lobby.create.quoridor')}
           </button>
@@ -257,6 +260,7 @@ export function LobbyPage({ api, user }: Props) {
               [
                 'backgammon',
                 'cards',
+                'liars_dice',
                 'quoridor',
                 'hex',
                 'gomoku',

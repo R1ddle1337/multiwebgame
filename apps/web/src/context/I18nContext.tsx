@@ -61,6 +61,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.create.gomoku': '创建五子棋房间',
     'lobby.create.backgammon': '创建双陆棋房间',
     'lobby.create.cards': '创建 Crazy Eights 房间',
+    'lobby.create.liars_dice': '创建吹牛骰子房间',
     'lobby.create.quoridor': '创建步步为营房间',
     'lobby.create.hex': '创建六角棋房间',
     'lobby.create.connect4': '创建四子棋房间',
@@ -157,6 +158,18 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.cards.draw': '摸 1 张',
     'room.cards.end_turn': '结束回合',
     'room.cards.pending_draw_play': '你已摸到可出的牌，可立即出牌或结束回合。',
+    'room.liars.waiting_rng': '等待双方完成随机承诺与揭示后掷骰',
+    'room.liars.dice_counts': '剩余骰子 • 黑: {black} • 白: {white}',
+    'room.liars.your_dice': '你的骰子: {dice}',
+    'room.liars.hidden_dice': '当前视角不可见骰子点数。',
+    'room.liars.current_bid': '当前出价: {quantity} 个 {face}',
+    'room.liars.no_bid': '当前还没有出价。',
+    'room.liars.bid_history': '出价链: {chain}',
+    'room.liars.bid_input': '出价（数量/点数）',
+    'room.liars.face': '点数',
+    'room.liars.bid_submit': '提交出价',
+    'room.liars.call_liar': '叫 Liar',
+    'room.liars.last_round': '上轮结算: 出价 {quantity} 个 {face}，匹配 {total}，输家 {loser}',
     'room.quoridor.walls_remaining': '剩余墙数 • 黑: {black} • 白: {white}',
     'replay.loading': '正在加载回放...',
     'replay.title': '回放 {id}',
@@ -174,6 +187,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'replay.moves.red': '红方',
     'replay.moves.black': '黑方',
     'replay.moves.empty': '—',
+    'replay.liars.round': '第 {round} 轮: 出价 {quantity} 个 {face}，匹配 {total}',
+    'replay.liars.dice': '黑骰: {black} | 白骰: {white}',
+    'replay.liars.bids': '出价链: {chain}',
     'invite.title': '邀请链接加入',
     'invite.processing': '正在处理邀请链接，请稍候...',
     'invite.failed': '邀请处理失败',
@@ -199,6 +215,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.gomoku': '五子棋',
     'enum.game.backgammon': '双陆棋',
     'enum.game.cards': '扑克（Crazy Eights）',
+    'enum.game.liars_dice': '吹牛骰子',
     'enum.game.quoridor': '步步为营',
     'enum.game.hex': '六角棋',
     'enum.game.go': '围棋',
@@ -228,6 +245,11 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.blocks_all_paths': '放墙后必须保留双方到终点的路径',
     'error.no_walls_remaining': '你的墙已用完',
     'error.piece_not_owned': '只能操作己方棋子',
+    'error.bid_not_higher': '出价必须严格高于上一手',
+    'error.no_bid_to_call': '当前没有可叫 liar 的出价',
+    'error.invalid_bid_quantity': '出价数量不合法',
+    'error.invalid_bid_face': '出价点数必须在 1 到 6',
+    'error.bid_exceeds_total_dice': '出价数量不能超过场上总骰子数',
     'error.invalid_move': '非法落子',
     'error.realtime_unstable': '实时连接不稳定，正在尝试重连',
     'error.network': '网络请求失败，请稍后重试',
@@ -290,6 +312,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.create.gomoku': 'Create Gomoku Room',
     'lobby.create.backgammon': 'Create Backgammon Room',
     'lobby.create.cards': 'Create Crazy Eights Room',
+    'lobby.create.liars_dice': "Create Liar's Dice Room",
     'lobby.create.quoridor': 'Create Quoridor Room',
     'lobby.create.hex': 'Create Hex Room',
     'lobby.create.connect4': 'Create Connect Four Room',
@@ -386,6 +409,18 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.cards.draw': 'Draw 1',
     'room.cards.end_turn': 'End Turn',
     'room.cards.pending_draw_play': 'You drew a playable card. Play now or end your turn.',
+    'room.liars.waiting_rng': 'Waiting for commit-reveal to finish before rolling dice.',
+    'room.liars.dice_counts': 'Dice left • Black: {black} • White: {white}',
+    'room.liars.your_dice': 'Your dice: {dice}',
+    'room.liars.hidden_dice': 'Dice values are hidden for this view.',
+    'room.liars.current_bid': 'Current bid: {quantity} of face {face}',
+    'room.liars.no_bid': 'No active bid yet.',
+    'room.liars.bid_history': 'Bid chain: {chain}',
+    'room.liars.bid_input': 'Bid (quantity/face)',
+    'room.liars.face': 'Face',
+    'room.liars.bid_submit': 'Submit Bid',
+    'room.liars.call_liar': 'Call Liar',
+    'room.liars.last_round': 'Last round: bid {quantity} of face {face}, matched {total}, loser {loser}',
     'room.quoridor.walls_remaining': 'Walls left • Black: {black} • White: {white}',
     'replay.loading': 'Loading replay...',
     'replay.title': 'Replay {id}',
@@ -403,6 +438,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'replay.moves.red': 'Red',
     'replay.moves.black': 'Black',
     'replay.moves.empty': '—',
+    'replay.liars.round': 'Round {round}: bid {quantity} of face {face}, matched {total}',
+    'replay.liars.dice': 'Black dice: {black} | White dice: {white}',
+    'replay.liars.bids': 'Bid chain: {chain}',
     'invite.title': 'Join Via Invite Link',
     'invite.processing': 'Processing invite link...',
     'invite.failed': 'Unable to join from invite link',
@@ -428,6 +466,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.gomoku': 'gomoku',
     'enum.game.backgammon': 'backgammon',
     'enum.game.cards': 'cards',
+    'enum.game.liars_dice': 'liars_dice',
     'enum.game.quoridor': 'quoridor',
     'enum.game.hex': 'hex',
     'enum.game.go': 'go',
@@ -457,6 +496,11 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.blocks_all_paths': 'Wall placement must keep both players with a path',
     'error.no_walls_remaining': 'No walls remaining',
     'error.piece_not_owned': 'You can only move your own piece',
+    'error.bid_not_higher': 'Bid must be strictly higher than the previous bid',
+    'error.no_bid_to_call': 'No bid to challenge right now',
+    'error.invalid_bid_quantity': 'Bid quantity is invalid',
+    'error.invalid_bid_face': 'Bid face must be between 1 and 6',
+    'error.bid_exceeds_total_dice': 'Bid cannot exceed total dice in play',
     'error.invalid_move': 'Invalid move',
     'error.realtime_unstable': 'Realtime connection is unstable. Reconnecting…',
     'error.network': 'Network request failed. Please retry.',
@@ -595,6 +639,21 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       }
       if (normalized.includes('piece_not_owned')) {
         return withCode('error.piece_not_owned');
+      }
+      if (normalized.includes('bid_not_higher')) {
+        return withCode('error.bid_not_higher');
+      }
+      if (normalized.includes('no_bid_to_call')) {
+        return withCode('error.no_bid_to_call');
+      }
+      if (normalized.includes('invalid_bid_quantity')) {
+        return withCode('error.invalid_bid_quantity');
+      }
+      if (normalized.includes('invalid_bid_face')) {
+        return withCode('error.invalid_bid_face');
+      }
+      if (normalized.includes('bid_exceeds_total_dice')) {
+        return withCode('error.bid_exceeds_total_dice');
       }
       if (
         normalized.includes('card_not_in_hand') ||

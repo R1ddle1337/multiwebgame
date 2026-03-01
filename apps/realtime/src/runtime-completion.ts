@@ -1,4 +1,4 @@
-import type { CardsRuntimeState } from '@multiwebgame/game-engines';
+import type { CardsRuntimeState, LiarsDiceRuntimeState } from '@multiwebgame/game-engines';
 import type {
   BackgammonState,
   Connect4State,
@@ -79,6 +79,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'hex';
       state: HexState;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'liars_dice';
+      state: LiarsDiceRuntimeState | null;
       players: {
         black: string;
         white: string;
@@ -333,6 +341,32 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           winner: runtime.state.winner,
           moveCount: runtime.state.moveCount,
           boardSize: runtime.state.boardSize
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'liars_dice') {
+    if (!runtime.state || runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        liars_dice: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          diceCounts: runtime.state.diceCounts,
+          rounds: runtime.state.roundHistory
         }
       }
     };

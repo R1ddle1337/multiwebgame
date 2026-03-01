@@ -5,6 +5,7 @@ import {
   createConnect4State,
   createDotsState,
   createHexState,
+  createLiarsDiceState,
   createGoState,
   createBackgammonState,
   createGomokuState,
@@ -395,6 +396,73 @@ describe('deriveRuntimeCompletion', () => {
           winner: 'white',
           moveCount: 74,
           boardSize: 11
+        }
+      }
+    });
+  });
+
+  it('maps liars_dice completion to winner and payload', () => {
+    const liarsDiceState = {
+      ...createLiarsDiceState({
+        dicePerPlayer: 5,
+        rollDie: () => 1
+      }),
+      status: 'completed' as const,
+      winner: 'black' as const,
+      moveCount: 18,
+      diceCounts: {
+        black: 1,
+        white: 0
+      },
+      roundHistory: [
+        {
+          round: 1,
+          starter: 'black' as const,
+          bids: [
+            {
+              quantity: 3,
+              face: 2,
+              player: 'black' as const
+            }
+          ],
+          caller: 'white' as const,
+          calledBid: {
+            quantity: 3,
+            face: 2,
+            player: 'black' as const
+          },
+          totalMatching: 2,
+          wasLiar: true,
+          loser: 'black' as const,
+          dice: {
+            black: [1, 2, 3, 4, 5],
+            white: [1, 1, 1, 2, 2]
+          }
+        }
+      ]
+    };
+
+    const liarsCompletion = deriveRuntimeCompletion({
+      gameType: 'liars_dice',
+      state: liarsDiceState,
+      players: {
+        black: 'u51',
+        white: 'u52'
+      }
+    });
+
+    expect(liarsCompletion).toEqual({
+      winnerUserId: 'u51',
+      status: 'completed',
+      resultPayload: {
+        liars_dice: {
+          winner: 'black',
+          moveCount: 18,
+          diceCounts: {
+            black: 1,
+            white: 0
+          },
+          rounds: liarsDiceState.roundHistory
         }
       }
     });

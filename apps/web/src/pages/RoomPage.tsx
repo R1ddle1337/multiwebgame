@@ -22,6 +22,8 @@ import type {
   GomokuState,
   HexMove,
   HexState,
+  LiarsDiceMoveInput,
+  LiarsDiceState,
   QuoridorMove,
   QuoridorMoveInput,
   QuoridorState,
@@ -130,6 +132,8 @@ export function RoomPage({ api, user }: Props) {
   const [inviteLinkNotice, setInviteLinkNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [xiangqiSelection, setXiangqiSelection] = useState<{ x: number; y: number } | null>(null);
+  const [liarsBidQuantity, setLiarsBidQuantity] = useState(1);
+  const [liarsBidFace, setLiarsBidFace] = useState(1);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   const gameLabel = (gameType: RoomDTO['gameType']) => t(`enum.game.${gameType}`);
@@ -163,6 +167,8 @@ export function RoomPage({ api, user }: Props) {
       : createHexState({
           boardSize: 11
         });
+  const liarsDiceState =
+    snapshot?.gameType === 'liars_dice' ? (snapshot.state as LiarsDiceState | null) : null;
   const quoridorState =
     snapshot?.gameType === 'quoridor'
       ? (snapshot.state as QuoridorState)
@@ -198,6 +204,11 @@ export function RoomPage({ api, user }: Props) {
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
   const hexTurn =
     hasActiveMatch && room?.gameType === 'hex' && viewerRole === 'player' && hexState.status === 'playing';
+  const liarsDiceTurn =
+    hasActiveMatch &&
+    room?.gameType === 'liars_dice' &&
+    viewerRole === 'player' &&
+    liarsDiceState?.status === 'playing';
   const quoridorTurn =
     hasActiveMatch &&
     room?.gameType === 'quoridor' &&
@@ -235,6 +246,10 @@ export function RoomPage({ api, user }: Props) {
   const canPlayHex =
     hexTurn &&
     ((seat === 1 && hexState.nextPlayer === 'black') || (seat === 2 && hexState.nextPlayer === 'white'));
+  const canPlayLiarsDice =
+    Boolean(liarsDiceTurn) &&
+    ((seat === 1 && liarsDiceState?.nextPlayer === 'black') ||
+      (seat === 2 && liarsDiceState?.nextPlayer === 'white'));
   const canPlayQuoridor =
     quoridorTurn &&
     ((seat === 1 && quoridorState.nextPlayer === 'black') ||
@@ -259,6 +274,7 @@ export function RoomPage({ api, user }: Props) {
     canPlayConnect4 ||
     canPlayGo ||
     canPlayHex ||
+    canPlayLiarsDice ||
     canPlayQuoridor ||
     canPlayReversi ||
     canPlayDots ||
@@ -300,6 +316,10 @@ export function RoomPage({ api, user }: Props) {
       return describeLastMove('hex', snapshot.lastMove as HexMove);
     }
 
+    if (room.gameType === 'liars_dice') {
+      return null;
+    }
+
     if (room.gameType === 'quoridor') {
       return describeLastMove('quoridor', snapshot.lastMove as QuoridorMove);
     }
@@ -338,6 +358,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'hex') {
       return formatResultText(hexState, statusLabel, colorLabel, t);
+    }
+
+    if (room.gameType === 'liars_dice') {
+      return null;
     }
 
     if (room.gameType === 'quoridor') {
@@ -584,6 +608,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'cards',
+        move
+      }
+    });
+  };
+
+  const sendLiarsDiceMove = (move: LiarsDiceMoveInput) => {
+    if (!canPlayLiarsDice) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'liars_dice',
         move
       }
     });
@@ -922,6 +961,126 @@ export function RoomPage({ api, user }: Props) {
                   : t('room.result.draw')}
               </p>
             ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'liars_dice' ? (
+          <>
+            {!liarsDiceState ? (
+              <p>{t('room.liars.waiting_rng')}</p>
+            ) : (
+              <>
+                {hasActiveMatch ? (
+                  <p>
+                    {t('room.next_turn', {
+                      player: colorLabel(liarsDiceState.nextPlayer),
+                      status: statusLabel(liarsDiceState.status)
+                    })}
+                  </p>
+                ) : null}
+                <p>
+                  {t('room.liars.dice_counts', {
+                    black: liarsDiceState.diceCounts.black,
+                    white: liarsDiceState.diceCounts.white
+                  })}
+                </p>
+                {liarsDiceState.viewerDice ? (
+                  <p>{t('room.liars.your_dice', { dice: liarsDiceState.viewerDice.join(', ') })}</p>
+                ) : (
+                  <p>{t('room.liars.hidden_dice')}</p>
+                )}
+                {liarsDiceState.currentBid ? (
+                  <p>
+                    {t('room.liars.current_bid', {
+                      quantity: liarsDiceState.currentBid.quantity,
+                      face: liarsDiceState.currentBid.face
+                    })}
+                  </p>
+                ) : (
+                  <p>{t('room.liars.no_bid')}</p>
+                )}
+                <p>
+                  {t('room.liars.bid_history', {
+                    chain:
+                      liarsDiceState.bidHistory.length > 0
+                        ? liarsDiceState.bidHistory
+                            .map((bid) => `${colorLabel(bid.player)}:${bid.quantity}x${bid.face}`)
+                            .join(' -> ')
+                        : '—'
+                  })}
+                </p>
+                {liarsDiceState.lastRound ? (
+                  <p>
+                    {t('room.liars.last_round', {
+                      quantity: liarsDiceState.lastRound.calledBid.quantity,
+                      face: liarsDiceState.lastRound.calledBid.face,
+                      total: liarsDiceState.lastRound.totalMatching,
+                      loser: colorLabel(liarsDiceState.lastRound.loser)
+                    })}
+                  </p>
+                ) : null}
+                <div className="button-row">
+                  <label>
+                    {t('room.liars.bid_input')}{' '}
+                    <input
+                      type="number"
+                      min={1}
+                      value={liarsBidQuantity}
+                      onChange={(event) => setLiarsBidQuantity(Math.max(1, Number(event.target.value) || 1))}
+                      disabled={!canPlayLiarsDice}
+                    />
+                  </label>
+                  <label>
+                    {t('room.liars.face')}{' '}
+                    <input
+                      type="number"
+                      min={1}
+                      max={6}
+                      value={liarsBidFace}
+                      onChange={(event) => {
+                        const next = Number(event.target.value) || 1;
+                        setLiarsBidFace(Math.max(1, Math.min(6, next)));
+                      }}
+                      disabled={!canPlayLiarsDice}
+                    />
+                  </label>
+                </div>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      sendLiarsDiceMove({
+                        type: 'bid',
+                        quantity: liarsBidQuantity,
+                        face: liarsBidFace
+                      })
+                    }
+                    disabled={!canPlayLiarsDice}
+                  >
+                    {t('room.liars.bid_submit')}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() =>
+                      sendLiarsDiceMove({
+                        type: 'call_liar'
+                      })
+                    }
+                    disabled={!canPlayLiarsDice || !liarsDiceState.currentBid}
+                  >
+                    {t('room.liars.call_liar')}
+                  </button>
+                </div>
+                {liarsDiceState.status === 'completed' ? (
+                  <p>
+                    {liarsDiceState.winner
+                      ? t('room.result.winner', { winner: colorLabel(liarsDiceState.winner) })
+                      : t('room.result.draw')}
+                  </p>
+                ) : null}
+              </>
+            )}
           </>
         ) : null}
 

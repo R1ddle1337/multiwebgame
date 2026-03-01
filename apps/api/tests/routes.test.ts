@@ -78,7 +78,8 @@ class InMemoryStore implements Store {
       backgammon: 1200,
       cards: 1200,
       quoridor: 1200,
-      hex: 1200
+      hex: 1200,
+      liars_dice: 1200
     };
   }
 
@@ -190,7 +191,8 @@ class InMemoryStore implements Store {
         'backgammon',
         'cards',
         'quoridor',
-        'hex'
+        'hex',
+        'liars_dice'
       ] as const
     ).map((gameType) => ({
       gameType,
