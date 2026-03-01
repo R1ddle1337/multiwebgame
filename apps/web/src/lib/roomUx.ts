@@ -2,6 +2,7 @@ import type {
   BattleshipMove,
   CodenamesDuetMove,
   Connect4Move,
+  DominationMove,
   DotsMove,
   GoMove,
   GomokuMove,
@@ -97,6 +98,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'domination',
+  move: DominationMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'love_letter',
   move: LoveLetterMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -144,6 +150,7 @@ export function describeLastMove(
     | 'onitama'
     | 'battleship'
     | 'yahtzee'
+    | 'domination'
     | 'love_letter'
     | 'codenames_duet'
     | 'go'
@@ -159,6 +166,7 @@ export function describeLastMove(
     | OnitamaMove
     | BattleshipMove
     | YahtzeeMove
+    | DominationMove
     | LoveLetterMove
     | CodenamesDuetMove
     | GoMove
@@ -271,6 +279,17 @@ export function describeLastMove(
         kind: 'move',
         from: 'score',
         to: yahtzeeMove.category
+      }
+    };
+  }
+
+  if (gameType === 'domination') {
+    const dominationMove = move as DominationMove;
+    return {
+      actor: dominationMove.player,
+      action: {
+        kind: 'place',
+        point: formatBoardPoint(dominationMove.x, dominationMove.y)
       }
     };
   }

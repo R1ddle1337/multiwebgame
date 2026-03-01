@@ -5,6 +5,7 @@ export type GameType =
   | 'onitama'
   | 'battleship'
   | 'yahtzee'
+  | 'domination'
   | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
@@ -23,6 +24,7 @@ export type BoardGameType =
   | 'onitama'
   | 'battleship'
   | 'yahtzee'
+  | 'domination'
   | 'love_letter'
   | 'codenames_duet'
   | 'xiangqi'
@@ -540,6 +542,40 @@ export interface YahtzeeState {
   };
 }
 
+export type DominationPlayer = 'black' | 'white';
+
+export interface DominationMoveInput {
+  x: number;
+  y: number;
+}
+
+export interface DominationMove {
+  x: number;
+  y: number;
+  player: DominationPlayer;
+}
+
+export interface DominationState {
+  boardSize: number;
+  board: (DominationPlayer | null)[][];
+  nextPlayer: DominationPlayer;
+  status: 'playing' | 'completed';
+  winner: DominationPlayer | null;
+  moveCount: number;
+  pieceCounts: {
+    black: number;
+    white: number;
+  };
+  controlCounts: {
+    black: number;
+    white: number;
+  };
+  scores: {
+    black: number;
+    white: number;
+  };
+}
+
 export type Connect4Disc = 'red' | 'yellow';
 
 export interface Connect4Move {
@@ -983,6 +1019,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'domination';
+      state: DominationState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'codenames_duet';
       state: CodenamesDuetState | null;
       viewerRole: RoomPlayerRole;
@@ -1093,6 +1135,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'domination';
+      state: DominationState;
+      lastMove: DominationMove;
+    }
+  | {
+      roomId: string;
       gameType: 'codenames_duet';
       state: CodenamesDuetState;
       lastMove: CodenamesDuetMove;
@@ -1176,6 +1224,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.move', { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'battleship'; move: BattleshipMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'yahtzee'; move: YahtzeeMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'domination'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>

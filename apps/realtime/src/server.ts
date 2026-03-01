@@ -4,6 +4,7 @@ import {
   applyYahtzeeMove,
   applyCardsMove,
   applyCodenamesDuetMove,
+  applyDominationMove,
   applyConnect4Move,
   applyDotsMove,
   applyHexMove,
@@ -28,6 +29,7 @@ import {
   createConnect4State,
   createDeterministicPrng,
   createDotsState,
+  createDominationState,
   createHexState,
   createLiarsDiceState,
   createLoveLetterDeck,
@@ -44,6 +46,7 @@ import {
   formatXiangqiMoveNotation,
   normalizeOnitamaMove,
   normalizeBattleshipMove,
+  normalizeDominationMove,
   normalizeYahtzeeMove,
   normalizeLoveLetterMove,
   normalizeCodenamesDuetMove,
@@ -55,6 +58,7 @@ import {
   toLiarsDicePublicState,
   type CardsRuntimeState,
   type BattleshipRuntimeState,
+  type DominationRuntimeState,
   type YahtzeeRuntimeState,
   type CodenamesDuetRuntimeState,
   type LoveLetterRuntimeState,
@@ -81,6 +85,7 @@ import type {
   CodenamesDuetMoveInput,
   CodenamesDuetPlayer,
   CodenamesDuetState,
+  DominationPlayer,
   ClientToServerMessage,
   Connect4Move,
   Connect4State,
@@ -230,6 +235,18 @@ interface YahtzeeRuntime {
   state: YahtzeeRuntimeState;
   rngSession: VerifiableRngSession;
   rngPrng: DeterministicPrng | null;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface DominationRuntime {
+  gameType: 'domination';
+  roomId: string;
+  matchId: string;
+  state: DominationRuntimeState;
+  rngSession?: VerifiableRngSession;
   players: {
     black: string;
     white: string;
@@ -396,6 +413,7 @@ type ActiveRuntime =
   | OnitamaRuntime
   | BattleshipRuntime
   | YahtzeeRuntime
+  | DominationRuntime
   | Connect4Runtime
   | GoRuntime
   | ReversiRuntime
@@ -579,6 +597,15 @@ const roomMoveSchema = z.union([
     type: z.literal('room.move'),
     payload: z.object({
       roomId: z.string().uuid(),
+      gameType: z.literal('domination'),
+      x: z.number().int().min(0),
+      y: z.number().int().min(0)
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
       gameType: z.literal('love_letter'),
       move: z.object({
         type: z.literal('play'),
@@ -756,6 +783,7 @@ const matchmakingJoinSchema = z.object({
       'onitama',
       'battleship',
       'yahtzee',
+      'domination',
       'love_letter',
       'codenames_duet',
       'go',
@@ -802,6 +830,7 @@ function playerSlotsForGame(gameType: BoardGameType): number {
     gameType === 'onitama' ||
     gameType === 'battleship' ||
     gameType === 'yahtzee' ||
+    gameType === 'domination' ||
     gameType === 'love_letter' ||
     gameType === 'codenames_duet' ||
     gameType === 'go' ||
@@ -953,6 +982,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
     runtime.gameType === 'onitama' ||
     runtime.gameType === 'battleship' ||
     runtime.gameType === 'yahtzee' ||
+    runtime.gameType === 'domination' ||
     runtime.gameType === 'gomoku' ||
     runtime.gameType === 'santorini' ||
     runtime.gameType === 'go' ||
@@ -1782,6 +1812,21 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
         playerTwoUserId: players.second
       }),
       rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
+  if (room.gameType === 'domination') {
+    return {
+      gameType: 'domination',
+      roomId: room.id,
+      matchId,
+      state: createDominationState({
+        boardSize: 9
+      }),
       players: {
         black: players.first,
         white: players.second
@@ -2668,6 +2713,41 @@ function replayMoves(
       continue;
     }
 
+    if (current.gameType === 'domination') {
+      const payload = move.payload as {
+        x?: number;
+        y?: number;
+        player?: DominationPlayer;
+        move?: { x?: number; y?: number; player?: DominationPlayer };
+      };
+      const source =
+        payload && typeof payload.move === 'object' && payload.move !== null
+          ? (payload.move as { x?: number; y?: number; player?: DominationPlayer })
+          : payload;
+      if (typeof source.x !== 'number' || typeof source.y !== 'number') {
+        continue;
+      }
+
+      const player = source.player ?? current.state.nextPlayer;
+      const normalizedMove = normalizeDominationMove(
+        {
+          x: source.x,
+          y: source.y
+        },
+        player
+      );
+      const applied = applyDominationMove(current.state, normalizedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
     if (current.gameType === 'santorini') {
       const parsedMove = readSantoriniMovePayload(move.payload);
       if (!parsedMove) {
@@ -3223,6 +3303,24 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
     return;
   }
 
+  if (room.gameType === 'domination') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'domination',
+        state:
+          runtime?.gameType === 'domination'
+            ? runtime.state
+            : createDominationState({
+                boardSize: 9
+              }),
+        viewerRole
+      }
+    });
+    return;
+  }
+
   if (room.gameType === 'go') {
     send(client, {
       type: 'room.state',
@@ -3427,6 +3525,61 @@ async function handleGomokuMove(
         y,
         player: playerMark
       }
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleDominationMove(
+  client: ClientContext,
+  runtime: DominationRuntime,
+  x: number,
+  y: number
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: DominationPlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove = normalizeDominationMove(
+    {
+      x,
+      y
+    },
+    player
+  );
+  const applied = applyDominationMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'domination.place_stone',
+    payload: {
+      move: normalizedMove
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'domination',
+      state: runtime.state,
+      lastMove: normalizedMove
     }
   });
 
@@ -4521,6 +4674,7 @@ async function handleMove(
     | { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
+    | { roomId: string; gameType: 'domination'; x: number; y: number }
     | { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }
     | { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }
     | { roomId: string; gameType: 'connect4'; column: number }
@@ -4594,6 +4748,11 @@ async function handleMove(
 
   if (message.gameType === 'gomoku' && runtime.gameType === 'gomoku') {
     await handleGomokuMove(client, runtime, message.x, message.y);
+    return;
+  }
+
+  if (message.gameType === 'domination' && runtime.gameType === 'domination') {
+    await handleDominationMove(client, runtime, message.x, message.y);
     return;
   }
 
@@ -4931,6 +5090,16 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'gomoku',
+            x: msg.payload.x,
+            y: msg.payload.y
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'domination') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'domination',
             x: msg.payload.x,
             y: msg.payload.y
           });

@@ -2,6 +2,7 @@ import {
   createBattleshipState,
   createConnect4State,
   createDotsState,
+  createDominationState,
   createHexState,
   createGoState,
   createGomokuState,
@@ -29,6 +30,8 @@ import type {
   CodenamesDuetState,
   Connect4Move,
   Connect4State,
+  DominationMove,
+  DominationState,
   DotsMove,
   DotsState,
   GoMove,
@@ -95,6 +98,7 @@ function formatResultText(
     | Connect4State
     | DotsState
     | GomokuState
+    | DominationState
     | GoState
     | HexState
     | LoveLetterState
@@ -244,6 +248,8 @@ export function RoomPage({ api, user }: Props) {
   const [battleshipShotY, setBattleshipShotY] = useState(0);
   const [yahtzeeHold, setYahtzeeHold] = useState<boolean[]>(DEFAULT_YAHTZEE_HOLD);
   const [yahtzeeCategory, setYahtzeeCategory] = useState<YahtzeeCategory>('chance');
+  const [dominationX, setDominationX] = useState(0);
+  const [dominationY, setDominationY] = useState(0);
   const [codenamesClueWord, setCodenamesClueWord] = useState('ocean');
   const [codenamesClueCount, setCodenamesClueCount] = useState(1);
   const [codenamesGuessIndex, setCodenamesGuessIndex] = useState(0);
@@ -302,6 +308,12 @@ export function RoomPage({ api, user }: Props) {
     snapshot?.gameType === 'battleship' ? (snapshot.state as BattleshipState) : defaultBattleshipState;
   const yahtzeeState =
     snapshot?.gameType === 'yahtzee' ? (snapshot.state as YahtzeeState) : createYahtzeeState();
+  const dominationState =
+    snapshot?.gameType === 'domination'
+      ? (snapshot.state as DominationState)
+      : createDominationState({
+          boardSize: 9
+        });
   const codenamesState =
     snapshot?.gameType === 'codenames_duet' ? (snapshot.state as CodenamesDuetState | null) : null;
   const connect4State =
@@ -368,6 +380,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'yahtzee' &&
     viewerRole === 'player' &&
     yahtzeeState.status === 'playing';
+  const dominationTurn =
+    hasActiveMatch &&
+    room?.gameType === 'domination' &&
+    viewerRole === 'player' &&
+    dominationState.status === 'playing';
   const codenamesTurn =
     hasActiveMatch &&
     room?.gameType === 'codenames_duet' &&
@@ -434,6 +451,10 @@ export function RoomPage({ api, user }: Props) {
     yahtzeeTurn &&
     ((seat === 1 && yahtzeeState.nextPlayer === 'black') ||
       (seat === 2 && yahtzeeState.nextPlayer === 'white'));
+  const canPlayDomination =
+    dominationTurn &&
+    ((seat === 1 && dominationState.nextPlayer === 'black') ||
+      (seat === 2 && dominationState.nextPlayer === 'white'));
   const codenamesSide = seat === 1 ? 'black' : seat === 2 ? 'white' : null;
   const canPlayCodenames =
     Boolean(codenamesTurn) &&
@@ -480,6 +501,7 @@ export function RoomPage({ api, user }: Props) {
     canPlayOnitama ||
     canPlayBattleship ||
     canPlayYahtzee ||
+    canPlayDomination ||
     canPlayCodenames ||
     canPlayConnect4 ||
     canPlayGo ||
@@ -521,6 +543,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'gomoku') {
       return describeLastMove('gomoku', snapshot.lastMove as GomokuMove);
+    }
+
+    if (room.gameType === 'domination') {
+      return describeLastMove('domination', snapshot.lastMove as DominationMove);
     }
 
     if (room.gameType === 'connect4') {
@@ -589,6 +615,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'gomoku') {
       return formatResultText(gomokuState, statusLabel, colorLabel, t);
+    }
+
+    if (room.gameType === 'domination') {
+      return formatResultText(dominationState, statusLabel, colorLabel, t);
     }
 
     if (room.gameType === 'connect4') {
@@ -670,6 +700,7 @@ export function RoomPage({ api, user }: Props) {
     room,
     latestMoveSummary,
     gomokuState,
+    dominationState,
     santoriniState,
     onitamaState,
     battleshipState,
@@ -794,6 +825,22 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'gomoku',
+        x,
+        y
+      }
+    });
+  };
+
+  const sendDominationMove = (x: number, y: number) => {
+    if (!canPlayDomination) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'domination',
         x,
         y
       }
@@ -1274,6 +1321,100 @@ export function RoomPage({ api, user }: Props) {
               <p>
                 {gomokuState.winner
                   ? t('room.result.winner', { winner: colorLabel(gomokuState.winner) })
+                  : t('room.result.draw')}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'domination' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(dominationState.nextPlayer),
+                  status: statusLabel(dominationState.status)
+                })}
+              </p>
+            ) : null}
+            <p>
+              {t('room.domination.scores', {
+                black: dominationState.scores.black,
+                white: dominationState.scores.white
+              })}
+            </p>
+            <p>
+              {t('room.domination.pieces', {
+                black: dominationState.pieceCounts.black,
+                white: dominationState.pieceCounts.white
+              })}
+            </p>
+            <p>
+              {t('room.domination.controls', {
+                black: dominationState.controlCounts.black,
+                white: dominationState.controlCounts.white
+              })}
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${dominationState.boardSize}, minmax(1.9rem, 1fr))`,
+                gap: '0.2rem',
+                maxWidth: '28rem'
+              }}
+            >
+              {dominationState.board.flatMap((row, y) =>
+                row.map((cell, x) => (
+                  <button
+                    key={`domination-${x}-${y}`}
+                    type="button"
+                    className="secondary"
+                    disabled={!canPlayDomination || cell !== null || dominationState.status !== 'playing'}
+                    onClick={() => sendDominationMove(x, y)}
+                    style={{ minHeight: '1.9rem', padding: '0.1rem' }}
+                  >
+                    {cell === 'black' ? 'B' : cell === 'white' ? 'W' : '·'}
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="button-row">
+              <label>
+                X{' '}
+                <input
+                  type="number"
+                  min={0}
+                  max={dominationState.boardSize - 1}
+                  value={dominationX}
+                  onChange={(event) => setDominationX(Math.max(0, Number(event.target.value) || 0))}
+                  disabled={!canPlayDomination || dominationState.status !== 'playing'}
+                />
+              </label>
+              <label>
+                Y{' '}
+                <input
+                  type="number"
+                  min={0}
+                  max={dominationState.boardSize - 1}
+                  value={dominationY}
+                  onChange={(event) => setDominationY(Math.max(0, Number(event.target.value) || 0))}
+                  disabled={!canPlayDomination || dominationState.status !== 'playing'}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => sendDominationMove(dominationX, dominationY)}
+                disabled={!canPlayDomination || dominationState.status !== 'playing'}
+              >
+                {t('room.last_move.action.place', {
+                  point: `${dominationX + 1},${dominationY + 1}`
+                })}
+              </button>
+            </div>
+            {dominationState.status === 'completed' ? (
+              <p>
+                {dominationState.winner
+                  ? t('room.result.winner', { winner: colorLabel(dominationState.winner) })
                   : t('room.result.draw')}
               </p>
             ) : null}

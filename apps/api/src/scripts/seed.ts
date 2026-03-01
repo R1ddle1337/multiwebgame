@@ -40,6 +40,7 @@ async function run(): Promise<void> {
           'onitama',
           'battleship',
           'yahtzee',
+          'domination',
           'love_letter',
           'codenames_duet',
           'xiangqi',

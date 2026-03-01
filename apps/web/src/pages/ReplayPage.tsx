@@ -4,6 +4,7 @@ import {
   applyYahtzeeMove,
   applyCardsMove,
   applyCodenamesDuetMove,
+  applyDominationMove,
   applyConnect4Move,
   applyDotsMove,
   applyHexMove,
@@ -26,6 +27,7 @@ import {
   createCodenamesDuetWordPool,
   createConnect4State,
   createDotsState,
+  createDominationState,
   createHexState,
   createLiarsDiceState,
   createLoveLetterDeck,
@@ -42,6 +44,7 @@ import {
   type BattleshipRuntimeState,
   createDeterministicPrng,
   formatXiangqiMoveNotation,
+  normalizeDominationMove,
   type CodenamesDuetRuntimeState,
   type LoveLetterRuntimeState,
   type LiarsDiceRuntimeState,
@@ -54,6 +57,8 @@ import type {
   CodenamesDuetMove,
   Connect4Move,
   Connect4State,
+  DominationMove,
+  DominationState,
   DotsMove,
   DotsState,
   Direction2048,
@@ -683,6 +688,11 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const { matchId = '' } = useParams();
   const [gameType, setGameType] = useState<GameType>('gomoku');
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
+  const [dominationStates, setDominationStates] = useState<DominationState[]>([
+    createDominationState({
+      boardSize: 9
+    })
+  ]);
   const [santoriniStates, setSantoriniStates] = useState<SantoriniState[]>([
     createSantoriniState({ boardSize: 5 })
   ]);
@@ -780,6 +790,41 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setGomokuStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'domination') {
+          let current = createDominationState({
+            boardSize: 9
+          });
+          const snapshots: DominationState[] = [current];
+
+          for (const move of result.match.moves) {
+            const payload = move.payload as { x?: number; y?: number; player?: DominationMove['player'] };
+            if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
+              continue;
+            }
+
+            const normalizedMove = normalizeDominationMove(
+              {
+                x: payload.x,
+                y: payload.y
+              },
+              payload.player ?? current.nextPlayer
+            );
+            const applied = applyDominationMove(current, normalizedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setDominationStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -1432,6 +1477,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'gomoku') {
       return Math.max(0, gomokuStates.length - 1);
     }
+    if (gameType === 'domination') {
+      return Math.max(0, dominationStates.length - 1);
+    }
     if (gameType === 'santorini') {
       return Math.max(0, santoriniStates.length - 1);
     }
@@ -1486,6 +1534,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     goStates.length,
     hexStates.length,
     gomokuStates.length,
+    dominationStates.length,
     santoriniStates.length,
     onitamaStates.length,
     battleshipStates.length,
@@ -1584,6 +1633,54 @@ export function ReplayPage({ api, viewerUserId }: Props) {
       />
 
       {gameType === 'gomoku' ? <GomokuBoard state={gomokuStates[clampedStep]} disabled /> : null}
+      {gameType === 'domination' ? (
+        <>
+          <p>
+            {t('room.domination.scores', {
+              black: dominationStates[clampedStep].scores.black,
+              white: dominationStates[clampedStep].scores.white
+            })}
+          </p>
+          <p>
+            {t('room.domination.pieces', {
+              black: dominationStates[clampedStep].pieceCounts.black,
+              white: dominationStates[clampedStep].pieceCounts.white
+            })}
+          </p>
+          <p>
+            {t('room.domination.controls', {
+              black: dominationStates[clampedStep].controlCounts.black,
+              white: dominationStates[clampedStep].controlCounts.white
+            })}
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: `repeat(${dominationStates[clampedStep].boardSize}, minmax(1.8rem, 1fr))`,
+              gap: '0.2rem',
+              maxWidth: '28rem'
+            }}
+          >
+            {dominationStates[clampedStep].board.flatMap((row, y) =>
+              row.map((cell, x) => (
+                <div
+                  key={`domination-replay-${x}-${y}`}
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: '6px',
+                    textAlign: 'center',
+                    minHeight: '1.9rem',
+                    lineHeight: '1.9rem',
+                    fontSize: '0.8rem'
+                  }}
+                >
+                  {cell === 'black' ? 'B' : cell === 'white' ? 'W' : '·'}
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      ) : null}
       {gameType === 'santorini' ? (
         <div
           style={{

@@ -34,6 +34,7 @@ const createRoomSchema = z.object({
     'onitama',
     'battleship',
     'yahtzee',
+    'domination',
     'love_letter',
     'codenames_duet',
     'xiangqi',

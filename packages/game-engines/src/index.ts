@@ -14,6 +14,12 @@ export {
   type CardsRuntimeState
 } from './cards.js';
 export { applyConnect4Move, createConnect4State } from './connect4.js';
+export {
+  applyDominationMove,
+  createDominationState,
+  normalizeDominationMove,
+  type DominationRuntimeState
+} from './domination.js';
 export { applyDotsMove, createDotsState } from './dots.js';
 export { applyGoMove, calculateGoScore, createGoState } from './go.js';
 export { applyGomokuMove, createGomokuState } from './gomoku.js';

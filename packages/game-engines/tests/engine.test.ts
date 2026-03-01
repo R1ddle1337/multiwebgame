@@ -7,6 +7,7 @@ import {
   applyCardsMove,
   applyConnect4Move,
   applyCodenamesDuetMove,
+  applyDominationMove,
   applyDotsMove,
   applyHexMove,
   applyLiarsDiceMove,
@@ -31,6 +32,7 @@ import {
   createCodenamesDuetState,
   createCodenamesDuetWordPool,
   createDotsState,
+  createDominationState,
   createHexState,
   createLiarsDiceState,
   createLoveLetterDeck,
@@ -749,6 +751,79 @@ describe('yahtzee engine', () => {
     expect(whiteFinal.nextState.status).toBe('completed');
     expect(whiteFinal.nextState.winner).toBe('black');
     expect(whiteFinal.nextState.completedCategories.white).toBe(13);
+  });
+});
+
+describe('domination engine', () => {
+  it('counts orthogonal control toward score', () => {
+    const state = createDominationState({
+      boardSize: 3
+    });
+
+    const applied = applyDominationMove(state, {
+      x: 1,
+      y: 1,
+      player: 'black'
+    });
+
+    expect(applied.accepted).toBe(true);
+    expect(applied.nextState.pieceCounts.black).toBe(1);
+    expect(applied.nextState.controlCounts.black).toBe(4);
+    expect(applied.nextState.scores.black).toBe(5);
+  });
+
+  it('rejects moves on occupied cells', () => {
+    let state = createDominationState({
+      boardSize: 3
+    });
+
+    const first = applyDominationMove(state, {
+      x: 0,
+      y: 0,
+      player: 'black'
+    });
+    expect(first.accepted).toBe(true);
+    state = first.nextState;
+
+    const second = applyDominationMove(state, {
+      x: 0,
+      y: 0,
+      player: 'white'
+    });
+    expect(second.accepted).toBe(false);
+    expect(second.reason).toBe('occupied_cell');
+  });
+
+  it('completes on full board and awards higher score winner', () => {
+    let state = createDominationState({
+      boardSize: 3
+    });
+
+    const sequence = [
+      { x: 0, y: 0, player: 'black' as const },
+      { x: 1, y: 0, player: 'white' as const },
+      { x: 2, y: 0, player: 'black' as const },
+      { x: 0, y: 1, player: 'white' as const },
+      { x: 1, y: 1, player: 'black' as const },
+      { x: 2, y: 1, player: 'white' as const },
+      { x: 0, y: 2, player: 'black' as const },
+      { x: 1, y: 2, player: 'white' as const },
+      { x: 2, y: 2, player: 'black' as const }
+    ];
+
+    for (const move of sequence) {
+      const next = applyDominationMove(state, move);
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    expect(state.status).toBe('completed');
+    expect(state.winner).toBe('black');
+    expect(state.moveCount).toBe(9);
+    expect(state.pieceCounts).toEqual({
+      black: 5,
+      white: 4
+    });
   });
 });
 

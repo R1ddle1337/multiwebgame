@@ -57,7 +57,7 @@ Auth uses `Authorization: Bearer <jwt>`.
 
 - `POST /rooms`
   - Auth required
-  - Body: `{ "gameType": "single_2048" | "gomoku" | "santorini" | "onitama" | "battleship" | "yahtzee" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number }`
+  - Body: `{ "gameType": "single_2048" | "gomoku" | "santorini" | "onitama" | "battleship" | "yahtzee" | "domination" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number }`
   - Returns: `{ room }`
 
 - `GET /rooms/:roomId`
@@ -137,6 +137,7 @@ Auth uses `Authorization: Bearer <jwt>`.
     - Onitama: winner/moveCount/opening cards + RNG proof transcript (`serverSeed`, commits/nonces, `rngSeed`).
     - Battleship: winner/moveCount + sunk-ship summary.
     - Yahtzee: winner/moveCount/turnCount + final totals/category-completion summary and RNG proof transcript.
+    - Domination: winner/moveCount + final piece/control/score breakdown.
     - Love Letter: winner/moveCount/turnCount + elimination/hand-count summary and RNG proof transcript.
     - Codenames Duet: cooperative outcome (`success`/`assassin`/`out_of_turns`) + target progress and RNG proof transcript.
 

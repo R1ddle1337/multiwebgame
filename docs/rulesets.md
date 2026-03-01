@@ -109,6 +109,23 @@ Randomness + verification:
 - gameplay is blocked until RNG phase is `ready`
 - completed payload includes totals/category completion and RNG proof transcript for replay verification
 
+## Domination (2-player, 9x9)
+
+Implemented rules:
+
+- default board `9x9`
+- players alternate placing one stone on an empty cell (`black` first)
+- score is recomputed after every move:
+  - `pieceCounts`: number of placed stones per side
+  - `controlCounts`: for each empty cell, count orthogonal adjacent stones; side with strictly higher adjacent count controls that cell
+  - `scores = pieceCounts + controlCounts`
+- legality:
+  - out-of-bounds and occupied-cell placements are rejected
+  - turn order is enforced
+- terminal:
+  - board full => match completed
+  - higher final score wins, tie allowed
+
 ## Codenames Duet (2-player co-op, 5x5)
 
 Implemented rules (v1 simplified co-op loop):

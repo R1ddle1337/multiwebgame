@@ -7,6 +7,7 @@ import {
   createCodenamesDuetState,
   createCodenamesDuetWordPool,
   createConnect4State,
+  createDominationState,
   createDotsState,
   createHexState,
   createLiarsDiceState,
@@ -156,6 +157,59 @@ describe('deriveRuntimeCompletion', () => {
           completedCategories: {
             black: 13,
             white: 13
+          }
+        }
+      }
+    });
+  });
+
+  it('maps domination completion to winner and payload', () => {
+    const state = createDominationState({
+      boardSize: 9
+    });
+    state.status = 'completed';
+    state.winner = 'white';
+    state.moveCount = 81;
+    state.pieceCounts = {
+      black: 40,
+      white: 41
+    };
+    state.controlCounts = {
+      black: 10,
+      white: 12
+    };
+    state.scores = {
+      black: 50,
+      white: 53
+    };
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'domination',
+      state,
+      players: {
+        black: 'u91',
+        white: 'u92'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u92',
+      status: 'completed',
+      resultPayload: {
+        domination: {
+          winner: 'white',
+          moveCount: 81,
+          pieceCounts: {
+            black: 40,
+            white: 41
+          },
+          controlCounts: {
+            black: 10,
+            white: 12
+          },
+          scores: {
+            black: 50,
+            white: 53
           }
         }
       }

@@ -21,6 +21,7 @@ const ALL_GAME_TYPES: GameType[] = [
   'onitama',
   'battleship',
   'yahtzee',
+  'domination',
   'love_letter',
   'codenames_duet',
   'xiangqi',
@@ -42,6 +43,7 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   onitama: 24,
   battleship: 24,
   yahtzee: 24,
+  domination: 24,
   love_letter: 24,
   codenames_duet: 24,
   xiangqi: 24,
@@ -68,6 +70,7 @@ function createDefaultRatings(): RatingMap {
     onitama: INITIAL_RATING,
     battleship: INITIAL_RATING,
     yahtzee: INITIAL_RATING,
+    domination: INITIAL_RATING,
     love_letter: INITIAL_RATING,
     codenames_duet: INITIAL_RATING,
     xiangqi: INITIAL_RATING,
@@ -554,6 +557,7 @@ export async function createMatchmakingRoom(
     | 'onitama'
     | 'battleship'
     | 'yahtzee'
+    | 'domination'
     | 'love_letter'
     | 'codenames_duet'
     | 'xiangqi'

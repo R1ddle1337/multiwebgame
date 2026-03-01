@@ -2,6 +2,7 @@ import type {
   BattleshipRuntimeState,
   CardsRuntimeState,
   CodenamesDuetRuntimeState,
+  DominationRuntimeState,
   LoveLetterRuntimeState,
   LiarsDiceRuntimeState,
   YahtzeeRuntimeState
@@ -40,6 +41,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'yahtzee';
       state: YahtzeeRuntimeState;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'domination';
+      state: DominationRuntimeState;
       players: {
         black: string;
         white: string;
@@ -243,6 +252,33 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           turnCount: runtime.state.turnCount,
           totals: runtime.state.totals,
           completedCategories: runtime.state.completedCategories
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'domination') {
+    if (runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        domination: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          pieceCounts: runtime.state.pieceCounts,
+          controlCounts: runtime.state.controlCounts,
+          scores: runtime.state.scores
         }
       }
     };
