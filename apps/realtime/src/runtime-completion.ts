@@ -3,6 +3,7 @@ import type {
   BackgammonState,
   Connect4State,
   DotsState,
+  HexState,
   GoState,
   GomokuState,
   QuoridorState,
@@ -70,6 +71,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'quoridor';
       state: QuoridorState;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'hex';
+      state: HexState;
       players: {
         black: string;
         white: string;
@@ -299,6 +308,31 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           moveCount: runtime.state.moveCount,
           boardSize: runtime.state.boardSize,
           remainingWalls: runtime.state.remainingWalls
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'hex') {
+    if (runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        hex: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          boardSize: runtime.state.boardSize
         }
       }
     };

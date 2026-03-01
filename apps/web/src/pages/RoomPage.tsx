@@ -1,6 +1,7 @@
 import {
   createConnect4State,
   createDotsState,
+  createHexState,
   createGoState,
   createGomokuState,
   createQuoridorState,
@@ -19,6 +20,8 @@ import type {
   GoState,
   GomokuMove,
   GomokuState,
+  HexMove,
+  HexState,
   QuoridorMove,
   QuoridorMoveInput,
   QuoridorState,
@@ -37,6 +40,7 @@ import { Connect4Board } from '../components/Connect4Board';
 import { DotsBoard } from '../components/DotsBoard';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
+import { HexBoard } from '../components/HexBoard';
 import { QuoridorBoard } from '../components/QuoridorBoard';
 import { ReversiBoard } from '../components/ReversiBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
@@ -59,7 +63,15 @@ function playerSeat(room: RoomDTO | null, userId: string): number | null {
 }
 
 function formatResultText(
-  state: Connect4State | DotsState | GomokuState | GoState | QuoridorState | ReversiState | XiangqiState,
+  state:
+    | Connect4State
+    | DotsState
+    | GomokuState
+    | GoState
+    | HexState
+    | QuoridorState
+    | ReversiState
+    | XiangqiState,
   statusLabel: (status: 'open' | 'in_match' | 'closed' | 'playing' | 'completed' | 'draw') => string,
   colorLabel: (color: 'black' | 'white' | 'red' | 'yellow') => string,
   t: (key: string, vars?: Record<string, string | number>) => string
@@ -145,6 +157,12 @@ export function RoomPage({ api, user }: Props) {
   const connect4State =
     snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
   const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
+  const hexState =
+    snapshot?.gameType === 'hex'
+      ? (snapshot.state as HexState)
+      : createHexState({
+          boardSize: 11
+        });
   const quoridorState =
     snapshot?.gameType === 'quoridor'
       ? (snapshot.state as QuoridorState)
@@ -178,6 +196,8 @@ export function RoomPage({ api, user }: Props) {
     connect4State.status === 'playing';
   const goTurn =
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
+  const hexTurn =
+    hasActiveMatch && room?.gameType === 'hex' && viewerRole === 'player' && hexState.status === 'playing';
   const quoridorTurn =
     hasActiveMatch &&
     room?.gameType === 'quoridor' &&
@@ -212,6 +232,9 @@ export function RoomPage({ api, user }: Props) {
   const canPlayGo =
     goTurn &&
     ((seat === 1 && goState.nextPlayer === 'black') || (seat === 2 && goState.nextPlayer === 'white'));
+  const canPlayHex =
+    hexTurn &&
+    ((seat === 1 && hexState.nextPlayer === 'black') || (seat === 2 && hexState.nextPlayer === 'white'));
   const canPlayQuoridor =
     quoridorTurn &&
     ((seat === 1 && quoridorState.nextPlayer === 'black') ||
@@ -235,6 +258,7 @@ export function RoomPage({ api, user }: Props) {
     canPlayGomoku ||
     canPlayConnect4 ||
     canPlayGo ||
+    canPlayHex ||
     canPlayQuoridor ||
     canPlayReversi ||
     canPlayDots ||
@@ -270,6 +294,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'dots') {
       return describeLastMove('dots', snapshot.lastMove as DotsMove);
+    }
+
+    if (room.gameType === 'hex') {
+      return describeLastMove('hex', snapshot.lastMove as HexMove);
     }
 
     if (room.gameType === 'quoridor') {
@@ -308,6 +336,10 @@ export function RoomPage({ api, user }: Props) {
       return formatResultText(dotsState, statusLabel, colorLabel, t);
     }
 
+    if (room.gameType === 'hex') {
+      return formatResultText(hexState, statusLabel, colorLabel, t);
+    }
+
     if (room.gameType === 'quoridor') {
       return formatResultText(quoridorState, statusLabel, colorLabel, t);
     }
@@ -323,6 +355,7 @@ export function RoomPage({ api, user }: Props) {
     gomokuState,
     connect4State,
     goState,
+    hexState,
     quoridorState,
     reversiState,
     dotsState,
@@ -460,6 +493,22 @@ export function RoomPage({ api, user }: Props) {
         roomId,
         gameType: 'go',
         move
+      }
+    });
+  };
+
+  const sendHexMove = (x: number, y: number) => {
+    if (!canPlayHex) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'hex',
+        x,
+        y
       }
     });
   };
@@ -850,6 +899,27 @@ export function RoomPage({ api, user }: Props) {
                   komi: goState.scoring.komi,
                   winner: goState.scoring.winner ? colorLabel(goState.scoring.winner) : t('room.result.draw')
                 })}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'hex' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(hexState.nextPlayer),
+                  status: statusLabel(hexState.status)
+                })}
+              </p>
+            ) : null}
+            <HexBoard state={hexState} disabled={!canPlayHex} onCellClick={sendHexMove} />
+            {hexState.status === 'completed' ? (
+              <p>
+                {hexState.winner
+                  ? t('room.result.winner', { winner: colorLabel(hexState.winner) })
+                  : t('room.result.draw')}
               </p>
             ) : null}
           </>

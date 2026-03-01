@@ -3,6 +3,7 @@ import {
   applyCardsMove,
   applyConnect4Move,
   applyDotsMove,
+  applyHexMove,
   applyGoMove,
   applyGomokuMove,
   applyQuoridorMove,
@@ -13,6 +14,7 @@ import {
   createCardsState,
   createConnect4State,
   createDotsState,
+  createHexState,
   createGoState,
   createGomokuState,
   createQuoridorState,
@@ -36,6 +38,8 @@ import type {
   GoState,
   GomokuMark,
   GomokuState,
+  HexMove,
+  HexState,
   QuoridorMove,
   QuoridorState,
   ReversiMove,
@@ -51,6 +55,7 @@ import { Connect4Board } from '../components/Connect4Board';
 import { DotsBoard } from '../components/DotsBoard';
 import { GoBoard } from '../components/GoBoard';
 import { GomokuBoard } from '../components/GomokuBoard';
+import { HexBoard } from '../components/HexBoard';
 import { QuoridorBoard } from '../components/QuoridorBoard';
 import { ReversiBoard } from '../components/ReversiBoard';
 import { XiangqiBoard } from '../components/XiangqiBoard';
@@ -250,6 +255,11 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [dotsStates, setDotsStates] = useState<DotsState[]>([createDotsState()]);
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
+  const [hexStates, setHexStates] = useState<HexState[]>([
+    createHexState({
+      boardSize: 11
+    })
+  ]);
   const [quoridorStates, setQuoridorStates] = useState<QuoridorState[]>([
     createQuoridorState({
       boardSize: 9,
@@ -338,6 +348,38 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setGoStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'hex') {
+          let current = createHexState({
+            boardSize: 11
+          });
+          const snapshots: HexState[] = [current];
+
+          for (const move of result.match.moves) {
+            const payload = move.payload as Partial<HexMove>;
+            if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
+              continue;
+            }
+
+            const applied = applyHexMove(current, {
+              x: payload.x,
+              y: payload.y,
+              player: payload.player ?? current.nextPlayer
+            });
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setHexStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -633,6 +675,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'go') {
       return Math.max(0, goStates.length - 1);
     }
+    if (gameType === 'hex') {
+      return Math.max(0, hexStates.length - 1);
+    }
     if (gameType === 'quoridor') {
       return Math.max(0, quoridorStates.length - 1);
     }
@@ -652,6 +697,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   }, [
     gameType,
     goStates.length,
+    hexStates.length,
     gomokuStates.length,
     quoridorStates.length,
     connect4States.length,
@@ -757,6 +803,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
         </>
       ) : null}
       {gameType === 'go' ? <GoBoard state={goStates[clampedStep]} disabled /> : null}
+      {gameType === 'hex' ? <HexBoard state={hexStates[clampedStep]} disabled /> : null}
       {gameType === 'quoridor' ? (
         <>
           <p>

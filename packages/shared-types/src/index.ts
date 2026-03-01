@@ -8,7 +8,8 @@ export type GameType =
   | 'dots'
   | 'backgammon'
   | 'cards'
-  | 'quoridor';
+  | 'quoridor'
+  | 'hex';
 export type BoardGameType =
   | 'gomoku'
   | 'xiangqi'
@@ -18,7 +19,8 @@ export type BoardGameType =
   | 'dots'
   | 'backgammon'
   | 'cards'
-  | 'quoridor';
+  | 'quoridor'
+  | 'hex';
 
 export interface UserDTO {
   id: string;
@@ -182,6 +184,23 @@ export interface Connect4State {
   nextPlayer: Connect4Disc;
   winner: Connect4Disc | null;
   status: 'playing' | 'draw' | 'completed';
+  moveCount: number;
+}
+
+export type HexPlayer = 'black' | 'white';
+
+export interface HexMove {
+  x: number;
+  y: number;
+  player: HexPlayer;
+}
+
+export interface HexState {
+  boardSize: number;
+  board: (HexPlayer | null)[][];
+  nextPlayer: HexPlayer;
+  winner: HexPlayer | null;
+  status: 'playing' | 'completed';
   moveCount: number;
 }
 
@@ -560,6 +579,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'hex';
+      state: HexState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'single_2048';
       state: null;
       viewerRole: RoomPlayerRole;
@@ -619,6 +644,12 @@ export type MatchMoveAppliedPayload =
       gameType: 'quoridor';
       state: QuoridorState;
       lastMove: QuoridorMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'hex';
+      state: HexState;
+      lastMove: HexMove;
     };
 
 export type ClientToServerMessage =
@@ -643,6 +674,7 @@ export type ClientToServerMessage =
     >
   | WsEnvelope<'room.move', { roomId: string; gameType: 'cards'; move: CardsMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'quoridor'; move: QuoridorMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'hex'; x: number; y: number }>
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.leave', Record<string, never>>
   | WsEnvelope<'invite.respond', { invitationId: string; action: 'accept' | 'decline' }>

@@ -55,8 +55,11 @@ Message shape:
 - `room.move` (Quoridor)
   - `{ roomId: string, gameType: "quoridor", move: { type: "pawn", x, y } | { type: "wall", orientation: "h" | "v", x, y } }`
 
+- `room.move` (Hex)
+  - `{ roomId: string, gameType: "hex", x: number, y: number }`
+
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" }`
+  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -87,6 +90,7 @@ Message shape:
   - Xiangqi: `{ room, gameType: "xiangqi", state, viewerRole }`
   - Cards: `{ room, gameType: "cards", state, viewerRole }`
   - Quoridor: `{ room, gameType: "quoridor", state, viewerRole }`
+  - Hex: `{ room, gameType: "hex", state, viewerRole }`
   - 2048 room: `{ room, gameType: "single_2048", state: null, viewerRole }`
 
 - `room.player_joined`

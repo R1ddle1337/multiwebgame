@@ -6,6 +6,7 @@ import {
   applyCardsMove,
   applyConnect4Move,
   applyDotsMove,
+  applyHexMove,
   applyGoMove,
   applyGomokuMove,
   applyQuoridorMove,
@@ -19,6 +20,7 @@ import {
   createCardsState,
   createConnect4State,
   createDotsState,
+  createHexState,
   createGoState,
   createGomokuState,
   createQuoridorState,
@@ -379,6 +381,67 @@ describe('quoridor engine', () => {
 
     expect(state.status).toBe('completed');
     expect(state.winner).toBe('black');
+  });
+});
+
+describe('hex engine', () => {
+  it('rejects out-of-turn placement', () => {
+    const state = createHexState();
+    const result = applyHexMove(state, { x: 0, y: 0, player: 'white' });
+    expect(result.accepted).toBe(false);
+    expect(result.reason).toBe('out_of_turn');
+  });
+
+  it('rejects occupied cell placement', () => {
+    let state = createHexState({ boardSize: 3 });
+    const first = applyHexMove(state, { x: 0, y: 0, player: 'black' });
+    expect(first.accepted).toBe(true);
+    state = first.nextState;
+
+    const second = applyHexMove(state, { x: 0, y: 0, player: 'white' });
+    expect(second.accepted).toBe(false);
+    expect(second.reason).toBe('occupied_cell');
+  });
+
+  it('detects black top-to-bottom connection', () => {
+    let state = createHexState({ boardSize: 3 });
+    const sequence = [
+      { x: 0, y: 0, player: 'black' as const },
+      { x: 1, y: 0, player: 'white' as const },
+      { x: 0, y: 1, player: 'black' as const },
+      { x: 2, y: 0, player: 'white' as const },
+      { x: 0, y: 2, player: 'black' as const }
+    ];
+
+    for (const move of sequence) {
+      const next = applyHexMove(state, move);
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    expect(state.status).toBe('completed');
+    expect(state.winner).toBe('black');
+  });
+
+  it('detects white left-to-right connection', () => {
+    let state = createHexState({ boardSize: 3 });
+    const sequence = [
+      { x: 0, y: 0, player: 'black' as const },
+      { x: 0, y: 1, player: 'white' as const },
+      { x: 1, y: 0, player: 'black' as const },
+      { x: 1, y: 1, player: 'white' as const },
+      { x: 2, y: 0, player: 'black' as const },
+      { x: 2, y: 1, player: 'white' as const }
+    ];
+
+    for (const move of sequence) {
+      const next = applyHexMove(state, move);
+      expect(next.accepted).toBe(true);
+      state = next.nextState;
+    }
+
+    expect(state.status).toBe('completed');
+    expect(state.winner).toBe('white');
   });
 });
 

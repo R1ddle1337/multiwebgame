@@ -37,7 +37,8 @@ const createRoomSchema = z.object({
     'dots',
     'backgammon',
     'cards',
-    'quoridor'
+    'quoridor',
+    'hex'
   ]),
   maxPlayers: z.number().int().min(1).max(8).optional()
 });

@@ -352,6 +352,28 @@ h3 {
   color: #fff;
 }
 
+.hex-board {
+  display: grid;
+  gap: 0.25rem;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+.hex-row {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.hex-cell {
+  width: clamp(24px, 4.8vw, 34px);
+  height: clamp(24px, 4.8vw, 34px);
+  border: 1px solid #9f845c;
+  border-radius: 8px;
+  background: #e4c591;
+  padding: 0;
+}
+
 .go-cell {
   aspect-ratio: 1;
   min-width: 22px;

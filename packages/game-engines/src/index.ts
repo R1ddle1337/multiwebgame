@@ -17,6 +17,7 @@ export { applyConnect4Move, createConnect4State } from './connect4.js';
 export { applyDotsMove, createDotsState } from './dots.js';
 export { applyGoMove, calculateGoScore, createGoState } from './go.js';
 export { applyGomokuMove, createGomokuState } from './gomoku.js';
+export { applyHexMove, createHexState } from './hex.js';
 export { applyQuoridorMove, createQuoridorState } from './quoridor.js';
 export { createDeterministicPrng, type DeterministicPrng } from './random.js';
 export { applyReversiMove, createReversiState } from './reversi.js';

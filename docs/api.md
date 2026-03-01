@@ -57,7 +57,7 @@ Auth uses `Authorization: Bearer <jwt>`.
 
 - `POST /rooms`
   - Auth required
-  - Body: `{ "gameType": "single_2048" | "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor", "maxPlayers"?: number }`
+  - Body: `{ "gameType": "single_2048" | "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex", "maxPlayers"?: number }`
   - Returns: `{ room }`
 
 - `GET /rooms/:roomId`
@@ -130,6 +130,7 @@ Auth uses `Authorization: Bearer <jwt>`.
     - Dots and Boxes: winner/status/moveCount/final scores/dot-grid dimensions.
     - Go: Chinese area score breakdown + komi + winner.
     - Quoridor: winner/moveCount/boardSize/remainingWalls.
+    - Hex: winner/moveCount/boardSize.
     - Xiangqi: outcome reason (checkmate/stalemate/repetition policy).
     - Gomoku: ruleset and final status metadata.
 

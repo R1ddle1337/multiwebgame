@@ -3,6 +3,7 @@ import {
   applyCardsMove,
   applyConnect4Move,
   applyDotsMove,
+  applyHexMove,
   applyGoMove,
   applyGomokuMove,
   applyQuoridorMove,
@@ -15,6 +16,7 @@ import {
   createConnect4State,
   createDeterministicPrng,
   createDotsState,
+  createHexState,
   createGoState,
   createGomokuState,
   createQuoridorState,
@@ -39,6 +41,8 @@ import type {
   Connect4State,
   DotsMove,
   DotsState,
+  HexMove,
+  HexState,
   GoMove,
   GoState,
   GomokuMark,
@@ -219,6 +223,18 @@ interface QuoridorRuntime {
   };
 }
 
+interface HexRuntime {
+  gameType: 'hex';
+  roomId: string;
+  matchId: string;
+  state: HexState;
+  rngSession?: VerifiableRngSession;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
 type ActiveRuntime =
   | BackgammonRuntime
   | CardsRuntime
@@ -228,6 +244,7 @@ type ActiveRuntime =
   | ReversiRuntime
   | DotsRuntime
   | QuoridorRuntime
+  | HexRuntime
   | XiangqiRuntime;
 
 const cardsSuitSchema = z.enum(['clubs', 'diamonds', 'hearts', 'spades']);
@@ -382,6 +399,15 @@ const roomMoveSchema = z.union([
     type: z.literal('room.move'),
     payload: z.object({
       roomId: z.string().uuid(),
+      gameType: z.literal('hex'),
+      x: z.number().int().min(0),
+      y: z.number().int().min(0)
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
       gameType: z.literal('cards'),
       move: z.discriminatedUnion('type', [
         z.object({
@@ -420,7 +446,8 @@ const matchmakingJoinSchema = z.object({
       'dots',
       'backgammon',
       'cards',
-      'quoridor'
+      'quoridor',
+      'hex'
     ])
   })
 });
@@ -457,7 +484,8 @@ function playerSlotsForGame(gameType: BoardGameType): number {
     gameType === 'reversi' ||
     gameType === 'dots' ||
     gameType === 'cards' ||
-    gameType === 'quoridor'
+    gameType === 'quoridor' ||
+    gameType === 'hex'
     ? 2
     : 2;
 }
@@ -596,7 +624,8 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
     runtime.gameType === 'go' ||
     runtime.gameType === 'reversi' ||
     runtime.gameType === 'dots' ||
-    runtime.gameType === 'quoridor'
+    runtime.gameType === 'quoridor' ||
+    runtime.gameType === 'hex'
   ) {
     return [runtime.players.black, runtime.players.white];
   }
@@ -1095,6 +1124,21 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'hex') {
+    return {
+      gameType: 'hex',
+      roomId: room.id,
+      matchId,
+      state: createHexState({
+        boardSize: 11
+      }),
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'xiangqi') {
     return {
       gameType: 'xiangqi',
@@ -1416,6 +1460,28 @@ function replayMoves(
       continue;
     }
 
+    if (current.gameType === 'hex') {
+      const payload = move.payload as Partial<HexMove>;
+      if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
+        continue;
+      }
+
+      const applied = applyHexMove(current.state, {
+        x: payload.x,
+        y: payload.y,
+        player: payload.player ?? current.state.nextPlayer
+      });
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
     if (current.gameType === 'go') {
       const payload = move.payload as GoMove;
       if (!payload || typeof payload !== 'object' || !('type' in payload)) {
@@ -1711,6 +1777,24 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
             : createQuoridorState({
                 boardSize: 9,
                 wallsPerPlayer: 10
+              }),
+        viewerRole
+      }
+    });
+    return;
+  }
+
+  if (room.gameType === 'hex') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'hex',
+        state:
+          runtime?.gameType === 'hex'
+            ? runtime.state
+            : createHexState({
+                boardSize: 11
               }),
         viewerRole
       }
@@ -2190,6 +2274,64 @@ async function handleQuoridorMove(
   await finishMatchIfCompleted(runtime, targets);
 }
 
+async function handleHexMove(
+  client: ClientContext,
+  runtime: HexRuntime,
+  x: number,
+  y: number
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: HexMove['player'] | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const applied = applyHexMove(runtime.state, {
+    x,
+    y,
+    player
+  });
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: 'hex.place_stone',
+    payload: {
+      x,
+      y,
+      player
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'hex',
+      state: runtime.state,
+      lastMove: {
+        x,
+        y,
+        player
+      }
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
 async function handleGoMove(client: ClientContext, runtime: GoRuntime, move: GoMove): Promise<void> {
   const userId = client.user!.id;
   const playerStone =
@@ -2434,6 +2576,7 @@ async function handleMove(
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
     | { roomId: string; gameType: 'dots'; move: Pick<DotsMove, 'orientation' | 'x' | 'y'> }
     | { roomId: string; gameType: 'quoridor'; move: QuoridorMoveInput }
+    | { roomId: string; gameType: 'hex'; x: number; y: number }
     | { roomId: string; gameType: 'go'; move: GoMove }
     | { roomId: string; gameType: 'xiangqi'; move: XiangqiMove }
 ): Promise<void> {
@@ -2495,6 +2638,11 @@ async function handleMove(
 
   if (message.gameType === 'quoridor' && runtime.gameType === 'quoridor') {
     await handleQuoridorMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'hex' && runtime.gameType === 'hex') {
+    await handleHexMove(client, runtime, message.x, message.y);
     return;
   }
 
@@ -2791,6 +2939,16 @@ wss.on('connection', (socket) => {
             roomId: msg.payload.roomId,
             gameType: 'quoridor',
             move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'hex') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'hex',
+            x: msg.payload.x,
+            y: msg.payload.y
           });
           return;
         }

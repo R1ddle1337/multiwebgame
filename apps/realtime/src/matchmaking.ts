@@ -7,7 +7,8 @@ export type MatchmakingGameType =
   | 'dots'
   | 'backgammon'
   | 'cards'
-  | 'quoridor';
+  | 'quoridor'
+  | 'hex';
 
 export interface QueueEntry {
   userId: string;

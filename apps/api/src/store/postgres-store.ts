@@ -34,7 +34,8 @@ const ALL_GAME_TYPES: GameType[] = [
   'dots',
   'backgammon',
   'cards',
-  'quoridor'
+  'quoridor',
+  'hex'
 ];
 const INITIAL_RATING = 1200;
 const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
@@ -47,7 +48,8 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   dots: 24,
   backgammon: 24,
   cards: 24,
-  quoridor: 24
+  quoridor: 24,
+  hex: 24
 };
 
 function playerSlotsForGame(gameType: GameType): number {
@@ -89,7 +91,8 @@ function createDefaultRatings(): RatingMap {
     dots: INITIAL_RATING,
     backgammon: INITIAL_RATING,
     cards: INITIAL_RATING,
-    quoridor: INITIAL_RATING
+    quoridor: INITIAL_RATING,
+    hex: INITIAL_RATING
   };
 }
 

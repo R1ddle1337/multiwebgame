@@ -97,6 +97,16 @@ Implemented rules:
   - placement rejected when either player would have no path to goal row
 - match ends immediately when black reaches bottom row or white reaches top row.
 
+## Hex (2-player, 11x11)
+
+Implemented rules:
+
+- default board size `11x11`.
+- players alternate placing one stone on an empty cell.
+- black wins by connecting top edge to bottom edge.
+- white wins by connecting left edge to right edge.
+- no draw state (Hex theorem): terminal state is winner-only in adjudication.
+
 ## 2048
 
 Implemented deterministic mechanics:

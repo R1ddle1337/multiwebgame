@@ -4,6 +4,7 @@ import {
   createCardsState,
   createConnect4State,
   createDotsState,
+  createHexState,
   createGoState,
   createBackgammonState,
   createGomokuState,
@@ -364,6 +365,36 @@ describe('deriveRuntimeCompletion', () => {
             black: 2,
             white: 1
           }
+        }
+      }
+    });
+  });
+
+  it('maps hex completion to winner and payload', () => {
+    const hexCompletion = deriveRuntimeCompletion({
+      gameType: 'hex',
+      state: {
+        ...createHexState({
+          boardSize: 11
+        }),
+        status: 'completed',
+        winner: 'white',
+        moveCount: 74
+      },
+      players: {
+        black: 'u41',
+        white: 'u42'
+      }
+    });
+
+    expect(hexCompletion).toEqual({
+      winnerUserId: 'u42',
+      status: 'completed',
+      resultPayload: {
+        hex: {
+          winner: 'white',
+          moveCount: 74,
+          boardSize: 11
         }
       }
     });

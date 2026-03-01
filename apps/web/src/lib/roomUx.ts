@@ -3,6 +3,7 @@ import type {
   DotsMove,
   GoMove,
   GomokuMove,
+  HexMove,
   QuoridorMove,
   ReversiMove,
   XiangqiMove,
@@ -85,6 +86,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'hex',
+  move: HexMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'quoridor',
   move: QuoridorMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -95,8 +101,8 @@ export function describeLastMove(
   xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
-  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'dots' | 'quoridor' | 'xiangqi',
-  move: GomokuMove | Connect4Move | GoMove | ReversiMove | DotsMove | QuoridorMove | XiangqiMove,
+  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'dots' | 'hex' | 'quoridor' | 'xiangqi',
+  move: GomokuMove | Connect4Move | GoMove | ReversiMove | DotsMove | HexMove | QuoridorMove | XiangqiMove,
   xiangqiPerspective: XiangqiPerspective = 'red'
 ): LastMoveSummary {
   if (gameType === 'gomoku') {
@@ -167,6 +173,17 @@ export function describeLastMove(
         kind: 'move',
         from,
         to
+      }
+    };
+  }
+
+  if (gameType === 'hex') {
+    const hexMove = move as HexMove;
+    return {
+      actor: hexMove.player,
+      action: {
+        kind: 'place',
+        point: formatBoardPoint(hexMove.x, hexMove.y)
       }
     };
   }
