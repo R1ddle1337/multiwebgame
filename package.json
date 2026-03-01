@@ -15,7 +15,7 @@
     "dev:realtime": "npm run dev -w @multiwebgame/realtime",
     "dev:web": "npm run dev -w @multiwebgame/web",
     "lint": "npm run lint -ws --if-present",
-    "typecheck": "npm run typecheck -ws --if-present",
+    "typecheck": "npm run build:packages && npm run typecheck -w @multiwebgame/shared-types && npm run typecheck -w @multiwebgame/game-engines && npm run typecheck -w @multiwebgame/api && npm run typecheck -w @multiwebgame/realtime && npm run typecheck -w @multiwebgame/web",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,md,css,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,md,css,yml,yaml}\"",
     "lint-staged": "lint-staged",

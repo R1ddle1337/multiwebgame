@@ -16,7 +16,8 @@ export type MatchmakingGameType =
   | 'cards'
   | 'quoridor'
   | 'hex'
-  | 'liars_dice';
+  | 'liars_dice'
+  | 'texas_holdem';
 
 export interface QueueEntry {
   userId: string;

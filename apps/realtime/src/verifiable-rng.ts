@@ -29,15 +29,19 @@ export function verifyPlayerNonceCommit(commit: string, nonce: string): boolean 
 
 export function deriveRngSeed(params: {
   serverSeedHex: string;
-  nonceP1: string;
-  nonceP2: string;
+  nonces?: string[];
+  nonceP1?: string;
+  nonceP2?: string;
   matchId: string;
 }): string {
   const serverSeed = Buffer.from(asHex(params.serverSeedHex), 'hex');
+  const nonces =
+    params.nonces && params.nonces.length > 0
+      ? [...params.nonces]
+      : [params.nonceP1 ?? '', params.nonceP2 ?? ''];
   const payload = Buffer.concat([
     serverSeed,
-    Buffer.from(params.nonceP1, 'utf8'),
-    Buffer.from(params.nonceP2, 'utf8'),
+    ...nonces.map((nonce) => Buffer.from(nonce, 'utf8')),
     Buffer.from(params.matchId, 'utf8')
   ]);
   return sha256Hex(payload);
@@ -49,7 +53,7 @@ export interface VerifiableRngSession {
   matchId: string;
   serverSeedHex: string;
   serverSeedCommit: string;
-  playerOrder: [string, string];
+  playerOrder: string[];
   playerCommits: Record<string, string | null>;
   playerNonces: Record<string, string | null>;
   rngSeed: string | null;
@@ -89,20 +93,21 @@ function normalizeCommitHex(commit: string): string {
 function cloneSession(session: VerifiableRngSession): VerifiableRngSession {
   return {
     ...session,
-    playerOrder: [session.playerOrder[0], session.playerOrder[1]],
+    playerOrder: [...session.playerOrder],
     playerCommits: { ...session.playerCommits },
     playerNonces: { ...session.playerNonces }
   };
 }
 
 function isMatchPlayer(session: VerifiableRngSession, userId: string): boolean {
-  return userId === session.playerOrder[0] || userId === session.playerOrder[1];
+  return session.playerOrder.includes(userId);
 }
 
 export function createVerifiableRngSession(params: {
   matchId: string;
-  playerOneUserId: string;
-  playerTwoUserId: string;
+  playerOneUserId?: string;
+  playerTwoUserId?: string;
+  playerUserIds?: string[];
   revealTimeoutMs?: number;
   serverSeedHex?: string;
 }): VerifiableRngSession {
@@ -113,21 +118,39 @@ export function createVerifiableRngSession(params: {
 
   const serverSeedHex = asHex(params.serverSeedHex ?? createServerSeedHex());
   const serverSeedCommit = createSeedCommit(serverSeedHex);
-  const playerOrder: [string, string] = [params.playerOneUserId, params.playerTwoUserId];
+  const uniquePlayerIds = new Set<string>();
+  const playerOrder = (
+    params.playerUserIds && params.playerUserIds.length > 0
+      ? params.playerUserIds
+      : [params.playerOneUserId ?? '', params.playerTwoUserId ?? '']
+  )
+    .filter((userId) => typeof userId === 'string' && userId.trim().length > 0)
+    .filter((userId) => {
+      if (uniquePlayerIds.has(userId)) {
+        return false;
+      }
+      uniquePlayerIds.add(userId);
+      return true;
+    });
+
+  if (playerOrder.length < 2) {
+    throw new Error('invalid_rng_player_count');
+  }
+
+  const playerCommits: Record<string, string | null> = {};
+  const playerNonces: Record<string, string | null> = {};
+  for (const userId of playerOrder) {
+    playerCommits[userId] = null;
+    playerNonces[userId] = null;
+  }
 
   return {
     matchId: params.matchId,
     serverSeedHex,
     serverSeedCommit,
     playerOrder,
-    playerCommits: {
-      [playerOrder[0]]: null,
-      [playerOrder[1]]: null
-    },
-    playerNonces: {
-      [playerOrder[0]]: null,
-      [playerOrder[1]]: null
-    },
+    playerCommits,
+    playerNonces,
     rngSeed: null,
     phase: 'awaiting_commits',
     revealDeadlineAt: null,
@@ -162,8 +185,8 @@ export function applyPlayerCommit(
 
   next.playerCommits[userId] = normalizedCommit;
 
-  const [p1, p2] = next.playerOrder;
-  if (next.playerCommits[p1] && next.playerCommits[p2]) {
+  const allCommitted = next.playerOrder.every((userId) => typeof next.playerCommits[userId] === 'string');
+  if (allCommitted) {
     next.phase = 'awaiting_reveals';
     next.revealDeadlineAt = now + next.revealTimeoutMs;
   }
@@ -204,14 +227,11 @@ export function applyPlayerReveal(
 
   next.playerNonces[userId] = nonce;
 
-  const [p1, p2] = next.playerOrder;
-  const nonceP1 = next.playerNonces[p1];
-  const nonceP2 = next.playerNonces[p2];
-  if (nonceP1 !== null && nonceP2 !== null) {
+  const allRevealed = next.playerOrder.every((userId) => next.playerNonces[userId] !== null);
+  if (allRevealed) {
     next.rngSeed = deriveRngSeed({
       serverSeedHex: next.serverSeedHex,
-      nonceP1,
-      nonceP2,
+      nonces: next.playerOrder.map((userId) => next.playerNonces[userId] ?? ''),
       matchId: next.matchId
     });
     next.phase = 'ready';

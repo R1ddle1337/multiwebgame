@@ -5,6 +5,7 @@ import type {
   DominationRuntimeState,
   LoveLetterRuntimeState,
   LiarsDiceRuntimeState,
+  TexasHoldemRuntimeState,
   YahtzeeRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
@@ -165,6 +166,14 @@ export type RuntimeCompletionSnapshot =
         red: string;
         black: string;
       };
+    }
+  | {
+      gameType: 'texas_holdem';
+      state: TexasHoldemRuntimeState;
+      players: Array<{
+        seat: number;
+        userId: string;
+      }>;
     };
 
 export interface RuntimeCompletion {
@@ -639,6 +648,31 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           moveCount: runtime.state.moveCount,
           diceCounts: runtime.state.diceCounts,
           rounds: runtime.state.roundHistory
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'texas_holdem') {
+    if (runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId = runtime.state.winnerUserIds?.[0] ?? null;
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        texas_holdem: {
+          winners: runtime.state.winnerUserIds ?? [],
+          handNumber: runtime.state.handNumber,
+          moveCount: runtime.state.moveCount,
+          lastHandWinners: runtime.state.lastHandWinners,
+          stacks: runtime.state.seats.map((seat) => ({
+            seat: seat.seat,
+            userId: seat.userId,
+            stack: seat.stack
+          }))
         }
       }
     };

@@ -17,7 +17,8 @@ export type GameType =
   | 'cards'
   | 'quoridor'
   | 'hex'
-  | 'liars_dice';
+  | 'liars_dice'
+  | 'texas_holdem';
 export type BoardGameType =
   | 'gomoku'
   | 'santorini'
@@ -36,7 +37,8 @@ export type BoardGameType =
   | 'cards'
   | 'quoridor'
   | 'hex'
-  | 'liars_dice';
+  | 'liars_dice'
+  | 'texas_holdem';
 
 export interface UserDTO {
   id: string;
@@ -984,6 +986,95 @@ export interface LiarsDiceState {
   lastRound: LiarsDiceRoundResolution | null;
 }
 
+export type TexasHoldemStreet =
+  | 'awaiting_rng'
+  | 'preflop'
+  | 'flop'
+  | 'turn'
+  | 'river'
+  | 'showdown'
+  | 'hand_complete';
+
+export type TexasHoldemMoveInput =
+  | {
+      type: 'fold';
+    }
+  | {
+      type: 'check';
+    }
+  | {
+      type: 'call';
+    }
+  | {
+      type: 'bet';
+      amount: number;
+    };
+
+export type TexasHoldemMove =
+  | {
+      type: 'fold';
+      seat: number;
+    }
+  | {
+      type: 'check';
+      seat: number;
+    }
+  | {
+      type: 'call';
+      seat: number;
+    }
+  | {
+      type: 'bet';
+      seat: number;
+      amount: number;
+    };
+
+export interface TexasHoldemShowdownEntry {
+  seat: number;
+  userId: string;
+  category:
+    | 'high_card'
+    | 'pair'
+    | 'two_pair'
+    | 'three_of_a_kind'
+    | 'straight'
+    | 'flush'
+    | 'full_house'
+    | 'four_of_a_kind'
+    | 'straight_flush';
+}
+
+export interface TexasHoldemSeatState {
+  seat: number;
+  userId: string;
+  stack: number;
+  inHand: boolean;
+  folded: boolean;
+  allIn: boolean;
+  bet: number;
+  totalCommitted: number;
+  holeCards: CardsCard[] | null;
+}
+
+export interface TexasHoldemState {
+  status: 'playing' | 'completed';
+  stage: TexasHoldemStreet;
+  moveCount: number;
+  handNumber: number;
+  buttonSeat: number | null;
+  smallBlind: number;
+  bigBlind: number;
+  currentBet: number;
+  minRaiseTo: number;
+  actionSeat: number | null;
+  pot: number;
+  board: CardsCard[];
+  seats: TexasHoldemSeatState[];
+  showdown: TexasHoldemShowdownEntry[] | null;
+  winnerUserIds: string[] | null;
+  lastHandWinners: Array<{ seat: number; userId: string; amount: number }> | null;
+}
+
 export type Direction2048 = 'up' | 'down' | 'left' | 'right';
 
 export interface Game2048State {
@@ -1120,6 +1211,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'texas_holdem';
+      state: TexasHoldemState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'single_2048';
       state: null;
       viewerRole: RoomPlayerRole;
@@ -1233,6 +1330,12 @@ export type MatchMoveAppliedPayload =
       gameType: 'liars_dice';
       state: LiarsDiceState;
       lastMove: LiarsDiceMove;
+    }
+  | {
+      roomId: string;
+      gameType: 'texas_holdem';
+      state: TexasHoldemState;
+      lastMove: TexasHoldemMove;
     };
 
 export type ClientToServerMessage =
@@ -1240,6 +1343,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'lobby.subscribe', Record<string, never>>
   | WsEnvelope<'room.subscribe', { roomId: string; asSpectator?: boolean }>
   | WsEnvelope<'room.unsubscribe', { roomId: string }>
+  | WsEnvelope<'room.start', { roomId: string }>
   | WsEnvelope<'room.rng.commit', { roomId: string; commit: string }>
   | WsEnvelope<'room.rng.reveal', { roomId: string; nonce: string }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
@@ -1266,6 +1370,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.move', { roomId: string; gameType: 'quoridor'; move: QuoridorMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'hex'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'texas_holdem'; move: TexasHoldemMoveInput }>
   | WsEnvelope<'matchmaking.join', { gameType: BoardGameType }>
   | WsEnvelope<'matchmaking.leave', Record<string, never>>
   | WsEnvelope<'invite.respond', { invitationId: string; action: 'accept' | 'decline' }>

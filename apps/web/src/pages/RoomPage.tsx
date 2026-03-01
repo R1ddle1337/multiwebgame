@@ -57,6 +57,9 @@ import type {
   SantoriniMove,
   SantoriniMoveInput,
   SantoriniState,
+  TexasHoldemMoveInput,
+  TexasHoldemSeatState,
+  TexasHoldemState,
   UserDTO,
   XiangqiColor,
   XiangqiMove,
@@ -258,6 +261,7 @@ export function RoomPage({ api, user }: Props) {
   const [loveLetterGuess, setLoveLetterGuess] = useState<LoveLetterMoveInput['guess']>('priest');
   const [liarsBidQuantity, setLiarsBidQuantity] = useState(1);
   const [liarsBidFace, setLiarsBidFace] = useState(1);
+  const [texasBetAmount, setTexasBetAmount] = useState(2);
   const [loadAttempt, setLoadAttempt] = useState(0);
 
   const gameLabel = (gameType: RoomDTO['gameType']) => t(`enum.game.${gameType}`);
@@ -342,6 +346,8 @@ export function RoomPage({ api, user }: Props) {
   const cardsState = snapshot?.gameType === 'cards' ? (snapshot.state as CardsState | null) : null;
   const loveLetterState =
     snapshot?.gameType === 'love_letter' ? (snapshot.state as LoveLetterState | null) : null;
+  const texasHoldemState =
+    snapshot?.gameType === 'texas_holdem' ? (snapshot.state as TexasHoldemState | null) : null;
 
   const seat = useMemo(() => playerSeat(room, user.id), [room, user.id]);
   const viewerRole =
@@ -426,6 +432,15 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'love_letter' &&
     viewerRole === 'player' &&
     loveLetterState?.status === 'playing';
+  const texasHoldemTurn =
+    hasActiveMatch &&
+    room?.gameType === 'texas_holdem' &&
+    viewerRole === 'player' &&
+    texasHoldemState?.status === 'playing' &&
+    (texasHoldemState?.stage === 'preflop' ||
+      texasHoldemState?.stage === 'flop' ||
+      texasHoldemState?.stage === 'turn' ||
+      texasHoldemState?.stage === 'river');
 
   const canPlayGomoku =
     gomokuTurn &&
@@ -495,6 +510,24 @@ export function RoomPage({ api, user }: Props) {
     Boolean(loveLetterTurn) &&
     ((seat === 1 && loveLetterState?.nextPlayer === 'black') ||
       (seat === 2 && loveLetterState?.nextPlayer === 'white'));
+  const texasViewerSeat =
+    texasHoldemState?.seats.find((stateSeat) => stateSeat.userId === user.id) ??
+    (seat !== null ? texasHoldemState?.seats.find((stateSeat) => stateSeat.seat === seat) : null) ??
+    null;
+  const texasToCall =
+    texasHoldemState && texasViewerSeat ? Math.max(0, texasHoldemState.currentBet - texasViewerSeat.bet) : 0;
+  const texasMinBetTo =
+    texasHoldemState && texasViewerSeat
+      ? Math.min(texasHoldemState.minRaiseTo, texasViewerSeat.bet + texasViewerSeat.stack)
+      : 0;
+  const texasMaxBetTo = texasViewerSeat ? texasViewerSeat.bet + texasViewerSeat.stack : 0;
+  const canPlayTexasHoldem =
+    Boolean(texasHoldemTurn) &&
+    texasViewerSeat !== null &&
+    texasHoldemState?.actionSeat === texasViewerSeat.seat &&
+    !texasViewerSeat.folded &&
+    !texasViewerSeat.allIn &&
+    texasViewerSeat.inHand;
   const canPlayCurrentTurn =
     canPlayGomoku ||
     canPlaySantorini ||
@@ -512,7 +545,8 @@ export function RoomPage({ api, user }: Props) {
     canPlayDots ||
     canPlayXiangqi ||
     canPlayCards ||
-    canPlayLoveLetter;
+    canPlayLoveLetter ||
+    canPlayTexasHoldem;
   const loveLetterHand = loveLetterState?.hand ?? [];
   const loveLetterSelectedCard = loveLetterHand.includes(loveLetterCard)
     ? loveLetterCard
@@ -590,6 +624,10 @@ export function RoomPage({ api, user }: Props) {
     }
 
     if (room.gameType === 'liars_dice') {
+      return null;
+    }
+
+    if (room.gameType === 'texas_holdem') {
       return null;
     }
 
@@ -680,6 +718,10 @@ export function RoomPage({ api, user }: Props) {
     }
 
     if (room.gameType === 'liars_dice') {
+      return null;
+    }
+
+    if (room.gameType === 'texas_holdem') {
       return null;
     }
 
@@ -814,6 +856,24 @@ export function RoomPage({ api, user }: Props) {
       setYahtzeeHold(DEFAULT_YAHTZEE_HOLD);
     }
   }, [room?.gameType, yahtzeeState.rollsUsed, yahtzeeState.moveCount]);
+
+  useEffect(() => {
+    if (room?.gameType !== 'texas_holdem' || !texasHoldemState || !texasViewerSeat) {
+      return;
+    }
+
+    const minAllowed = Math.max(
+      1,
+      Math.min(texasHoldemState.minRaiseTo, texasViewerSeat.bet + texasViewerSeat.stack)
+    );
+    const maxAllowed = Math.max(minAllowed, texasViewerSeat.bet + texasViewerSeat.stack);
+    setTexasBetAmount((current) => {
+      if (!Number.isFinite(current)) {
+        return minAllowed;
+      }
+      return Math.max(minAllowed, Math.min(maxAllowed, Math.floor(current)));
+    });
+  }, [room?.gameType, texasHoldemState, texasViewerSeat]);
 
   const sendGomokuMove = (x: number, y: number) => {
     if (!canPlayGomoku) {
@@ -1074,6 +1134,21 @@ export function RoomPage({ api, user }: Props) {
     });
   };
 
+  const sendTexasHoldemMove = (move: TexasHoldemMoveInput) => {
+    if (!canPlayTexasHoldem) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'texas_holdem',
+        move
+      }
+    });
+  };
+
   const leaveCurrentRoom = async () => {
     try {
       send({
@@ -1121,6 +1196,25 @@ export function RoomPage({ api, user }: Props) {
           <button type="button" className="secondary" onClick={leaveCurrentRoom}>
             {t('room.leave')}
           </button>
+          {room.gameType === 'texas_holdem' &&
+          !hasActiveMatch &&
+          viewerRole === 'player' &&
+          room.hostUserId === user.id ? (
+            <button
+              type="button"
+              onClick={() =>
+                send({
+                  type: 'room.start',
+                  payload: {
+                    roomId: room.id
+                  }
+                })
+              }
+              disabled={activePlayerCount < 2}
+            >
+              {t('room.texas.start_match')}
+            </button>
+          ) : null}
           {viewerRole !== 'spectator' ? null : (
             <button
               type="button"
@@ -1247,6 +1341,13 @@ export function RoomPage({ api, user }: Props) {
         {waitingForOpponent ? (
           <p role="status" aria-live="polite">
             {t('room.waiting_for_opponent')}
+          </p>
+        ) : null}
+        {room.gameType === 'texas_holdem' && !hasActiveMatch && activePlayerCount >= 2 ? (
+          <p role="status" aria-live="polite">
+            {room.hostUserId === user.id
+              ? t('room.texas.ready_to_start')
+              : t('room.texas.waiting_host_start')}
           </p>
         ) : null}
 
@@ -2767,6 +2868,185 @@ export function RoomPage({ api, user }: Props) {
                   <p>
                     {loveLetterState.winner
                       ? t('room.result.winner', { winner: colorLabel(loveLetterState.winner) })
+                      : t('room.result.draw')}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </>
+        ) : null}
+
+        {room.gameType === 'texas_holdem' ? (
+          <>
+            {!texasHoldemState ? (
+              <p>{t('room.texas.waiting_start')}</p>
+            ) : (
+              <>
+                <p>
+                  {t('room.texas.hand_stage', {
+                    hand: texasHoldemState.handNumber,
+                    stage: t(`room.texas.stage.${texasHoldemState.stage}`)
+                  })}
+                </p>
+                <p>
+                  {t('room.texas.table', {
+                    pot: texasHoldemState.pot,
+                    currentBet: texasHoldemState.currentBet,
+                    minRaiseTo: texasHoldemState.minRaiseTo,
+                    button: texasHoldemState.buttonSeat ?? '-',
+                    actionSeat: texasHoldemState.actionSeat ?? '-'
+                  })}
+                </p>
+                <p>
+                  {t('room.texas.board', {
+                    cards:
+                      texasHoldemState.board.length > 0
+                        ? texasHoldemState.board.map((card) => formatCardsCard(card)).join(', ')
+                        : '—'
+                  })}
+                </p>
+                <ul className="simple-list">
+                  {texasHoldemState.seats.map((stateSeat: TexasHoldemSeatState) => {
+                    const seatStatus = stateSeat.folded
+                      ? t('room.texas.status.folded')
+                      : stateSeat.allIn
+                        ? t('room.texas.status.all_in')
+                        : stateSeat.inHand
+                          ? t('room.texas.status.live')
+                          : t('room.texas.status.out');
+
+                    const visibleCards =
+                      stateSeat.holeCards === null
+                        ? t('room.texas.hole_cards_hidden')
+                        : stateSeat.holeCards.length === 0
+                          ? t('room.texas.hole_cards_pending')
+                          : stateSeat.holeCards.map((card) => formatCardsCard(card)).join(', ');
+
+                    return (
+                      <li key={`texas-seat-${stateSeat.seat}`}>
+                        <div>
+                          {t('room.texas.seat_line', {
+                            seat: stateSeat.seat,
+                            user: stateSeat.userId.slice(0, 8),
+                            stack: stateSeat.stack,
+                            bet: stateSeat.bet,
+                            status: seatStatus
+                          })}
+                        </div>
+                        <div>
+                          {t('room.texas.hole_cards', {
+                            cards: visibleCards
+                          })}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+
+                {texasHoldemState.showdown ? (
+                  <p>
+                    {t('room.texas.showdown', {
+                      summary: texasHoldemState.showdown
+                        .map(
+                          (entry) =>
+                            `${entry.userId.slice(0, 8)}(S${entry.seat}): ${t(`room.texas.hand.${entry.category}`)}`
+                        )
+                        .join(' | ')
+                    })}
+                  </p>
+                ) : null}
+
+                {texasHoldemState.lastHandWinners && texasHoldemState.lastHandWinners.length > 0 ? (
+                  <p>
+                    {t('room.texas.last_hand_winners', {
+                      winners: texasHoldemState.lastHandWinners
+                        .map((entry) => `${entry.userId.slice(0, 8)} +${entry.amount}`)
+                        .join(' | ')
+                    })}
+                  </p>
+                ) : null}
+
+                {canPlayTexasHoldem && texasViewerSeat ? (
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        sendTexasHoldemMove({
+                          type: 'fold'
+                        })
+                      }
+                    >
+                      {t('room.texas.action.fold')}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() =>
+                        sendTexasHoldemMove({
+                          type: 'check'
+                        })
+                      }
+                      disabled={texasToCall > 0}
+                    >
+                      {t('room.texas.action.check')}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() =>
+                        sendTexasHoldemMove({
+                          type: 'call'
+                        })
+                      }
+                      disabled={texasToCall <= 0}
+                    >
+                      {t('room.texas.action.call', { amount: texasToCall })}
+                    </button>
+                    <label>
+                      {t('room.texas.action.bet_to')}{' '}
+                      <input
+                        type="number"
+                        min={Math.max(1, texasMinBetTo)}
+                        max={Math.max(1, texasMaxBetTo)}
+                        value={texasBetAmount}
+                        onChange={(event) => {
+                          const parsed = Number(event.target.value) || 0;
+                          const minAllowed = Math.max(1, texasMinBetTo);
+                          const maxAllowed = Math.max(minAllowed, texasMaxBetTo);
+                          setTexasBetAmount(Math.max(minAllowed, Math.min(maxAllowed, parsed)));
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        sendTexasHoldemMove({
+                          type: 'bet',
+                          amount: Math.max(
+                            Math.max(1, texasMinBetTo),
+                            Math.min(Math.max(1, texasMaxBetTo), Math.floor(texasBetAmount))
+                          )
+                        })
+                      }
+                      disabled={
+                        texasViewerSeat.stack <= texasToCall ||
+                        texasMaxBetTo <= texasHoldemState.currentBet ||
+                        texasMaxBetTo <= 0
+                      }
+                    >
+                      {t('room.texas.action.bet')}
+                    </button>
+                  </div>
+                ) : null}
+
+                {texasHoldemState.status === 'completed' ? (
+                  <p>
+                    {texasHoldemState.winnerUserIds && texasHoldemState.winnerUserIds.length > 0
+                      ? t('room.texas.match_winner', {
+                          winners: texasHoldemState.winnerUserIds
+                            .map((winner) => winner.slice(0, 8))
+                            .join(', ')
+                        })
                       : t('room.result.draw')}
                   </p>
                 ) : null}

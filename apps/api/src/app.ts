@@ -46,7 +46,8 @@ const createRoomSchema = z.object({
     'cards',
     'quoridor',
     'hex',
-    'liars_dice'
+    'liars_dice',
+    'texas_holdem'
   ]),
   maxPlayers: z.number().int().min(1).max(8).optional()
 });

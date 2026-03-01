@@ -183,7 +183,10 @@ export function LobbyPage({ api, user }: Props) {
   }, [realtime, translateError]);
 
   const createRoom = async (gameType: RoomDTO['gameType']) => {
-    const result = await api.createRoom(gameType, gameType === 'single_2048' ? 1 : 4);
+    const result = await api.createRoom(
+      gameType,
+      gameType === 'single_2048' ? 1 : gameType === 'texas_holdem' ? 6 : 4
+    );
     navigate(`/rooms/${result.room.id}`);
   };
 
@@ -268,6 +271,9 @@ export function LobbyPage({ api, user }: Props) {
           <button type="button" onClick={() => createRoom('xiangqi')}>
             {t('lobby.create.xiangqi')}
           </button>
+          <button type="button" onClick={() => createRoom('texas_holdem')}>
+            {t('lobby.create.texas_holdem')}
+          </button>
           <button type="button" className="secondary" onClick={() => navigate('/training')}>
             {t('lobby.training')}
           </button>
@@ -298,7 +304,8 @@ export function LobbyPage({ api, user }: Props) {
                 'reversi',
                 'dots',
                 'go',
-                'xiangqi'
+                'xiangqi',
+                'texas_holdem'
               ] as const
             ).map((gameType) => (
               <button

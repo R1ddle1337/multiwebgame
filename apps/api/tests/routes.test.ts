@@ -86,7 +86,8 @@ class InMemoryStore implements Store {
       cards: 1200,
       quoridor: 1200,
       hex: 1200,
-      liars_dice: 1200
+      liars_dice: 1200,
+      texas_holdem: 1200
     };
   }
 
@@ -206,7 +207,8 @@ class InMemoryStore implements Store {
         'cards',
         'quoridor',
         'hex',
-        'liars_dice'
+        'liars_dice',
+        'texas_holdem'
       ] as const
     ).map((gameType) => ({
       gameType,
@@ -236,7 +238,7 @@ class InMemoryStore implements Store {
       hostUserId,
       gameType,
       status: 'open',
-      maxPlayers: maxPlayers ?? (gameType === 'single_2048' ? 1 : 4),
+      maxPlayers: maxPlayers ?? (gameType === 'single_2048' ? 1 : gameType === 'texas_holdem' ? 6 : 4),
       createdAt: new Date().toISOString(),
       players: [
         {
@@ -263,7 +265,7 @@ class InMemoryStore implements Store {
       throw new Error('room_or_user_not_found');
     }
 
-    const playerSlots = room.gameType === 'single_2048' ? 1 : 2;
+    const playerSlots = room.gameType === 'single_2048' ? 1 : room.gameType === 'texas_holdem' ? 6 : 2;
     const activePlayers = room.players.filter((player) => player.role === 'player');
     const existing = room.players.find((player) => player.userId === userId);
     if (existing) {

@@ -34,6 +34,8 @@ import {
   createLiarsDiceState,
   createLoveLetterDeck,
   createLoveLetterState,
+  createTexasHoldemDeck,
+  createTexasHoldemState,
   createGoState,
   createGomokuState,
   createOnitamaCardPool,
@@ -49,13 +51,17 @@ import {
   normalizeDominationMove,
   normalizeYahtzeeMove,
   normalizeLoveLetterMove,
+  normalizeTexasHoldemMove,
   normalizeCodenamesDuetMove,
   normalizeSantoriniMove,
+  startTexasHoldemHand,
   toBattleshipPublicState,
   toCardsPublicState,
   toCodenamesDuetPublicState,
   toLoveLetterPublicState,
   toLiarsDicePublicState,
+  toTexasHoldemPublicState,
+  applyTexasHoldemMove,
   type CardsRuntimeState,
   type BattleshipRuntimeState,
   type DominationRuntimeState,
@@ -63,6 +69,7 @@ import {
   type CodenamesDuetRuntimeState,
   type LoveLetterRuntimeState,
   type LiarsDiceRuntimeState,
+  type TexasHoldemRuntimeState,
   type DeterministicPrng
 } from '@multiwebgame/game-engines';
 import type {
@@ -113,6 +120,9 @@ import type {
   SantoriniMoveInput,
   SantoriniPlayer,
   SantoriniState,
+  TexasHoldemMove,
+  TexasHoldemMoveInput,
+  TexasHoldemState,
   ReversiMove,
   ReversiState,
   QuoridorMove,
@@ -318,6 +328,22 @@ interface LiarsDiceRuntime {
   };
 }
 
+interface TexasHoldemRuntime {
+  gameType: 'texas_holdem';
+  roomId: string;
+  matchId: string;
+  state: TexasHoldemRuntimeState;
+  rngSession: VerifiableRngSession;
+  players: Array<{
+    seat: number;
+    userId: string;
+  }>;
+  rngHistory: Array<{
+    handNumber: number;
+    rng: ReturnType<typeof buildRngPayload>;
+  }>;
+}
+
 interface Connect4Runtime {
   gameType: 'connect4';
   roomId: string;
@@ -408,6 +434,7 @@ type ActiveRuntime =
   | LoveLetterRuntime
   | CodenamesDuetRuntime
   | LiarsDiceRuntime
+  | TexasHoldemRuntime
   | GomokuRuntime
   | SantoriniRuntime
   | OnitamaRuntime
@@ -466,6 +493,13 @@ const roomSubscribeSchema = z.object({
 
 const roomUnsubscribeSchema = z.object({
   type: z.literal('room.unsubscribe'),
+  payload: z.object({
+    roomId: z.string().uuid()
+  })
+});
+
+const roomStartSchema = z.object({
+  type: z.literal('room.start'),
   payload: z.object({
     roomId: z.string().uuid()
   })
@@ -782,6 +816,28 @@ const roomMoveSchema = z.union([
         })
       ])
     })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('texas_holdem'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('fold')
+        }),
+        z.object({
+          type: z.literal('check')
+        }),
+        z.object({
+          type: z.literal('call')
+        }),
+        z.object({
+          type: z.literal('bet'),
+          amount: z.number().int().min(1)
+        })
+      ])
+    })
   })
 ]);
 
@@ -814,7 +870,8 @@ const matchmakingJoinSchema = z.object({
       'cards',
       'quoridor',
       'hex',
-      'liars_dice'
+      'liars_dice',
+      'texas_holdem'
     ])
   })
 });
@@ -843,26 +900,12 @@ const activeRuntimes = new Map<string, ActiveRuntime>();
 const ROOM_INACTIVE_TIMEOUT_MS = 90_000;
 const pendingInactiveRoomLeaves = new Map<string, Map<string, ReturnType<typeof setTimeout>>>();
 
-function playerSlotsForGame(gameType: BoardGameType): number {
-  return gameType === 'gomoku' ||
-    gameType === 'santorini' ||
-    gameType === 'onitama' ||
-    gameType === 'battleship' ||
-    gameType === 'yahtzee' ||
-    gameType === 'domination' ||
-    gameType === 'love_letter' ||
-    gameType === 'codenames_duet' ||
-    gameType === 'go' ||
-    gameType === 'xiangqi' ||
-    gameType === 'connect4' ||
-    gameType === 'reversi' ||
-    gameType === 'dots' ||
-    gameType === 'cards' ||
-    gameType === 'quoridor' ||
-    gameType === 'hex' ||
-    gameType === 'liars_dice'
-    ? 2
-    : 2;
+function minPlayersToStartForGame(_gameType: BoardGameType): number {
+  return 2;
+}
+
+function maxPlayerSeatsForGame(gameType: BoardGameType): number {
+  return gameType === 'texas_holdem' ? 6 : 2;
 }
 
 function send(client: ClientContext, message: ServerToClientMessage): void {
@@ -975,10 +1018,17 @@ function isUserSubscribedToRoom(userId: string, roomId: string): boolean {
   return Array.from(set).some((client) => client.user?.id === userId);
 }
 
+function findSeatedPlayersList(room: RoomDTO): Array<{ userId: string; seat: number }> {
+  return room.players
+    .filter((player): player is RoomDTO['players'][number] & { seat: number } => {
+      return player.role === 'player' && typeof player.seat === 'number';
+    })
+    .sort((a, b) => a.seat - b.seat)
+    .map((player) => ({ userId: player.userId, seat: player.seat }));
+}
+
 function findSeatedPlayers(room: RoomDTO): { first: string | null; second: string | null } {
-  const players = room.players
-    .filter((player) => player.role === 'player' && player.seat !== null)
-    .sort((a, b) => (a.seat ?? 99) - (b.seat ?? 99));
+  const players = findSeatedPlayersList(room);
 
   return {
     first: players[0]?.userId ?? null,
@@ -991,7 +1041,11 @@ function getViewerRole(room: RoomDTO, userId: string): RoomPlayerRole {
   return member?.role ?? 'spectator';
 }
 
-function runtimePlayers(runtime: ActiveRuntime): [string, string] {
+function runtimePlayers(runtime: ActiveRuntime): string[] {
+  if (runtime.gameType === 'texas_holdem') {
+    return [...runtime.players].sort((left, right) => left.seat - right.seat).map((entry) => entry.userId);
+  }
+
   if (
     runtime.gameType === 'backgammon' ||
     runtime.gameType === 'cards' ||
@@ -1025,6 +1079,17 @@ function isRuntimeSyncedWithRoom(runtime: ActiveRuntime, room: RoomDTO): boolean
     return false;
   }
 
+  if (runtime.gameType === 'texas_holdem') {
+    const roomPlayers = findSeatedPlayersList(room)
+      .slice(0, maxPlayerSeatsForGame('texas_holdem'))
+      .map((entry) => entry.userId);
+    const currentPlayers = runtimePlayers(runtime);
+    return (
+      roomPlayers.length === currentPlayers.length &&
+      roomPlayers.every((userId, index) => userId === currentPlayers[index])
+    );
+  }
+
   const players = findSeatedPlayers(room);
   if (!players.first || !players.second) {
     return false;
@@ -1054,6 +1119,19 @@ function mergeResultPayloadWithRng(
 ): Record<string, unknown> | null {
   if (!hasRngSession(runtime)) {
     return base ?? null;
+  }
+
+  if (runtime.gameType === 'texas_holdem') {
+    return {
+      ...(base ?? {}),
+      rng: {
+        hands: runtime.rngHistory.map((entry) => ({
+          handNumber: entry.handNumber,
+          ...entry.rng
+        })),
+        active: buildRngPayload(runtime.rngSession)
+      }
+    };
   }
 
   return {
@@ -1439,6 +1517,14 @@ function codenamesDuetStateForClient(
   return toCodenamesDuetPublicState(runtime.state, side, revealAll);
 }
 
+function texasHoldemStateForClient(runtime: TexasHoldemRuntime, client: ClientContext): TexasHoldemState {
+  return toTexasHoldemPublicState(
+    runtime.state,
+    client.user?.id ?? null,
+    runtime.state.status === 'completed'
+  );
+}
+
 function broadcastCardsMoveApplied(
   runtime: CardsRuntime,
   targets: Set<ClientContext>,
@@ -1543,6 +1629,25 @@ function broadcastCodenamesDuetMoveApplied(
       payload: {
         roomId: runtime.roomId,
         gameType: 'codenames_duet',
+        state,
+        lastMove
+      }
+    });
+  }
+}
+
+function broadcastTexasHoldemMoveApplied(
+  runtime: TexasHoldemRuntime,
+  targets: Set<ClientContext>,
+  lastMove: TexasHoldemMove
+): void {
+  for (const target of targets) {
+    const state = texasHoldemStateForClient(runtime, target);
+    send(target, {
+      type: 'match.move_applied',
+      payload: {
+        roomId: runtime.roomId,
+        gameType: 'texas_holdem',
         state,
         lastMove
       }
@@ -1727,6 +1832,34 @@ function scheduleInactiveRoomLeaves(userId: string, roomIds: string[]): void {
 }
 
 function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
+  const seatedPlayers = findSeatedPlayersList(room);
+  if (room.gameType === 'texas_holdem') {
+    if (seatedPlayers.length < minPlayersToStartForGame('texas_holdem')) {
+      return null;
+    }
+
+    const holdemPlayers = seatedPlayers
+      .slice(0, maxPlayerSeatsForGame('texas_holdem'))
+      .map((player) => ({ seat: player.seat, userId: player.userId }));
+    return {
+      gameType: 'texas_holdem',
+      roomId: room.id,
+      matchId,
+      state: createTexasHoldemState({
+        players: holdemPlayers,
+        startingStack: 100,
+        smallBlind: 1,
+        bigBlind: 2
+      }),
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerUserIds: holdemPlayers.map((player) => player.userId)
+      }),
+      players: holdemPlayers,
+      rngHistory: []
+    };
+  }
+
   const players = findSeatedPlayers(room);
   if (!players.first || !players.second) {
     return null;
@@ -2417,6 +2550,39 @@ function readCodenamesDuetMovePayload(payload: Record<string, unknown>): Codenam
   return isCodenamesDuetMoveRecord(payload) ? payload : null;
 }
 
+function isTexasHoldemMoveRecord(value: unknown): value is TexasHoldemMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<TexasHoldemMove>;
+  if (typed.type === 'fold' || typed.type === 'check' || typed.type === 'call') {
+    return typeof typed.seat === 'number' && Number.isInteger(typed.seat) && typed.seat > 0;
+  }
+
+  if (typed.type === 'bet') {
+    return (
+      typeof typed.seat === 'number' &&
+      Number.isInteger(typed.seat) &&
+      typed.seat > 0 &&
+      typeof typed.amount === 'number' &&
+      Number.isInteger(typed.amount) &&
+      typed.amount > 0
+    );
+  }
+
+  return false;
+}
+
+function readTexasHoldemMovePayload(payload: Record<string, unknown>): TexasHoldemMove | null {
+  const nested = payload.move;
+  if (isTexasHoldemMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isTexasHoldemMoveRecord(payload) ? payload : null;
+}
+
 function replayMoves(
   runtime: ActiveRuntime,
   moves: Array<{ payload: Record<string, unknown> }>
@@ -2710,6 +2876,82 @@ function replayMoves(
       continue;
     }
 
+    if (current.gameType === 'texas_holdem') {
+      const payload = move.payload as {
+        move?: Record<string, unknown>;
+        rngSeed?: string;
+        handNumber?: number;
+        rng?: Record<string, unknown>;
+      };
+      if (typeof payload.rngSeed === 'string' && payload.rngSeed.length > 0) {
+        current = {
+          ...current,
+          rngSession: {
+            ...current.rngSession,
+            phase: 'ready',
+            rngSeed: payload.rngSeed,
+            revealDeadlineAt: null
+          }
+        };
+
+        const prng = createDeterministicPrng(payload.rngSeed);
+        const deck = createTexasHoldemDeck();
+        prng.shuffleInPlace(deck);
+        const started = startTexasHoldemHand(current.state, deck);
+        if (started.accepted) {
+          const rngPayload = buildRngPayload(current.rngSession);
+          current = {
+            ...current,
+            state: started.nextState,
+            rngHistory: [
+              ...current.rngHistory,
+              {
+                handNumber:
+                  typeof payload.handNumber === 'number' && Number.isInteger(payload.handNumber)
+                    ? payload.handNumber
+                    : started.nextState.handNumber,
+                rng: rngPayload
+              }
+            ]
+          };
+        }
+      }
+
+      const parsedMove = readTexasHoldemMovePayload(move.payload);
+      if (!parsedMove) {
+        continue;
+      }
+
+      const applied = applyTexasHoldemMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      let nextRuntime: TexasHoldemRuntime = {
+        ...current,
+        state: applied.nextState
+      };
+
+      if (nextRuntime.state.stage === 'awaiting_rng' && nextRuntime.state.status === 'playing') {
+        const nextPlayers = nextRuntime.players.filter((entry) => {
+          const seat = nextRuntime.state.seats.find((stateSeat) => stateSeat.seat === entry.seat);
+          return Boolean(seat && seat.stack > 0);
+        });
+        if (nextPlayers.length >= minPlayersToStartForGame('texas_holdem')) {
+          nextRuntime = {
+            ...nextRuntime,
+            rngSession: createVerifiableRngSession({
+              matchId: nextRuntime.matchId,
+              playerUserIds: nextPlayers.map((entry) => entry.userId)
+            })
+          };
+        }
+      }
+
+      current = nextRuntime;
+      continue;
+    }
+
     if (current.gameType === 'gomoku') {
       const payload = move.payload as { x?: number; y?: number; player?: GomokuMark };
       if (typeof payload.x !== 'number' || typeof payload.y !== 'number') {
@@ -2984,7 +3226,11 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   }
 
   const seated = findSeatedPlayers(room);
-  if (!seated.first || !seated.second) {
+  const seatedList = findSeatedPlayersList(room);
+  if (
+    (room.gameType === 'texas_holdem' && seatedList.length < minPlayersToStartForGame('texas_holdem')) ||
+    (room.gameType !== 'texas_holdem' && (!seated.first || !seated.second))
+  ) {
     activeRuntimes.delete(roomId);
     return null;
   }
@@ -3032,7 +3278,6 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   if (replayed.gameType === 'yahtzee' && replayed.rngSession.phase === 'ready') {
     ensureYahtzeePrng(replayed);
   }
-
   if (match.status === 'active') {
     if (hasRngSession(replayed) && isRevealTimedOut(replayed.rngSession)) {
       activeRuntimes.delete(roomId);
@@ -3082,7 +3327,7 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   return replayed;
 }
 
-async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | null> {
+async function ensureRoomMatchIfReady(roomId: string, forceStart = false): Promise<ActiveRuntime | null> {
   const existing = await getOrLoadRuntime(roomId);
   if (
     existing &&
@@ -3092,6 +3337,7 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
       existing.gameType === 'onitama' ||
       existing.gameType === 'codenames_duet') &&
       existing.state?.status === 'playing') ||
+      (existing.gameType === 'texas_holdem' && existing.state.status === 'playing') ||
       (existing.gameType === 'santorini' && existing.state.status !== 'completed') ||
       (existing.gameType !== 'cards' &&
         existing.gameType !== 'love_letter' &&
@@ -3099,6 +3345,7 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
         existing.gameType !== 'onitama' &&
         existing.gameType !== 'santorini' &&
         existing.gameType !== 'liars_dice' &&
+        existing.gameType !== 'texas_holdem' &&
         existing.state.status === 'playing'))
   ) {
     return existing;
@@ -3109,8 +3356,12 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
     return null;
   }
 
+  if (room.gameType === 'texas_holdem' && !forceStart) {
+    return null;
+  }
+
   const players = room.players.filter((player) => player.role === 'player');
-  if (players.length < playerSlotsForGame(room.gameType)) {
+  if (players.length < minPlayersToStartForGame(room.gameType)) {
     return null;
   }
 
@@ -3293,6 +3544,22 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
       }
     });
     if (runtime?.gameType === 'codenames_duet') {
+      send(client, rngUpdatedMessage(runtime));
+    }
+    return;
+  }
+
+  if (room.gameType === 'texas_holdem') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'texas_holdem',
+        state: runtime?.gameType === 'texas_holdem' ? texasHoldemStateForClient(runtime, client) : null,
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'texas_holdem') {
       send(client, rngUpdatedMessage(runtime));
     }
     return;
@@ -4145,6 +4412,58 @@ async function handleLiarsDiceMove(
   await finishMatchIfCompleted(runtime, targets);
 }
 
+async function handleTexasHoldemMove(
+  client: ClientContext,
+  runtime: TexasHoldemRuntime,
+  move: TexasHoldemMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player = runtime.players.find((entry) => entry.userId === userId);
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove = normalizeTexasHoldemMove(move, player.seat);
+  const applied = applyTexasHoldemMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: `texas_holdem.${normalizedMove.type}`,
+    payload: {
+      move: normalizedMove
+    }
+  });
+
+  if (runtime.state.stage === 'awaiting_rng' && runtime.state.status === 'playing') {
+    const nextPlayers = runtime.players.filter((entry) => {
+      const seat = runtime.state.seats.find((stateSeat) => stateSeat.seat === entry.seat);
+      return Boolean(seat && seat.stack > 0);
+    });
+    if (nextPlayers.length >= minPlayersToStartForGame('texas_holdem')) {
+      runtime.rngSession = createVerifiableRngSession({
+        matchId: runtime.matchId,
+        playerUserIds: nextPlayers.map((entry) => entry.userId)
+      });
+    }
+  }
+
+  activeRuntimes.set(runtime.roomId, runtime);
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcastTexasHoldemMoveApplied(runtime, targets, normalizedMove);
+  if (runtime.state.stage === 'awaiting_rng' && runtime.state.status === 'playing') {
+    broadcast(targets, rngUpdatedMessage(runtime));
+  }
+  await finishMatchIfCompleted(runtime, targets);
+}
+
 async function handleReversiMove(
   client: ClientContext,
   runtime: ReversiRuntime,
@@ -4517,8 +4836,8 @@ async function handleRngCommit(client: ClientContext, roomId: string, commit: st
     return;
   }
 
-  const [first, second] = runtimePlayers(runtime);
-  if (client.user.id !== first && client.user.id !== second) {
+  const players = runtimePlayers(runtime);
+  if (!players.includes(client.user.id)) {
     sendError(client, 'not_a_match_player');
     return;
   }
@@ -4561,8 +4880,8 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
     return;
   }
 
-  const [first, second] = runtimePlayers(runtime);
-  if (client.user.id !== first && client.user.id !== second) {
+  const players = runtimePlayers(runtime);
+  if (!players.includes(client.user.id)) {
     sendError(client, 'not_a_match_player');
     return;
   }
@@ -4674,6 +4993,55 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       });
     }
   }
+  if (runtime.gameType === 'texas_holdem' && runtime.rngSession.phase === 'ready') {
+    const seed = runtime.rngSession.rngSeed;
+    if (!seed) {
+      sendError(client, 'rng_reveal_pending');
+      return;
+    }
+
+    const prng = createDeterministicPrng(seed);
+    const deck = createTexasHoldemDeck();
+    prng.shuffleInPlace(deck);
+    const started = startTexasHoldemHand(runtime.state, deck);
+    if (!started.accepted) {
+      sendError(client, started.reason ?? 'failed_to_start_hand');
+      return;
+    }
+
+    runtime.state = started.nextState;
+    const rngPayload = buildRngPayload(runtime.rngSession);
+    if (becameReady) {
+      runtime.rngHistory.push({
+        handNumber: runtime.state.handNumber,
+        rng: rngPayload
+      });
+      await createMatchMove({
+        matchId: runtime.matchId,
+        actorUserId: client.user.id,
+        moveIndex: runtime.state.moveCount,
+        moveType: 'texas_holdem.rng_ready',
+        payload: {
+          handNumber: runtime.state.handNumber,
+          rngSeed: runtime.rngSession.rngSeed,
+          rng: rngPayload
+        }
+      });
+    }
+
+    if (runtime.state.stage === 'awaiting_rng' && runtime.state.status === 'playing') {
+      const nextPlayers = runtime.players.filter((entry) => {
+        const seat = runtime.state.seats.find((stateSeat) => stateSeat.seat === entry.seat);
+        return Boolean(seat && seat.stack > 0);
+      });
+      if (nextPlayers.length >= minPlayersToStartForGame('texas_holdem')) {
+        runtime.rngSession = createVerifiableRngSession({
+          matchId: runtime.matchId,
+          playerUserIds: nextPlayers.map((entry) => entry.userId)
+        });
+      }
+    }
+  }
   activeRuntimes.set(runtime.roomId, runtime);
   broadcast(targets, rngUpdatedMessage(runtime));
   if (
@@ -4683,11 +5051,49 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       runtime.gameType === 'onitama' ||
       runtime.gameType === 'codenames_duet' ||
       runtime.gameType === 'liars_dice' ||
-      runtime.gameType === 'yahtzee') &&
+      runtime.gameType === 'yahtzee' ||
+      runtime.gameType === 'texas_holdem') &&
     runtime.rngSession.phase === 'ready'
   ) {
     await broadcastRoomStateToSubscribers(runtime.roomId);
   }
+}
+
+async function handleRoomStart(client: ClientContext, roomId: string): Promise<void> {
+  if (!client.user) {
+    sendError(client, 'not_authenticated');
+    return;
+  }
+
+  if (!client.subscribedRooms.has(roomId)) {
+    sendError(client, 'room_not_subscribed');
+    return;
+  }
+
+  const room = await reconcileRoomLifecycle(roomId, 'stale_match_recovery');
+  if (!room) {
+    sendError(client, 'room_not_found');
+    return;
+  }
+
+  if (room.hostUserId !== client.user.id) {
+    sendError(client, 'only_host_can_start');
+    return;
+  }
+
+  if (room.gameType === 'single_2048') {
+    sendError(client, 'unsupported_game_type');
+    return;
+  }
+
+  const runtime = await ensureRoomMatchIfReady(roomId, true);
+  if (!runtime) {
+    sendError(client, 'not_enough_players');
+    return;
+  }
+
+  activeRuntimes.set(roomId, runtime);
+  await broadcastRoomStateToSubscribers(roomId);
 }
 
 async function handleMove(
@@ -4700,6 +5106,7 @@ async function handleMove(
     | { roomId: string; gameType: 'love_letter'; move: LoveLetterMoveInput }
     | { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
+    | { roomId: string; gameType: 'texas_holdem'; move: TexasHoldemMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'domination'; x: number; y: number }
     | { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }
@@ -4770,6 +5177,11 @@ async function handleMove(
 
   if (message.gameType === 'liars_dice' && runtime.gameType === 'liars_dice') {
     await handleLiarsDiceMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'texas_holdem' && runtime.gameType === 'texas_holdem') {
+    await handleTexasHoldemMove(client, runtime, message.move);
     return;
   }
 
@@ -5035,6 +5447,12 @@ wss.on('connection', (socket) => {
         return;
       }
 
+      if (parsed.type === 'room.start') {
+        const msg = roomStartSchema.parse(parsed);
+        await handleRoomStart(client, msg.payload.roomId);
+        return;
+      }
+
       if (parsed.type === 'room.rng.commit') {
         const msg = roomRngCommitSchema.parse(parsed);
         await handleRngCommit(client, msg.payload.roomId, msg.payload.commit);
@@ -5108,6 +5526,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'liars_dice',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'texas_holdem') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'texas_holdem',
             move: msg.payload.move
           });
           return;

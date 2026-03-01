@@ -43,7 +43,8 @@ const ALL_GAME_TYPES: GameType[] = [
   'cards',
   'quoridor',
   'hex',
-  'liars_dice'
+  'liars_dice',
+  'texas_holdem'
 ];
 const INITIAL_RATING = 1200;
 const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
@@ -65,19 +66,40 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   cards: 24,
   quoridor: 24,
   hex: 24,
-  liars_dice: 24
+  liars_dice: 24,
+  texas_holdem: 24
 };
 
-function playerSlotsForGame(gameType: GameType): number {
+function minPlayersToStartForGame(gameType: GameType): number {
   return gameType === 'single_2048' ? 1 : 2;
 }
 
 function defaultMaxPlayersForGame(gameType: GameType): number {
-  return gameType === 'single_2048' ? 1 : 4;
+  if (gameType === 'single_2048') {
+    return 1;
+  }
+
+  if (gameType === 'texas_holdem') {
+    return 6;
+  }
+
+  return 4;
+}
+
+function maxPlayerSeatsForGame(gameType: GameType): number {
+  if (gameType === 'single_2048') {
+    return 1;
+  }
+
+  if (gameType === 'texas_holdem') {
+    return 6;
+  }
+
+  return 2;
 }
 
 function normalizeMaxPlayers(gameType: GameType, requested?: number): number {
-  const slots = playerSlotsForGame(gameType);
+  const slots = maxPlayerSeatsForGame(gameType);
   const fallback = defaultMaxPlayersForGame(gameType);
   const maxPlayers = requested ?? fallback;
 
@@ -116,7 +138,8 @@ function createDefaultRatings(): RatingMap {
     cards: INITIAL_RATING,
     quoridor: INITIAL_RATING,
     hex: INITIAL_RATING,
-    liars_dice: INITIAL_RATING
+    liars_dice: INITIAL_RATING,
+    texas_holdem: INITIAL_RATING
   };
 }
 
@@ -522,7 +545,7 @@ async function reconcileRoomLifecycleTx(
 
   const activePlayers = members.rows.filter((row) => row.role === 'player');
   const memberIds = new Set(members.rows.map((row) => row.user_id));
-  const requiredPlayers = playerSlotsForGame(room.game_type);
+  const requiredPlayers = minPlayersToStartForGame(room.game_type);
 
   if (!memberIds.has(room.host_user_id)) {
     const nextHost = activePlayers[0]?.user_id ?? members.rows[0].user_id;
@@ -589,7 +612,7 @@ async function joinRoomTx(
     throw new StoreError('Room is closed', 'forbidden');
   }
 
-  const maxPlayersForMode = playerSlotsForGame(room.gameType);
+  const maxPlayersForMode = maxPlayerSeatsForGame(room.gameType);
   const activePlayers = room.players.filter((member) => member.role === 'player');
   const existingMember = room.players.find((member) => member.userId === userId);
   if (existingMember) {
@@ -1153,7 +1176,7 @@ export function createPostgresStore(): Store {
           [room.id]
         );
         const playerCount = playersResult.rows[0]?.player_count ?? 0;
-        const joinAsSpectator = playerCount >= playerSlotsForGame(room.game_type);
+        const joinAsSpectator = playerCount >= maxPlayerSeatsForGame(room.game_type);
 
         const joinedRoom = await joinRoomTx(client, room.id, params.userId, joinAsSpectator);
         const role =

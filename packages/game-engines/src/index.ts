@@ -70,6 +70,17 @@ export {
   type LiarsDiceRoundReveal,
   type LiarsDiceRuntimeState
 } from './liars-dice.js';
+export {
+  applyTexasHoldemMove,
+  createTexasHoldemDeck,
+  createTexasHoldemState,
+  evaluateTexasHoldemBestHand,
+  normalizeTexasHoldemMove,
+  startTexasHoldemHand,
+  toTexasHoldemPublicState,
+  type TexasHoldemRuntimeSeatState,
+  type TexasHoldemRuntimeState
+} from './texas-holdem.js';
 export { applyQuoridorMove, createQuoridorState } from './quoridor.js';
 export { createDeterministicPrng, type DeterministicPrng } from './random.js';
 export { applyReversiMove, createReversiState } from './reversi.js';

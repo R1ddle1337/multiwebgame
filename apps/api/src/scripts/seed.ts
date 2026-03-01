@@ -52,7 +52,8 @@ async function run(): Promise<void> {
           'cards',
           'quoridor',
           'hex',
-          'liars_dice'
+          'liars_dice',
+          'texas_holdem'
         ]
       ]
     );

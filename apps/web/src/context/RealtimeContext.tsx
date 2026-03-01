@@ -7,7 +7,8 @@ import type {
   RoomPlayerRole,
   RoomStatePayload,
   ServerToClientMessage,
-  UserDTO
+  UserDTO,
+  VerifiableRngPublicState
 } from '@multiwebgame/shared-types';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -47,6 +48,32 @@ const WS_AUTH_TIMEOUT_MS = 10_000;
 const WS_PING_INTERVAL_MS = 15_000;
 const WS_PONG_TIMEOUT_MS = 45_000;
 
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function createNonceHex(): string {
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    return `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  }
+
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return toHex(bytes);
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  if (typeof crypto === 'undefined' || typeof crypto.subtle?.digest !== 'function') {
+    return input;
+  }
+
+  const encoded = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return toHex(new Uint8Array(digest));
+}
+
 interface Props {
   token: string;
   user: UserDTO;
@@ -64,6 +91,9 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
   const isAuthedRef = useRef(false);
   const shouldReconnectRef = useRef(true);
   const pendingMessagesRef = useRef<ClientToServerMessage[]>([]);
+  const rngNonceByRoomRef = useRef<Record<string, string>>({});
+  const rngCommitPendingRef = useRef<Record<string, boolean>>({});
+  const rngRevealPendingRef = useRef<Record<string, boolean>>({});
 
   const [status, setStatus] = useState<'disconnected' | 'connecting' | 'connected'>('connecting');
   const [onlineUsers, setOnlineUsers] = useState<Array<{ userId: string; displayName: string }>>([]);
@@ -86,7 +116,8 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
     xiangqi: 0,
     quoridor: 0,
     hex: 0,
-    liars_dice: 0
+    liars_dice: 0,
+    texas_holdem: 0
   });
   const [roomStates, setRoomStates] = useState<Record<string, RoomSnapshot>>({});
   const [matchedRoom, setMatchedRoom] = useState<{ room: RoomDTO; matchId: string } | null>(null);
@@ -270,6 +301,89 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
                     : null
               }
             }));
+            break;
+          }
+          case 'room.rng.updated': {
+            const payload: VerifiableRngPublicState = message.payload;
+            const selfUserId = user.id;
+            const isParticipant = Object.prototype.hasOwnProperty.call(payload.commits, selfUserId);
+
+            if (!isParticipant) {
+              delete rngNonceByRoomRef.current[payload.roomId];
+              delete rngCommitPendingRef.current[payload.roomId];
+              delete rngRevealPendingRef.current[payload.roomId];
+              break;
+            }
+
+            if (payload.phase !== 'awaiting_commits' || payload.commits[selfUserId] !== null) {
+              rngCommitPendingRef.current[payload.roomId] = false;
+            }
+            if (payload.phase !== 'awaiting_reveals' || payload.revealedUsers.includes(selfUserId)) {
+              rngRevealPendingRef.current[payload.roomId] = false;
+            }
+
+            if (payload.phase === 'ready') {
+              delete rngNonceByRoomRef.current[payload.roomId];
+              break;
+            }
+
+            if (
+              payload.phase === 'awaiting_commits' &&
+              payload.commits[selfUserId] === null &&
+              !rngCommitPendingRef.current[payload.roomId]
+            ) {
+              const nonce = rngNonceByRoomRef.current[payload.roomId] ?? createNonceHex();
+              rngNonceByRoomRef.current[payload.roomId] = nonce;
+              rngCommitPendingRef.current[payload.roomId] = true;
+              void sha256Hex(nonce)
+                .then((commit) => {
+                  const openSocket = socketRef.current;
+                  if (!openSocket || openSocket.readyState !== WebSocket.OPEN || !isAuthedRef.current) {
+                    rngCommitPendingRef.current[payload.roomId] = false;
+                    return;
+                  }
+
+                  openSocket.send(
+                    JSON.stringify({
+                      type: 'room.rng.commit',
+                      payload: {
+                        roomId: payload.roomId,
+                        commit
+                      }
+                    })
+                  );
+                })
+                .catch(() => {
+                  rngCommitPendingRef.current[payload.roomId] = false;
+                });
+            }
+
+            if (
+              payload.phase === 'awaiting_reveals' &&
+              !payload.revealedUsers.includes(selfUserId) &&
+              !rngRevealPendingRef.current[payload.roomId]
+            ) {
+              const nonce = rngNonceByRoomRef.current[payload.roomId];
+              if (!nonce) {
+                break;
+              }
+
+              const openSocket = socketRef.current;
+              if (!openSocket || openSocket.readyState !== WebSocket.OPEN || !isAuthedRef.current) {
+                break;
+              }
+
+              rngRevealPendingRef.current[payload.roomId] = true;
+              openSocket.send(
+                JSON.stringify({
+                  type: 'room.rng.reveal',
+                  payload: {
+                    roomId: payload.roomId,
+                    nonce
+                  }
+                })
+              );
+            }
             break;
           }
           case 'match.move_applied': {

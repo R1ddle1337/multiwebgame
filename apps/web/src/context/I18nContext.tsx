@@ -76,6 +76,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.create.dots': '创建点格棋房间',
     'lobby.create.go': '创建围棋房间',
     'lobby.create.xiangqi': '创建象棋房间',
+    'lobby.create.texas_holdem': '创建德州扑克房间',
     'lobby.training': '训练模式',
     'training.title': '训练模式',
     'training.sandbox_note': '训练沙盒：使用确定性本地随机种子，不走实时 commit/reveal。',
@@ -270,6 +271,46 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.liars.bid_submit': '提交出价',
     'room.liars.call_liar': '叫 Liar',
     'room.liars.last_round': '上轮结算: 出价 {quantity} 个 {face}，匹配 {total}，输家 {loser}',
+    'room.texas.start_match': '开始牌局',
+    'room.texas.ready_to_start': '玩家已就位，可由房主开始牌局。',
+    'room.texas.waiting_host_start': '等待房主开始牌局。',
+    'room.texas.waiting_start': '等待房主开始牌局。',
+    'room.texas.hand_stage': '手牌 #{hand} • 阶段: {stage}',
+    'room.texas.table':
+      '底池 {pot} • 当前下注 {currentBet} • 最小加注到 {minRaiseTo} • 庄位 {button} • 行动位 {actionSeat}',
+    'room.texas.board': '公共牌: {cards}',
+    'room.texas.seat_line': '座位 {seat} • {user} • 筹码 {stack} • 本轮下注 {bet} • {status}',
+    'room.texas.hole_cards': '底牌: {cards}',
+    'room.texas.hole_cards_hidden': '隐藏',
+    'room.texas.hole_cards_pending': '待发牌',
+    'room.texas.status.live': '在局',
+    'room.texas.status.folded': '已弃牌',
+    'room.texas.status.all_in': '全下',
+    'room.texas.status.out': '出局',
+    'room.texas.action.fold': '弃牌',
+    'room.texas.action.check': '过牌',
+    'room.texas.action.call': '跟注 {amount}',
+    'room.texas.action.bet_to': '下注到',
+    'room.texas.action.bet': '下注/加注',
+    'room.texas.showdown': '摊牌: {summary}',
+    'room.texas.last_hand_winners': '本手赢家: {winners}',
+    'room.texas.match_winner': '整局赢家: {winners}',
+    'room.texas.stage.awaiting_rng': '等待随机承诺',
+    'room.texas.stage.preflop': '翻牌前',
+    'room.texas.stage.flop': '翻牌',
+    'room.texas.stage.turn': '转牌',
+    'room.texas.stage.river': '河牌',
+    'room.texas.stage.showdown': '摊牌',
+    'room.texas.stage.hand_complete': '手牌完成',
+    'room.texas.hand.high_card': '高牌',
+    'room.texas.hand.pair': '一对',
+    'room.texas.hand.two_pair': '两对',
+    'room.texas.hand.three_of_a_kind': '三条',
+    'room.texas.hand.straight': '顺子',
+    'room.texas.hand.flush': '同花',
+    'room.texas.hand.full_house': '葫芦',
+    'room.texas.hand.four_of_a_kind': '四条',
+    'room.texas.hand.straight_flush': '同花顺',
     'room.quoridor.walls_remaining': '剩余墙数 • 黑: {black} • 白: {white}',
     'replay.loading': '正在加载回放...',
     'replay.title': '回放 {id}',
@@ -328,6 +369,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.hex': '六角棋',
     'enum.game.go': '围棋',
     'enum.game.xiangqi': '象棋',
+    'enum.game.texas_holdem': '德州扑克',
     'enum.game.single_2048': '2048',
     'enum.suit.clubs': '梅花',
     'enum.suit.diamonds': '方片',
@@ -343,6 +385,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.room_not_subscribed': '请先进入房间后再操作',
     'error.room_join_failed': '加入房间失败，请稍后重试',
     'error.invite_invalid': '邀请链接已失效或不可用',
+    'error.only_host_can_start': '仅房主可开始牌局',
+    'error.not_enough_players': '玩家人数不足，暂无法开始',
+    'error.rng_reveal_pending': '等待所有玩家完成随机承诺与揭示',
     'error.game_type_mismatch': '游戏类型不匹配',
     'error.out_of_bounds': '坐标超出棋盘范围',
     'error.out_of_turn': '未轮到你落子',
@@ -435,6 +480,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'lobby.create.dots': 'Create Dots Room',
     'lobby.create.go': 'Create Go Room',
     'lobby.create.xiangqi': 'Create Xiangqi Room',
+    'lobby.create.texas_holdem': "Create Texas Hold'em Room",
     'lobby.training': 'Training Mode',
     'training.title': 'Training Mode',
     'training.sandbox_note': 'Training Sandbox: deterministic local seed, no realtime commit/reveal.',
@@ -628,6 +674,46 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'room.liars.bid_submit': 'Submit Bid',
     'room.liars.call_liar': 'Call Liar',
     'room.liars.last_round': 'Last round: bid {quantity} of face {face}, matched {total}, loser {loser}',
+    'room.texas.start_match': 'Start Match',
+    'room.texas.ready_to_start': 'Enough players are seated. Host can start the match.',
+    'room.texas.waiting_host_start': 'Waiting for the host to start the match.',
+    'room.texas.waiting_start': 'Waiting for the host to start the match.',
+    'room.texas.hand_stage': 'Hand #{hand} • Stage: {stage}',
+    'room.texas.table':
+      'Pot {pot} • Current bet {currentBet} • Min raise to {minRaiseTo} • Button seat {button} • Action seat {actionSeat}',
+    'room.texas.board': 'Board: {cards}',
+    'room.texas.seat_line': 'Seat {seat} • {user} • Stack {stack} • Street bet {bet} • {status}',
+    'room.texas.hole_cards': 'Hole cards: {cards}',
+    'room.texas.hole_cards_hidden': 'hidden',
+    'room.texas.hole_cards_pending': 'pending',
+    'room.texas.status.live': 'live',
+    'room.texas.status.folded': 'folded',
+    'room.texas.status.all_in': 'all-in',
+    'room.texas.status.out': 'out',
+    'room.texas.action.fold': 'Fold',
+    'room.texas.action.check': 'Check',
+    'room.texas.action.call': 'Call {amount}',
+    'room.texas.action.bet_to': 'Bet/Raise to',
+    'room.texas.action.bet': 'Bet/Raise',
+    'room.texas.showdown': 'Showdown: {summary}',
+    'room.texas.last_hand_winners': 'Last hand winners: {winners}',
+    'room.texas.match_winner': 'Match winner(s): {winners}',
+    'room.texas.stage.awaiting_rng': 'awaiting rng',
+    'room.texas.stage.preflop': 'preflop',
+    'room.texas.stage.flop': 'flop',
+    'room.texas.stage.turn': 'turn',
+    'room.texas.stage.river': 'river',
+    'room.texas.stage.showdown': 'showdown',
+    'room.texas.stage.hand_complete': 'hand complete',
+    'room.texas.hand.high_card': 'high card',
+    'room.texas.hand.pair': 'pair',
+    'room.texas.hand.two_pair': 'two pair',
+    'room.texas.hand.three_of_a_kind': 'three of a kind',
+    'room.texas.hand.straight': 'straight',
+    'room.texas.hand.flush': 'flush',
+    'room.texas.hand.full_house': 'full house',
+    'room.texas.hand.four_of_a_kind': 'four of a kind',
+    'room.texas.hand.straight_flush': 'straight flush',
     'room.quoridor.walls_remaining': 'Walls left • Black: {black} • White: {white}',
     'replay.loading': 'Loading replay...',
     'replay.title': 'Replay {id}',
@@ -686,6 +772,7 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'enum.game.hex': 'hex',
     'enum.game.go': 'go',
     'enum.game.xiangqi': 'xiangqi',
+    'enum.game.texas_holdem': 'texas_holdem',
     'enum.game.single_2048': '2048',
     'enum.suit.clubs': 'clubs',
     'enum.suit.diamonds': 'diamonds',
@@ -701,6 +788,9 @@ const messages: Record<AppLocale, Record<string, string>> = {
     'error.room_not_subscribed': 'Join the room before sending actions',
     'error.room_join_failed': 'Failed to join room. Please retry.',
     'error.invite_invalid': 'Invite link is invalid or expired',
+    'error.only_host_can_start': 'Only the host can start the match',
+    'error.not_enough_players': 'Not enough players to start',
+    'error.rng_reveal_pending': 'Waiting for all players to finish RNG commit/reveal',
     'error.game_type_mismatch': 'Game type mismatch',
     'error.out_of_bounds': 'Move coordinates are out of bounds',
     'error.out_of_turn': 'It is not your turn',
@@ -843,6 +933,15 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       if (normalized.includes('room_join_failed')) {
         return withCode('error.room_join_failed');
       }
+      if (normalized.includes('only_host_can_start')) {
+        return withCode('error.only_host_can_start');
+      }
+      if (normalized.includes('not_enough_players')) {
+        return withCode('error.not_enough_players');
+      }
+      if (normalized.includes('rng_reveal_pending')) {
+        return withCode('error.rng_reveal_pending');
+      }
       if (normalized.includes('game_type_mismatch')) {
         return withCode('error.game_type_mismatch');
       }
@@ -882,7 +981,15 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
         normalized.includes('invalid_hold_mask') ||
         normalized.includes('no_rolls_remaining') ||
         normalized.includes('unknown_category') ||
-        normalized.includes('invalid_die_roll')
+        normalized.includes('invalid_die_roll') ||
+        normalized.includes('cannot_check') ||
+        normalized.includes('nothing_to_call') ||
+        normalized.includes('all_in_must_call') ||
+        normalized.includes('raise_below_minimum') ||
+        normalized.includes('raise_must_exceed_current_bet') ||
+        normalized.includes('invalid_raise_amount') ||
+        normalized.includes('seat_cannot_act') ||
+        normalized.includes('hand_not_in_action')
       ) {
         return withCode('error.invalid_move');
       }

@@ -33,7 +33,8 @@ const ALL_GAME_TYPES: GameType[] = [
   'cards',
   'quoridor',
   'hex',
-  'liars_dice'
+  'liars_dice',
+  'texas_holdem'
 ];
 const INITIAL_RATING = 1200;
 const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
@@ -55,7 +56,8 @@ const ELO_K_FACTOR_BY_GAME: Record<GameType, number> = {
   cards: 24,
   quoridor: 24,
   hex: 24,
-  liars_dice: 24
+  liars_dice: 24,
+  texas_holdem: 24
 };
 
 function toIso(value: Date | string): string {
@@ -82,16 +84,37 @@ function createDefaultRatings(): RatingMap {
     cards: INITIAL_RATING,
     quoridor: INITIAL_RATING,
     hex: INITIAL_RATING,
-    liars_dice: INITIAL_RATING
+    liars_dice: INITIAL_RATING,
+    texas_holdem: INITIAL_RATING
   };
 }
 
-function playerSlotsForGame(gameType: GameType): number {
+function minPlayersToStartForGame(gameType: GameType): number {
   return gameType === 'single_2048' ? 1 : 2;
 }
 
 function defaultMaxPlayersForGame(gameType: GameType): number {
-  return gameType === 'single_2048' ? 1 : 4;
+  if (gameType === 'single_2048') {
+    return 1;
+  }
+
+  if (gameType === 'texas_holdem') {
+    return 6;
+  }
+
+  return 4;
+}
+
+function maxPlayerSeatsForGame(gameType: GameType): number {
+  if (gameType === 'single_2048') {
+    return 1;
+  }
+
+  if (gameType === 'texas_holdem') {
+    return 6;
+  }
+
+  return 2;
 }
 
 async function abandonActiveMatches(
@@ -196,7 +219,7 @@ async function reconcileRoomLifecycleTx(
 
   const activePlayers = membersResult.rows.filter((row) => row.role === 'player');
   const memberIds = new Set(membersResult.rows.map((row) => row.user_id));
-  const requiredPlayers = playerSlotsForGame(room.game_type);
+  const requiredPlayers = minPlayersToStartForGame(room.game_type);
 
   if (!memberIds.has(room.host_user_id)) {
     const nextHost = activePlayers[0]?.user_id ?? membersResult.rows[0].user_id;
@@ -436,7 +459,7 @@ async function updateRatingsForMatch(
   gameType: GameType,
   winnerUserId: string | null
 ): Promise<void> {
-  if (gameType === 'single_2048') {
+  if (gameType === 'single_2048' || gameType === 'texas_holdem') {
     return;
   }
 
@@ -570,6 +593,7 @@ export async function createMatchmakingRoom(
     | 'quoridor'
     | 'hex'
     | 'liars_dice'
+    | 'texas_holdem'
   >
 ): Promise<{ room: RoomDTO; matchId: string }> {
   return withTransaction(async (client) => {
@@ -657,7 +681,7 @@ export async function createMatchForRoom(roomId: string): Promise<string> {
       [roomId]
     );
 
-    const requiredPlayers = playerSlotsForGame(room.game_type);
+    const requiredPlayers = minPlayersToStartForGame(room.game_type);
     const playerCount = playersResult.rows[0]?.player_count ?? 0;
     if (playerCount < requiredPlayers) {
       throw new Error('not_enough_players');
@@ -917,7 +941,7 @@ export async function joinRoomIfPossible(
       [roomId]
     );
 
-    const maxPlayerSlots = playerSlotsForGame(room.game_type);
+    const maxPlayerSlots = maxPlayerSeatsForGame(room.game_type);
     const activePlayers = members.rows.filter((row) => row.role === 'player');
     if (existing.rowCount && existing.rows[0].role === 'spectator' && !asSpectator) {
       if (activePlayers.length < maxPlayerSlots) {

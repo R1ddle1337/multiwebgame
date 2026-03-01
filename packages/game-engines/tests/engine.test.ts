@@ -12,6 +12,7 @@ import {
   applyHexMove,
   applyLiarsDiceMove,
   applyLoveLetterMove,
+  applyTexasHoldemMove,
   applyYahtzeeMove,
   applyGoMove,
   applyGomokuMove,
@@ -37,6 +38,8 @@ import {
   createLiarsDiceState,
   createLoveLetterDeck,
   createLoveLetterState,
+  createTexasHoldemDeck,
+  createTexasHoldemState,
   createYahtzeeState,
   createGoState,
   createGomokuState,
@@ -45,7 +48,10 @@ import {
   createSantoriniState,
   createQuoridorState,
   createReversiState,
-  createXiangqiState
+  createXiangqiState,
+  evaluateTexasHoldemBestHand,
+  startTexasHoldemHand,
+  toTexasHoldemPublicState
 } from '../src/index.js';
 
 describe('2048 engine', () => {
@@ -2140,5 +2146,110 @@ describe('xiangqi engine', () => {
     expect(repeated.nextState.status).toBe('completed');
     expect(repeated.nextState.winner).toBe('black');
     expect(repeated.nextState.outcomeReason).toBe('perpetual_check_violation');
+  });
+});
+
+describe('texas holdem engine', () => {
+  it('evaluates 7-card best hand categories', () => {
+    const straightFlush = evaluateTexasHoldemBestHand([
+      { rank: '9', suit: 'hearts' },
+      { rank: '10', suit: 'hearts' },
+      { rank: 'J', suit: 'hearts' },
+      { rank: 'Q', suit: 'hearts' },
+      { rank: 'K', suit: 'hearts' },
+      { rank: '2', suit: 'clubs' },
+      { rank: '3', suit: 'spades' }
+    ]);
+    expect(straightFlush.category).toBe('straight_flush');
+
+    const wheel = evaluateTexasHoldemBestHand([
+      { rank: 'A', suit: 'clubs' },
+      { rank: '2', suit: 'diamonds' },
+      { rank: '3', suit: 'hearts' },
+      { rank: '4', suit: 'spades' },
+      { rank: '5', suit: 'clubs' },
+      { rank: 'K', suit: 'hearts' },
+      { rank: 'Q', suit: 'spades' }
+    ]);
+    expect(wheel.category).toBe('straight');
+  });
+
+  it('deals deterministic hole cards from a shuffled deck', () => {
+    const players = [
+      { seat: 1, userId: 'u1' },
+      { seat: 2, userId: 'u2' },
+      { seat: 3, userId: 'u3' }
+    ] as const;
+
+    const firstState = createTexasHoldemState({ players: [...players] });
+    const secondState = createTexasHoldemState({ players: [...players] });
+
+    const firstPrng = createDeterministicPrng('ab'.repeat(32));
+    const secondPrng = createDeterministicPrng('ab'.repeat(32));
+    const firstDeck = createTexasHoldemDeck();
+    const secondDeck = createTexasHoldemDeck();
+    firstPrng.shuffleInPlace(firstDeck);
+    secondPrng.shuffleInPlace(secondDeck);
+
+    const firstHand = startTexasHoldemHand(firstState, firstDeck);
+    const secondHand = startTexasHoldemHand(secondState, secondDeck);
+    expect(firstHand.accepted).toBe(true);
+    expect(secondHand.accepted).toBe(true);
+    expect(firstHand.nextState.stage).toBe('preflop');
+    expect(firstHand.nextState.seats.map((seat) => seat.holeCards)).toEqual(
+      secondHand.nextState.seats.map((seat) => seat.holeCards)
+    );
+  });
+
+  it('projects private hole cards per viewer', () => {
+    const initial = createTexasHoldemState({
+      players: [
+        { seat: 1, userId: 'u1' },
+        { seat: 2, userId: 'u2' }
+      ]
+    });
+    const prng = createDeterministicPrng('cd'.repeat(32));
+    const deck = createTexasHoldemDeck();
+    prng.shuffleInPlace(deck);
+    const started = startTexasHoldemHand(initial, deck);
+    expect(started.accepted).toBe(true);
+
+    const forU1 = toTexasHoldemPublicState(started.nextState, 'u1');
+    const forSpectator = toTexasHoldemPublicState(started.nextState, null);
+
+    const u1Seat = forU1.seats.find((seat) => seat.userId === 'u1');
+    const u2Seat = forU1.seats.find((seat) => seat.userId === 'u2');
+    const spectatorU1 = forSpectator.seats.find((seat) => seat.userId === 'u1');
+    const spectatorU2 = forSpectator.seats.find((seat) => seat.userId === 'u2');
+
+    expect(u1Seat?.holeCards).not.toBeNull();
+    expect(u2Seat?.holeCards).toBeNull();
+    expect(spectatorU1?.holeCards).toBeNull();
+    expect(spectatorU2?.holeCards).toBeNull();
+  });
+
+  it('advances to awaiting rng when a hand is won by fold', () => {
+    const initial = createTexasHoldemState({
+      players: [
+        { seat: 1, userId: 'u1' },
+        { seat: 2, userId: 'u2' }
+      ]
+    });
+    const prng = createDeterministicPrng('ef'.repeat(32));
+    const deck = createTexasHoldemDeck();
+    prng.shuffleInPlace(deck);
+    const started = startTexasHoldemHand(initial, deck);
+    expect(started.accepted).toBe(true);
+
+    const actionSeat = started.nextState.actionSeat;
+    expect(actionSeat).not.toBeNull();
+    const move = applyTexasHoldemMove(started.nextState, {
+      type: 'fold',
+      seat: actionSeat as number
+    });
+
+    expect(move.accepted).toBe(true);
+    expect(move.nextState.stage).toBe('awaiting_rng');
+    expect(move.nextState.lastHandWinners?.length).toBe(1);
   });
 });

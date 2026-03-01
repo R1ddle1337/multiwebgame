@@ -19,6 +19,7 @@ import {
   createBackgammonState,
   createGomokuState,
   createSantoriniState,
+  createTexasHoldemState,
   createQuoridorState,
   createReversiState,
   createXiangqiState
@@ -302,6 +303,49 @@ describe('deriveRuntimeCompletion', () => {
             total: 15,
             found: 15
           }
+        }
+      }
+    });
+  });
+
+  it('maps texas holdem completion to winner and payload', () => {
+    const state = createTexasHoldemState({
+      players: [
+        { seat: 1, userId: 'u1001' },
+        { seat: 2, userId: 'u1002' }
+      ]
+    });
+    state.status = 'completed';
+    state.stage = 'hand_complete';
+    state.handNumber = 12;
+    state.moveCount = 144;
+    state.winnerUserIds = ['u1001'];
+    state.seats[0].stack = 200;
+    state.seats[1].stack = 0;
+    state.lastHandWinners = [{ seat: 1, userId: 'u1001', amount: 8 }];
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'texas_holdem',
+      state,
+      players: [
+        { seat: 1, userId: 'u1001' },
+        { seat: 2, userId: 'u1002' }
+      ]
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u1001',
+      status: 'completed',
+      resultPayload: {
+        texas_holdem: {
+          winners: ['u1001'],
+          handNumber: 12,
+          moveCount: 144,
+          lastHandWinners: [{ seat: 1, userId: 'u1001', amount: 8 }],
+          stacks: [
+            { seat: 1, userId: 'u1001', stack: 200 },
+            { seat: 2, userId: 'u1002', stack: 0 }
+          ]
         }
       }
     });
