@@ -32,6 +32,7 @@ const createRoomSchema = z.object({
     'gomoku',
     'santorini',
     'onitama',
+    'codenames_duet',
     'xiangqi',
     'go',
     'connect4',

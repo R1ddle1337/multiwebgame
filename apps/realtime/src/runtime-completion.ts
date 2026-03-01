@@ -1,4 +1,8 @@
-import type { CardsRuntimeState, LiarsDiceRuntimeState } from '@multiwebgame/game-engines';
+import type {
+  CardsRuntimeState,
+  CodenamesDuetRuntimeState,
+  LiarsDiceRuntimeState
+} from '@multiwebgame/game-engines';
 import type {
   BackgammonState,
   Connect4State,
@@ -25,6 +29,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'cards';
       state: CardsRuntimeState | null;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'codenames_duet';
+      state: CodenamesDuetRuntimeState | null;
       players: {
         black: string;
         white: string;
@@ -181,6 +193,42 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           discardPileCount: runtime.state.discardPile.length,
           activeSuit: runtime.state.activeSuit,
           topCard
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'codenames_duet') {
+    if (!runtime.state || runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const state = runtime.state;
+
+    const totalTargets = state.keyBlack.reduce(
+      (count, role, index) => (role === 'agent' || state.keyWhite[index] === 'agent' ? count + 1 : count),
+      0
+    );
+    const foundTargets = state.revealed.reduce(
+      (count, revealed, index) =>
+        revealed && (state.keyBlack[index] === 'agent' || state.keyWhite[index] === 'agent')
+          ? count + 1
+          : count,
+      0
+    );
+
+    return {
+      winnerUserId: null,
+      status: 'completed',
+      resultPayload: {
+        codenames_duet: {
+          outcome: state.outcome,
+          moveCount: state.moveCount,
+          turnsRemaining: state.turnsRemaining,
+          targetCounts: {
+            total: totalTargets,
+            found: foundTargets
+          }
         }
       }
     };

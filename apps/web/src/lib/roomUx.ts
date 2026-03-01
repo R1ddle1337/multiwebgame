@@ -1,4 +1,5 @@
 import type {
+  CodenamesDuetMove,
   Connect4Move,
   DotsMove,
   GoMove,
@@ -83,6 +84,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'codenames_duet',
+  move: CodenamesDuetMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'go',
   move: GoMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -118,6 +124,7 @@ export function describeLastMove(
     | 'connect4'
     | 'santorini'
     | 'onitama'
+    | 'codenames_duet'
     | 'go'
     | 'reversi'
     | 'dots'
@@ -129,6 +136,7 @@ export function describeLastMove(
     | Connect4Move
     | SantoriniMove
     | OnitamaMove
+    | CodenamesDuetMove
     | GoMove
     | ReversiMove
     | DotsMove
@@ -195,6 +203,35 @@ export function describeLastMove(
         from: formatBoardPoint(onitamaMove.from.x, onitamaMove.from.y),
         to: formatBoardPoint(onitamaMove.to.x, onitamaMove.to.y)
       }
+    };
+  }
+
+  if (gameType === 'codenames_duet') {
+    const codenamesMove = move as CodenamesDuetMove;
+    if (codenamesMove.type === 'clue') {
+      return {
+        actor: codenamesMove.player,
+        action: {
+          kind: 'move',
+          from: codenamesMove.word,
+          to: String(codenamesMove.count)
+        }
+      };
+    }
+
+    if (codenamesMove.type === 'guess') {
+      return {
+        actor: codenamesMove.player,
+        action: {
+          kind: 'place',
+          point: `#${codenamesMove.index + 1}`
+        }
+      };
+    }
+
+    return {
+      actor: codenamesMove.player,
+      action: { kind: 'pass' }
     };
   }
 

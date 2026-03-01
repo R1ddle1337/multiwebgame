@@ -63,6 +63,31 @@ Randomness + verification:
 - gameplay is blocked until RNG phase is `ready`
 - completed payload includes RNG proof transcript and sampled opening cards for replay verification
 
+## Codenames Duet (2-player co-op, 5x5)
+
+Implemented rules (v1 simplified co-op loop):
+
+- default word grid `5x5` (`25` words), sampled from fixed open word pool
+- each player has a private key map (`agent`/`neutral`/`assassin`)
+- turn loop:
+  - current clue-giver submits clue (`word` + `count`)
+  - partner guesses indices, up to `count + 1`, or ends guess phase early
+  - neutral guess ends turn; assassin guess ends match immediately
+- global win condition: all target cells (union of both key maps' `agent` cells) are revealed
+- loss conditions: assassin revealed or clue rounds exhausted
+
+Randomness + verification:
+
+- word grid and both key maps are generated via commit-reveal verifiable RNG
+- gameplay remains blocked until RNG phase is `ready`
+- completed payload includes cooperative outcome and RNG proof transcript for replay verification
+
+Visibility policy:
+
+- active player view only includes own key map
+- spectators do not receive key maps during active play
+- completed replay can reveal both key maps
+
 ## Xiangqi (Chinese Chess)
 
 Implemented movement/legality:

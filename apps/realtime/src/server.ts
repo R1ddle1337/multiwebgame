@@ -1,6 +1,7 @@
 import {
   applyBackgammonMove,
   applyCardsMove,
+  applyCodenamesDuetMove,
   applyConnect4Move,
   applyDotsMove,
   applyHexMove,
@@ -16,6 +17,9 @@ import {
   createBackgammonState,
   createCardsDeck,
   createCardsState,
+  createCodenamesDuetRolePool,
+  createCodenamesDuetState,
+  createCodenamesDuetWordPool,
   createConnect4State,
   createDeterministicPrng,
   createDotsState,
@@ -32,10 +36,13 @@ import {
   createXiangqiState,
   formatXiangqiMoveNotation,
   normalizeOnitamaMove,
+  normalizeCodenamesDuetMove,
   normalizeSantoriniMove,
   toCardsPublicState,
+  toCodenamesDuetPublicState,
   toLiarsDicePublicState,
   type CardsRuntimeState,
+  type CodenamesDuetRuntimeState,
   type LiarsDiceRuntimeState,
   type DeterministicPrng
 } from '@multiwebgame/game-engines';
@@ -47,6 +54,10 @@ import type {
   CardsMove,
   CardsMoveInput,
   CardsPlayer,
+  CodenamesDuetMove,
+  CodenamesDuetMoveInput,
+  CodenamesDuetPlayer,
+  CodenamesDuetState,
   ClientToServerMessage,
   Connect4Move,
   Connect4State,
@@ -165,6 +176,19 @@ interface OnitamaRuntime {
   roomId: string;
   matchId: string;
   state: OnitamaState | null;
+  rngSession: VerifiableRngSession;
+  rngPrng: DeterministicPrng | null;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface CodenamesDuetRuntime {
+  gameType: 'codenames_duet';
+  roomId: string;
+  matchId: string;
+  state: CodenamesDuetRuntimeState | null;
   rngSession: VerifiableRngSession;
   rngPrng: DeterministicPrng | null;
   players: {
@@ -299,6 +323,7 @@ interface HexRuntime {
 type ActiveRuntime =
   | BackgammonRuntime
   | CardsRuntime
+  | CodenamesDuetRuntime
   | LiarsDiceRuntime
   | GomokuRuntime
   | SantoriniRuntime
@@ -422,6 +447,27 @@ const roomMoveSchema = z.union([
         }),
         card: z.enum(['tiger', 'dragon', 'frog', 'rabbit', 'crab', 'elephant', 'goose', 'rooster'])
       })
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('codenames_duet'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('clue'),
+          word: z.string().trim().min(1).max(64),
+          count: z.number().int().min(1).max(9)
+        }),
+        z.object({
+          type: z.literal('guess'),
+          index: z.number().int().min(0).max(24)
+        }),
+        z.object({
+          type: z.literal('end_guesses')
+        })
+      ])
     })
   }),
   z.object({
@@ -567,6 +613,7 @@ const matchmakingJoinSchema = z.object({
       'gomoku',
       'santorini',
       'onitama',
+      'codenames_duet',
       'go',
       'xiangqi',
       'connect4',
@@ -609,6 +656,7 @@ function playerSlotsForGame(gameType: BoardGameType): number {
   return gameType === 'gomoku' ||
     gameType === 'santorini' ||
     gameType === 'onitama' ||
+    gameType === 'codenames_duet' ||
     gameType === 'go' ||
     gameType === 'xiangqi' ||
     gameType === 'connect4' ||
@@ -752,6 +800,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
   if (
     runtime.gameType === 'backgammon' ||
     runtime.gameType === 'cards' ||
+    runtime.gameType === 'codenames_duet' ||
     runtime.gameType === 'liars_dice' ||
     runtime.gameType === 'onitama' ||
     runtime.gameType === 'gomoku' ||
@@ -938,6 +987,47 @@ function ensureOnitamaRuntimeState(runtime: OnitamaRuntime): OnitamaState | null
   return runtime.state;
 }
 
+function ensureCodenamesDuetPrng(runtime: CodenamesDuetRuntime): DeterministicPrng | null {
+  if (!runtime.rngSession.rngSeed) {
+    return null;
+  }
+
+  if (runtime.rngPrng) {
+    return runtime.rngPrng;
+  }
+
+  runtime.rngPrng = createDeterministicPrng(runtime.rngSession.rngSeed);
+  return runtime.rngPrng;
+}
+
+function ensureCodenamesDuetRuntimeState(runtime: CodenamesDuetRuntime): CodenamesDuetRuntimeState | null {
+  if (runtime.state) {
+    return runtime.state;
+  }
+
+  const prng = ensureCodenamesDuetPrng(runtime);
+  if (!prng) {
+    return null;
+  }
+
+  const words = createCodenamesDuetWordPool();
+  prng.shuffleInPlace(words);
+
+  const keyBlack = createCodenamesDuetRolePool();
+  const keyWhite = createCodenamesDuetRolePool();
+  prng.shuffleInPlace(keyBlack);
+  prng.shuffleInPlace(keyWhite);
+
+  runtime.state = createCodenamesDuetState({
+    words: words.slice(0, 25),
+    keyBlack,
+    keyWhite,
+    turns: 9,
+    startingCluer: 'black'
+  });
+  return runtime.state;
+}
+
 function ensureLiarsDicePrng(runtime: LiarsDiceRuntime): DeterministicPrng | null {
   if (!runtime.rngSession.rngSeed) {
     return null;
@@ -1001,6 +1091,25 @@ function viewerLiarsDiceSide(runtime: LiarsDiceRuntime, userId: string | null): 
   return null;
 }
 
+function viewerCodenamesDuetSide(
+  runtime: CodenamesDuetRuntime,
+  userId: string | null
+): CodenamesDuetPlayer | null {
+  if (!userId) {
+    return null;
+  }
+
+  if (runtime.players.black === userId) {
+    return 'black';
+  }
+
+  if (runtime.players.white === userId) {
+    return 'white';
+  }
+
+  return null;
+}
+
 function cardsStateForClient(
   runtime: CardsRuntime,
   client: ClientContext
@@ -1020,6 +1129,19 @@ function liarsDiceStateForClient(runtime: LiarsDiceRuntime, client: ClientContex
 
   const side = viewerLiarsDiceSide(runtime, client.user?.id ?? null);
   return toLiarsDicePublicState(runtime.state, side);
+}
+
+function codenamesDuetStateForClient(
+  runtime: CodenamesDuetRuntime,
+  client: ClientContext
+): CodenamesDuetState | null {
+  if (!runtime.state) {
+    return null;
+  }
+
+  const side = viewerCodenamesDuetSide(runtime, client.user?.id ?? null);
+  const revealAll = runtime.state.status === 'completed';
+  return toCodenamesDuetPublicState(runtime.state, side, revealAll);
 }
 
 function broadcastCardsMoveApplied(
@@ -1061,6 +1183,29 @@ function broadcastLiarsDiceMoveApplied(
       payload: {
         roomId: runtime.roomId,
         gameType: 'liars_dice',
+        state,
+        lastMove
+      }
+    });
+  }
+}
+
+function broadcastCodenamesDuetMoveApplied(
+  runtime: CodenamesDuetRuntime,
+  targets: Set<ClientContext>,
+  lastMove: CodenamesDuetMove
+): void {
+  for (const target of targets) {
+    const state = codenamesDuetStateForClient(runtime, target);
+    if (!state) {
+      continue;
+    }
+
+    send(target, {
+      type: 'match.move_applied',
+      payload: {
+        roomId: runtime.roomId,
+        gameType: 'codenames_duet',
         state,
         lastMove
       }
@@ -1291,6 +1436,25 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
   if (room.gameType === 'onitama') {
     return {
       gameType: 'onitama',
+      roomId: room.id,
+      matchId,
+      state: null,
+      rngSession: createVerifiableRngSession({
+        matchId,
+        playerOneUserId: players.first,
+        playerTwoUserId: players.second
+      }),
+      rngPrng: null,
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
+  if (room.gameType === 'codenames_duet') {
+    return {
+      gameType: 'codenames_duet',
       roomId: room.id,
       matchId,
       state: null,
@@ -1670,6 +1834,50 @@ function readOnitamaMovePayload(payload: Record<string, unknown>): OnitamaMove |
   return isOnitamaMoveRecord(payload) ? payload : null;
 }
 
+function isCodenamesDuetMoveRecord(value: unknown): value is CodenamesDuetMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<CodenamesDuetMove>;
+  if (typed.type === 'end_guesses') {
+    return typed.player === 'black' || typed.player === 'white';
+  }
+
+  if (typed.type === 'guess') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      typeof typed.index === 'number' &&
+      Number.isInteger(typed.index) &&
+      typed.index >= 0 &&
+      typed.index < 25
+    );
+  }
+
+  if (typed.type === 'clue') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      typeof typed.word === 'string' &&
+      typed.word.trim().length > 0 &&
+      typeof typed.count === 'number' &&
+      Number.isInteger(typed.count) &&
+      typed.count > 0 &&
+      typed.count <= 9
+    );
+  }
+
+  return false;
+}
+
+function readCodenamesDuetMovePayload(payload: Record<string, unknown>): CodenamesDuetMove | null {
+  const nested = payload.move;
+  if (isCodenamesDuetMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isCodenamesDuetMoveRecord(payload) ? payload : null;
+}
+
 function replayMoves(
   runtime: ActiveRuntime,
   moves: Array<{ payload: Record<string, unknown> }>
@@ -1767,6 +1975,45 @@ function replayMoves(
       }
 
       const applied = applyOnitamaMove(current.state, parsedMove);
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'codenames_duet') {
+      const payload = move.payload as {
+        move?: Record<string, unknown>;
+        rngSeed?: string;
+      };
+      if (typeof payload.rngSeed === 'string' && payload.rngSeed.length > 0) {
+        current = {
+          ...current,
+          rngSession: {
+            ...current.rngSession,
+            phase: 'ready',
+            rngSeed: payload.rngSeed,
+            revealDeadlineAt: null
+          },
+          rngPrng: null
+        };
+      }
+
+      if (current.rngSession.phase === 'ready') {
+        ensureCodenamesDuetRuntimeState(current);
+      }
+
+      const parsedMove = readCodenamesDuetMovePayload(move.payload);
+      if (!parsedMove || !current.state) {
+        continue;
+      }
+
+      const applied = applyCodenamesDuetMove(current.state, parsedMove);
       if (!applied.accepted) {
         continue;
       }
@@ -2097,6 +2344,9 @@ async function getOrLoadRuntime(roomId: string): Promise<ActiveRuntime | null> {
   if (replayed.gameType === 'onitama' && replayed.rngSession.phase === 'ready') {
     ensureOnitamaRuntimeState(replayed);
   }
+  if (replayed.gameType === 'codenames_duet' && replayed.rngSession.phase === 'ready') {
+    ensureCodenamesDuetRuntimeState(replayed);
+  }
   if (replayed.gameType === 'liars_dice' && replayed.rngSession.phase === 'ready') {
     ensureLiarsDiceRuntimeState(replayed);
   }
@@ -2156,10 +2406,12 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
     existing &&
     (((existing.gameType === 'cards' ||
       existing.gameType === 'liars_dice' ||
-      existing.gameType === 'onitama') &&
+      existing.gameType === 'onitama' ||
+      existing.gameType === 'codenames_duet') &&
       existing.state?.status === 'playing') ||
       (existing.gameType === 'santorini' && existing.state.status !== 'completed') ||
       (existing.gameType !== 'cards' &&
+        existing.gameType !== 'codenames_duet' &&
         existing.gameType !== 'onitama' &&
         existing.gameType !== 'santorini' &&
         existing.gameType !== 'liars_dice' &&
@@ -2285,6 +2537,26 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
       }
     });
     if (runtime?.gameType === 'onitama') {
+      send(client, rngUpdatedMessage(runtime));
+    }
+    return;
+  }
+
+  if (room.gameType === 'codenames_duet') {
+    if (runtime?.gameType === 'codenames_duet' && runtime.rngSession.phase === 'ready') {
+      ensureCodenamesDuetRuntimeState(runtime);
+    }
+
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'codenames_duet',
+        state: runtime?.gameType === 'codenames_duet' ? codenamesDuetStateForClient(runtime, client) : null,
+        viewerRole
+      }
+    });
+    if (runtime?.gameType === 'codenames_duet') {
       send(client, rngUpdatedMessage(runtime));
     }
     return;
@@ -2624,6 +2896,52 @@ async function handleOnitamaMove(
       lastMove: normalizedMove
     }
   });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleCodenamesDuetMove(
+  client: ClientContext,
+  runtime: CodenamesDuetRuntime,
+  move: CodenamesDuetMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: CodenamesDuetPlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const state = ensureCodenamesDuetRuntimeState(runtime);
+  if (!state) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
+  const normalizedMove = normalizeCodenamesDuetMove(move, player);
+  const applied = applyCodenamesDuetMove(state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: `codenames_duet.${normalizedMove.type}`,
+    payload: {
+      move: normalizedMove
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcastCodenamesDuetMoveApplied(runtime, targets, normalizedMove);
 
   await finishMatchIfCompleted(runtime, targets);
 }
@@ -3340,6 +3658,21 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
       });
     }
   }
+  if (runtime.gameType === 'codenames_duet' && runtime.rngSession.phase === 'ready') {
+    runtime.rngPrng = null;
+    ensureCodenamesDuetRuntimeState(runtime);
+    if (becameReady) {
+      await createMatchMove({
+        matchId: runtime.matchId,
+        actorUserId: client.user.id,
+        moveIndex: 0,
+        moveType: 'codenames_duet.rng_ready',
+        payload: {
+          rngSeed: runtime.rngSession.rngSeed
+        }
+      });
+    }
+  }
   if (runtime.gameType === 'liars_dice' && runtime.rngSession.phase === 'ready') {
     runtime.rngPrng = null;
     ensureLiarsDiceRuntimeState(runtime);
@@ -3361,6 +3694,7 @@ async function handleRngReveal(client: ClientContext, roomId: string, nonce: str
     (runtime.gameType === 'backgammon' ||
       runtime.gameType === 'cards' ||
       runtime.gameType === 'onitama' ||
+      runtime.gameType === 'codenames_duet' ||
       runtime.gameType === 'liars_dice') &&
     runtime.rngSession.phase === 'ready'
   ) {
@@ -3373,6 +3707,7 @@ async function handleMove(
   message:
     | { roomId: string; gameType: 'backgammon'; move: Pick<BackgammonMove, 'from' | 'to' | 'die'> }
     | { roomId: string; gameType: 'cards'; move: CardsMoveInput }
+    | { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
     | { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }
@@ -3418,6 +3753,11 @@ async function handleMove(
 
   if (message.gameType === 'cards' && runtime.gameType === 'cards') {
     await handleCardsMove(client, runtime, message.move);
+    return;
+  }
+
+  if (message.gameType === 'codenames_duet' && runtime.gameType === 'codenames_duet') {
+    await handleCodenamesDuetMove(client, runtime, message.move);
     return;
   }
 
@@ -3711,6 +4051,15 @@ wss.on('connection', (socket) => {
           await handleMove(client, {
             roomId: msg.payload.roomId,
             gameType: 'cards',
+            move: msg.payload.move
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'codenames_duet') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'codenames_duet',
             move: msg.payload.move
           });
           return;

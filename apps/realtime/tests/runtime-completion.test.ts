@@ -2,6 +2,9 @@ import {
   assignBackgammonTurnDice,
   createCardsDeck,
   createCardsState,
+  createCodenamesDuetRolePool,
+  createCodenamesDuetState,
+  createCodenamesDuetWordPool,
   createConnect4State,
   createDotsState,
   createHexState,
@@ -107,6 +110,44 @@ describe('deriveRuntimeCompletion', () => {
           discardPileCount: completed.discardPile.length,
           activeSuit: 'spades',
           topCard: completed.discardPile[completed.discardPile.length - 1]
+        }
+      }
+    });
+  });
+
+  it('maps codenames duet completion to cooperative payload', () => {
+    const state = createCodenamesDuetState({
+      words: createCodenamesDuetWordPool().slice(0, 25),
+      keyBlack: createCodenamesDuetRolePool(),
+      keyWhite: createCodenamesDuetRolePool()
+    });
+    state.status = 'completed';
+    state.outcome = 'success';
+    state.moveCount = 18;
+    state.turnsRemaining = 2;
+    state.revealed = state.revealed.map((_value, index) => index < 9);
+
+    const completion = deriveRuntimeCompletion({
+      gameType: 'codenames_duet',
+      state,
+      players: {
+        black: 'u101',
+        white: 'u102'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: null,
+      status: 'completed',
+      resultPayload: {
+        codenames_duet: {
+          outcome: 'success',
+          moveCount: 18,
+          turnsRemaining: 2,
+          targetCounts: {
+            total: 9,
+            found: 9
+          }
         }
       }
     });

@@ -12,6 +12,7 @@
   - Gomoku (`freestyle` + restricted Renju policy support)
   - Santorini (5x5 no-god-power rules, setup + move/build + no-legal-move loss)
   - Onitama (5x5 fixed-card rules, master capture/temple win, verifiable RNG opening cards)
+  - Codenames Duet (5x5 co-op clues/guesses, hidden key projection, verifiable RNG words + key maps)
   - Go (capture/ko/suicide + Chinese area scoring + komi)
   - Xiangqi (full movement, check safety, mate/stalemate, repetition policy)
 - `packages/shared-types`: Cross-service DTOs and realtime protocol contracts.

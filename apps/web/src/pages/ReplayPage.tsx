@@ -1,6 +1,7 @@
 import {
   apply2048Move,
   applyCardsMove,
+  applyCodenamesDuetMove,
   applyConnect4Move,
   applyDotsMove,
   applyHexMove,
@@ -15,6 +16,9 @@ import {
   create2048State,
   createCardsDeck,
   createCardsState,
+  createCodenamesDuetRolePool,
+  createCodenamesDuetState,
+  createCodenamesDuetWordPool,
   createConnect4State,
   createDotsState,
   createHexState,
@@ -30,11 +34,13 @@ import {
   type CardsRuntimeState,
   createDeterministicPrng,
   formatXiangqiMoveNotation,
+  type CodenamesDuetRuntimeState,
   type LiarsDiceRuntimeState
 } from '@multiwebgame/game-engines';
 import type {
   CardsCard,
   CardsMove,
+  CodenamesDuetMove,
   Connect4Move,
   Connect4State,
   DotsMove,
@@ -400,6 +406,56 @@ function parseOnitamaMove(
   };
 }
 
+function parseCodenamesDuetMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: CodenamesDuetMove['player']
+): CodenamesDuetMove | null {
+  const source = (payload.move ?? payload) as Partial<CodenamesDuetMove>;
+  if (source.type === 'end_guesses') {
+    return {
+      type: 'end_guesses',
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  if (source.type === 'guess') {
+    if (
+      typeof source.index !== 'number' ||
+      !Number.isInteger(source.index) ||
+      source.index < 0 ||
+      source.index > 24
+    ) {
+      return null;
+    }
+    return {
+      type: 'guess',
+      index: source.index,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  if (source.type === 'clue') {
+    if (
+      typeof source.word !== 'string' ||
+      !source.word.trim() ||
+      typeof source.count !== 'number' ||
+      !Number.isInteger(source.count) ||
+      source.count < 1 ||
+      source.count > 9
+    ) {
+      return null;
+    }
+    return {
+      type: 'clue',
+      word: source.word.trim(),
+      count: source.count,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  return null;
+}
+
 function formatCardsCard(card: { rank: string; suit: string }): string {
   return `${card.rank}${card.suit.slice(0, 1).toUpperCase()}`;
 }
@@ -428,6 +484,22 @@ function replayOnitamaPieceAt(state: OnitamaState, x: number, y: number): string
   return `${prefix}${suffix}`;
 }
 
+function replayCodenamesRoleAt(state: CodenamesDuetRuntimeState, index: number): string {
+  if (!state.revealed[index]) {
+    return '';
+  }
+
+  if (state.keyBlack[index] === 'assassin' || state.keyWhite[index] === 'assassin') {
+    return 'ASSASSIN';
+  }
+
+  if (state.keyBlack[index] === 'agent' || state.keyWhite[index] === 'agent') {
+    return 'AGENT';
+  }
+
+  return 'NEUTRAL';
+}
+
 export function ReplayPage({ api, viewerUserId }: Props) {
   const { t, translateError } = useI18n();
   const { matchId = '' } = useParams();
@@ -439,6 +511,13 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const [onitamaStates, setOnitamaStates] = useState<OnitamaState[]>([
     createOnitamaState({
       openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
+    })
+  ]);
+  const [codenamesStates, setCodenamesStates] = useState<CodenamesDuetRuntimeState[]>([
+    createCodenamesDuetState({
+      words: createCodenamesDuetWordPool().slice(0, 25),
+      keyBlack: createCodenamesDuetRolePool(),
+      keyWhite: createCodenamesDuetRolePool()
     })
   ]);
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
@@ -614,6 +693,68 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setOnitamaStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'codenames_duet') {
+          const payload = result.match.resultPayload as { rng?: { rngSeed?: unknown } } | null;
+          let rngSeed = typeof payload?.rng?.rngSeed === 'string' ? payload.rng.rngSeed : null;
+
+          if (!rngSeed) {
+            const fromMove = result.match.moves
+              .map((entry) => entry.payload as { rngSeed?: unknown })
+              .find((entry) => typeof entry.rngSeed === 'string');
+            rngSeed = typeof fromMove?.rngSeed === 'string' ? fromMove.rngSeed : null;
+          }
+
+          if (!rngSeed) {
+            setError(t('common.error_generic'));
+            return;
+          }
+
+          const prng = createDeterministicPrng(rngSeed);
+          const words = createCodenamesDuetWordPool();
+          prng.shuffleInPlace(words);
+          const keyBlack = createCodenamesDuetRolePool();
+          const keyWhite = createCodenamesDuetRolePool();
+          prng.shuffleInPlace(keyBlack);
+          prng.shuffleInPlace(keyWhite);
+
+          let current = createCodenamesDuetState({
+            words: words.slice(0, 25),
+            keyBlack,
+            keyWhite
+          });
+          const snapshots: CodenamesDuetRuntimeState[] = [current];
+
+          for (const move of result.match.moves) {
+            const fallbackPlayer =
+              current.phase === 'clue'
+                ? current.currentCluer
+                : current.currentCluer === 'black'
+                  ? 'white'
+                  : 'black';
+            const parsedMove = parseCodenamesDuetMove(
+              move.payload as Record<string, unknown>,
+              fallbackPlayer
+            );
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applyCodenamesDuetMove(current, parsedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setCodenamesStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -987,6 +1128,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'onitama') {
       return Math.max(0, onitamaStates.length - 1);
     }
+    if (gameType === 'codenames_duet') {
+      return Math.max(0, codenamesStates.length - 1);
+    }
     if (gameType === 'connect4') {
       return Math.max(0, connect4States.length - 1);
     }
@@ -1025,6 +1169,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     gomokuStates.length,
     santoriniStates.length,
     onitamaStates.length,
+    codenamesStates.length,
     quoridorStates.length,
     connect4States.length,
     dotsStates.length,
@@ -1176,6 +1321,37 @@ export function ReplayPage({ api, viewerUserId }: Props) {
                 </div>
               ))
             )}
+          </div>
+        </>
+      ) : null}
+      {gameType === 'codenames_duet' ? (
+        <>
+          <p>
+            Turns: {codenamesStates[clampedStep].turnsRemaining} | Phase: {codenamesStates[clampedStep].phase}{' '}
+            | Outcome: {codenamesStates[clampedStep].outcome ?? '-'}
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(5, minmax(4.5rem, 1fr))',
+              gap: '0.35rem'
+            }}
+          >
+            {codenamesStates[clampedStep].words.map((word, index) => (
+              <div
+                key={`codenames-replay-${index}-${word}`}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  padding: '0.35rem',
+                  lineHeight: 1.25
+                }}
+              >
+                <strong>{word}</strong>
+                <br />
+                <small>{replayCodenamesRoleAt(codenamesStates[clampedStep], index) || ' '}</small>
+              </div>
+            ))}
           </div>
         </>
       ) : null}

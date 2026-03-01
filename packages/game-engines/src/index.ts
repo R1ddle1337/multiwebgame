@@ -25,6 +25,15 @@ export {
   normalizeOnitamaMove,
   ONITAMA_CARDS
 } from './onitama.js';
+export {
+  applyCodenamesDuetMove,
+  createCodenamesDuetRolePool,
+  createCodenamesDuetState,
+  createCodenamesDuetWordPool,
+  normalizeCodenamesDuetMove,
+  toCodenamesDuetPublicState,
+  type CodenamesDuetRuntimeState
+} from './codenames-duet.js';
 export { applySantoriniMove, createSantoriniState, normalizeSantoriniMove } from './santorini.js';
 export {
   applyLiarsDiceMove,

@@ -14,6 +14,9 @@ import type {
   CardsCard,
   CardsMoveInput,
   CardsState,
+  CodenamesDuetMove,
+  CodenamesDuetMoveInput,
+  CodenamesDuetState,
   Connect4Move,
   Connect4State,
   DotsMove,
@@ -175,6 +178,9 @@ export function RoomPage({ api, user }: Props) {
   const [onitamaFromY, setOnitamaFromY] = useState(4);
   const [onitamaToX, setOnitamaToX] = useState(2);
   const [onitamaToY, setOnitamaToY] = useState(2);
+  const [codenamesClueWord, setCodenamesClueWord] = useState('ocean');
+  const [codenamesClueCount, setCodenamesClueCount] = useState(1);
+  const [codenamesGuessIndex, setCodenamesGuessIndex] = useState(0);
   const [liarsBidQuantity, setLiarsBidQuantity] = useState(1);
   const [liarsBidFace, setLiarsBidFace] = useState(1);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -211,6 +217,8 @@ export function RoomPage({ api, user }: Props) {
       : createOnitamaState({
           openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
         });
+  const codenamesState =
+    snapshot?.gameType === 'codenames_duet' ? (snapshot.state as CodenamesDuetState | null) : null;
   const connect4State =
     snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
   const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
@@ -263,6 +271,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'onitama' &&
     viewerRole === 'player' &&
     onitamaState?.status === 'playing';
+  const codenamesTurn =
+    hasActiveMatch &&
+    room?.gameType === 'codenames_duet' &&
+    viewerRole === 'player' &&
+    codenamesState?.status === 'playing';
   const goTurn =
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
   const hexTurn =
@@ -311,6 +324,13 @@ export function RoomPage({ api, user }: Props) {
     Boolean(onitamaTurn) &&
     ((seat === 1 && onitamaState?.nextPlayer === 'black') ||
       (seat === 2 && onitamaState?.nextPlayer === 'white'));
+  const codenamesSide = seat === 1 ? 'black' : seat === 2 ? 'white' : null;
+  const canPlayCodenames =
+    Boolean(codenamesTurn) &&
+    Boolean(codenamesState) &&
+    Boolean(codenamesSide) &&
+    ((codenamesState?.phase === 'clue' && codenamesState.currentCluer === codenamesSide) ||
+      (codenamesState?.phase === 'guess' && codenamesState.currentGuesser === codenamesSide));
   const canPlayGo =
     goTurn &&
     ((seat === 1 && goState.nextPlayer === 'black') || (seat === 2 && goState.nextPlayer === 'white'));
@@ -344,6 +364,7 @@ export function RoomPage({ api, user }: Props) {
     canPlayGomoku ||
     canPlaySantorini ||
     canPlayOnitama ||
+    canPlayCodenames ||
     canPlayConnect4 ||
     canPlayGo ||
     canPlayHex ||
@@ -379,6 +400,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'onitama') {
       return describeLastMove('onitama', snapshot.lastMove as OnitamaMove);
+    }
+
+    if (room.gameType === 'codenames_duet') {
+      return describeLastMove('codenames_duet', snapshot.lastMove as CodenamesDuetMove);
     }
 
     if (room.gameType === 'go') {
@@ -439,6 +464,22 @@ export function RoomPage({ api, user }: Props) {
       return onitamaState ? formatResultText(onitamaState, statusLabel, colorLabel, t) : null;
     }
 
+    if (room.gameType === 'codenames_duet') {
+      if (!codenamesState) {
+        return null;
+      }
+      if (codenamesState.status !== 'completed') {
+        return statusLabel('playing');
+      }
+      if (codenamesState.outcome === 'success') {
+        return t('room.codenames.outcome.success');
+      }
+      if (codenamesState.outcome === 'assassin') {
+        return t('room.codenames.outcome.assassin');
+      }
+      return t('room.codenames.outcome.out_of_turns');
+    }
+
     if (room.gameType === 'go') {
       return formatResultText(goState, statusLabel, colorLabel, t);
     }
@@ -474,6 +515,7 @@ export function RoomPage({ api, user }: Props) {
     gomokuState,
     santoriniState,
     onitamaState,
+    codenamesState,
     connect4State,
     goState,
     hexState,
@@ -613,6 +655,21 @@ export function RoomPage({ api, user }: Props) {
       payload: {
         roomId,
         gameType: 'onitama',
+        move
+      }
+    });
+  };
+
+  const sendCodenamesMove = (move: CodenamesDuetMoveInput) => {
+    if (!canPlayCodenames) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'codenames_duet',
         move
       }
     });
@@ -1310,6 +1367,174 @@ export function RoomPage({ api, user }: Props) {
                     {onitamaState.winner
                       ? t('room.result.winner', { winner: colorLabel(onitamaState.winner) })
                       : t('room.result.draw')}
+                  </p>
+                ) : null}
+              </>
+            )}
+          </>
+        ) : null}
+
+        {room.gameType === 'codenames_duet' ? (
+          <>
+            {!codenamesState ? (
+              <p>{t('room.codenames.waiting_rng')}</p>
+            ) : (
+              <>
+                {hasActiveMatch ? (
+                  <p>
+                    {t('room.next_turn', {
+                      player: colorLabel(
+                        codenamesState.phase === 'clue'
+                          ? codenamesState.currentCluer
+                          : codenamesState.currentGuesser
+                      ),
+                      status: statusLabel(codenamesState.status)
+                    })}
+                  </p>
+                ) : null}
+                <p>{t('room.codenames.turns_remaining', { turns: codenamesState.turnsRemaining })}</p>
+                <p>
+                  {t('room.codenames.targets', {
+                    found: codenamesState.targetCounts.found,
+                    total: codenamesState.targetCounts.total
+                  })}
+                </p>
+                <p>
+                  {codenamesState.phase === 'clue'
+                    ? t('room.codenames.phase_clue')
+                    : t('room.codenames.phase_guess')}
+                </p>
+                {codenamesState.activeClue ? (
+                  <p>
+                    {codenamesState.activeClue.word} ({codenamesState.activeClue.count})
+                  </p>
+                ) : null}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(5, minmax(4.5rem, 1fr))',
+                    gap: '0.35rem'
+                  }}
+                >
+                  {codenamesState.words.map((word, index) => {
+                    const revealedRole = codenamesState.revealedRoles[index];
+                    const keyRole = codenamesState.key?.[index] ?? null;
+                    const keyMark =
+                      keyRole === 'agent'
+                        ? 'A'
+                        : keyRole === 'assassin'
+                          ? 'X'
+                          : keyRole === 'neutral'
+                            ? 'N'
+                            : '';
+                    const revealedMark =
+                      revealedRole === 'agent'
+                        ? 'AGENT'
+                        : revealedRole === 'assassin'
+                          ? 'ASSASSIN'
+                          : revealedRole === 'neutral'
+                            ? 'NEUTRAL'
+                            : '';
+                    const canGuessCell =
+                      canPlayCodenames &&
+                      codenamesState.phase === 'guess' &&
+                      !codenamesState.revealed[index] &&
+                      codenamesState.status === 'playing';
+
+                    return (
+                      <button
+                        key={`codenames-${index}-${word}`}
+                        type="button"
+                        className="secondary"
+                        disabled={!canGuessCell}
+                        onClick={() => sendCodenamesMove({ type: 'guess', index })}
+                        style={{
+                          minHeight: '4rem',
+                          textAlign: 'left',
+                          lineHeight: 1.25
+                        }}
+                      >
+                        <strong>{word}</strong>
+                        <br />
+                        <small>{revealedMark || keyMark || ' '}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {canPlayCodenames && codenamesState.phase === 'clue' ? (
+                  <div className="button-row">
+                    <label>
+                      Clue{' '}
+                      <input
+                        value={codenamesClueWord}
+                        onChange={(event) => setCodenamesClueWord(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Count{' '}
+                      <input
+                        type="number"
+                        min={1}
+                        max={9}
+                        value={codenamesClueCount}
+                        onChange={(event) =>
+                          setCodenamesClueCount(Math.max(1, Math.min(9, Number(event.target.value) || 1)))
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        sendCodenamesMove({
+                          type: 'clue',
+                          word: codenamesClueWord,
+                          count: codenamesClueCount
+                        })
+                      }
+                    >
+                      {t('room.codenames.submit_clue')}
+                    </button>
+                  </div>
+                ) : null}
+
+                {canPlayCodenames && codenamesState.phase === 'guess' ? (
+                  <div className="button-row">
+                    <label>
+                      Index{' '}
+                      <input
+                        type="number"
+                        min={0}
+                        max={24}
+                        value={codenamesGuessIndex}
+                        onChange={(event) =>
+                          setCodenamesGuessIndex(Math.max(0, Number(event.target.value) || 0))
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => sendCodenamesMove({ type: 'guess', index: codenamesGuessIndex })}
+                    >
+                      {t('room.codenames.submit_guess')}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => sendCodenamesMove({ type: 'end_guesses' })}
+                    >
+                      {t('room.codenames.end_guesses')}
+                    </button>
+                  </div>
+                ) : null}
+
+                {codenamesState.status === 'completed' ? (
+                  <p>
+                    {codenamesState.outcome === 'success'
+                      ? t('room.codenames.outcome.success')
+                      : codenamesState.outcome === 'assassin'
+                        ? t('room.codenames.outcome.assassin')
+                        : t('room.codenames.outcome.out_of_turns')}
                   </p>
                 ) : null}
               </>

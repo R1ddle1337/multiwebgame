@@ -5,6 +5,7 @@ import {
   applyBackgammonMove,
   applyCardsMove,
   applyConnect4Move,
+  applyCodenamesDuetMove,
   applyDotsMove,
   applyHexMove,
   applyLiarsDiceMove,
@@ -22,6 +23,9 @@ import {
   createCardsDeck,
   createCardsState,
   createConnect4State,
+  createCodenamesDuetRolePool,
+  createCodenamesDuetState,
+  createCodenamesDuetWordPool,
   createDotsState,
   createHexState,
   createLiarsDiceState,
@@ -387,6 +391,79 @@ describe('onitama engine', () => {
     expect(winning.accepted).toBe(true);
     expect(winning.nextState.status).toBe('completed');
     expect(winning.nextState.winner).toBe('black');
+  });
+});
+
+describe('codenames duet engine', () => {
+  it('accepts clue then guess flow and switches turn when guesses end', () => {
+    const words = createCodenamesDuetWordPool().slice(0, 25);
+    const keyBlack = createCodenamesDuetRolePool();
+    const keyWhite = createCodenamesDuetRolePool();
+    const agentIndex = keyBlack.findIndex((cell) => cell === 'agent');
+
+    let state = createCodenamesDuetState({
+      words,
+      keyBlack,
+      keyWhite,
+      turns: 6
+    });
+
+    const clue = applyCodenamesDuetMove(state, {
+      type: 'clue',
+      word: 'sea',
+      count: 1,
+      player: 'black'
+    });
+    expect(clue.accepted).toBe(true);
+    state = clue.nextState;
+    expect(state.phase).toBe('guess');
+
+    const guess = applyCodenamesDuetMove(state, {
+      type: 'guess',
+      index: agentIndex,
+      player: 'white'
+    });
+    expect(guess.accepted).toBe(true);
+    state = guess.nextState;
+    expect(state.revealed[agentIndex]).toBe(true);
+
+    const end = applyCodenamesDuetMove(state, {
+      type: 'end_guesses',
+      player: 'white'
+    });
+    expect(end.accepted).toBe(true);
+    expect(end.nextState.phase).toBe('clue');
+    expect(end.nextState.currentCluer).toBe('white');
+  });
+
+  it('ends with assassin outcome when an assassin cell is revealed', () => {
+    const words = createCodenamesDuetWordPool().slice(0, 25);
+    const keyBlack = createCodenamesDuetRolePool();
+    const keyWhite = createCodenamesDuetRolePool();
+    const assassinIndex = keyBlack.findIndex((cell) => cell === 'assassin');
+
+    let state = createCodenamesDuetState({
+      words,
+      keyBlack,
+      keyWhite,
+      turns: 6
+    });
+
+    state = applyCodenamesDuetMove(state, {
+      type: 'clue',
+      word: 'risk',
+      count: 1,
+      player: 'black'
+    }).nextState;
+
+    const outcome = applyCodenamesDuetMove(state, {
+      type: 'guess',
+      index: assassinIndex,
+      player: 'white'
+    });
+    expect(outcome.accepted).toBe(true);
+    expect(outcome.nextState.status).toBe('completed');
+    expect(outcome.nextState.outcome).toBe('assassin');
   });
 });
 

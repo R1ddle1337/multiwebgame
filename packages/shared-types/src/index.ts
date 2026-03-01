@@ -3,6 +3,7 @@ export type GameType =
   | 'gomoku'
   | 'santorini'
   | 'onitama'
+  | 'codenames_duet'
   | 'xiangqi'
   | 'go'
   | 'connect4'
@@ -17,6 +18,7 @@ export type BoardGameType =
   | 'gomoku'
   | 'santorini'
   | 'onitama'
+  | 'codenames_duet'
   | 'xiangqi'
   | 'go'
   | 'connect4'
@@ -286,6 +288,69 @@ export interface OnitamaState {
   status: 'playing' | 'completed';
   winner: OnitamaPlayer | null;
   moveCount: number;
+}
+
+export type CodenamesDuetPlayer = 'black' | 'white';
+export type CodenamesDuetCellRole = 'agent' | 'neutral' | 'assassin';
+
+export interface CodenamesDuetClue {
+  word: string;
+  count: number;
+  by: CodenamesDuetPlayer;
+  remainingGuesses: number;
+}
+
+export type CodenamesDuetMoveInput =
+  | {
+      type: 'clue';
+      word: string;
+      count: number;
+    }
+  | {
+      type: 'guess';
+      index: number;
+    }
+  | {
+      type: 'end_guesses';
+    };
+
+export type CodenamesDuetMove =
+  | {
+      type: 'clue';
+      word: string;
+      count: number;
+      player: CodenamesDuetPlayer;
+    }
+  | {
+      type: 'guess';
+      index: number;
+      player: CodenamesDuetPlayer;
+    }
+  | {
+      type: 'end_guesses';
+      player: CodenamesDuetPlayer;
+    };
+
+export interface CodenamesDuetState {
+  boardSize: number;
+  words: string[];
+  revealed: boolean[];
+  revealedRoles: (CodenamesDuetCellRole | null)[];
+  turnsRemaining: number;
+  currentCluer: CodenamesDuetPlayer;
+  currentGuesser: CodenamesDuetPlayer;
+  phase: 'clue' | 'guess';
+  activeClue: CodenamesDuetClue | null;
+  status: 'playing' | 'completed';
+  outcome: 'success' | 'assassin' | 'out_of_turns' | null;
+  moveCount: number;
+  key: CodenamesDuetCellRole[] | null;
+  keyBlack: CodenamesDuetCellRole[] | null;
+  keyWhite: CodenamesDuetCellRole[] | null;
+  targetCounts: {
+    total: number;
+    found: number;
+  };
 }
 
 export type Connect4Disc = 'red' | 'yellow';
@@ -719,6 +784,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'codenames_duet';
+      state: CodenamesDuetState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'connect4';
       state: Connect4State | null;
       viewerRole: RoomPlayerRole;
@@ -805,6 +876,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'codenames_duet';
+      state: CodenamesDuetState;
+      lastMove: CodenamesDuetMove;
+    }
+  | {
+      roomId: string;
       gameType: 'connect4';
       state: Connect4State;
       lastMove: Connect4Move;
@@ -874,6 +951,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'onitama'; move: OnitamaMoveInput }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'codenames_duet'; move: CodenamesDuetMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'reversi'; x: number; y: number }>
   | WsEnvelope<

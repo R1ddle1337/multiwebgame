@@ -38,6 +38,7 @@ async function run(): Promise<void> {
           'gomoku',
           'santorini',
           'onitama',
+          'codenames_duet',
           'xiangqi',
           'go',
           'connect4',
