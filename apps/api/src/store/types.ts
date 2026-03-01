@@ -4,6 +4,7 @@ import type {
   InviteLinkDTO,
   InvitationDTO,
   MatchDTO,
+  RoomConfigDTO,
   RatingFormulaDTO,
   RatingDTO,
   ReportDTO,
@@ -50,7 +51,12 @@ export interface Store {
   listRatingFormulas(): Promise<RatingFormulaDTO[]>;
   listOpenRooms(): Promise<RoomDTO[]>;
   getRoomById(roomId: string): Promise<RoomDTO | null>;
-  createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO>;
+  createRoom(
+    hostUserId: string,
+    gameType: GameType,
+    maxPlayers?: number,
+    roomConfig?: RoomConfigDTO
+  ): Promise<RoomDTO>;
   joinRoom(roomId: string, userId: string, asSpectator?: boolean): Promise<RoomDTO>;
   leaveRoom(roomId: string, userId: string): Promise<RoomDTO | null>;
   createOrGetInviteLink(params: { roomId: string; createdByUserId: string }): Promise<InviteLinkDTO>;

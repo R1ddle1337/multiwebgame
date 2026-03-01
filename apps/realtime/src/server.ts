@@ -109,6 +109,7 @@ import type {
   LoveLetterPlayer,
   LoveLetterState,
   GoMove,
+  GoBoardSize,
   GoState,
   GomokuMark,
   GomokuState,
@@ -906,6 +907,14 @@ function minPlayersToStartForGame(_gameType: BoardGameType): number {
 
 function maxPlayerSeatsForGame(gameType: BoardGameType): number {
   return gameType === 'texas_holdem' ? 6 : 2;
+}
+
+function parseGoBoardSize(value: unknown): GoBoardSize | null {
+  return value === 9 || value === 13 || value === 19 ? value : null;
+}
+
+function roomGoBoardSize(room: RoomDTO): GoBoardSize {
+  return parseGoBoardSize(room.roomConfig?.goBoardSize) ?? 9;
 }
 
 function send(client: ClientContext, message: ServerToClientMessage): void {
@@ -2061,7 +2070,7 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
       gameType: 'go',
       roomId: room.id,
       matchId,
-      state: createGoState(9),
+      state: createGoState(roomGoBoardSize(room)),
       players: {
         black: players.first,
         white: players.second
@@ -3615,7 +3624,7 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
       payload: {
         room,
         gameType: 'go',
-        state: runtime?.gameType === 'go' ? runtime.state : createGoState(9),
+        state: runtime?.gameType === 'go' ? runtime.state : createGoState(roomGoBoardSize(room)),
         viewerRole
       }
     });

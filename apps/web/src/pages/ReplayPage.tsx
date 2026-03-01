@@ -105,6 +105,8 @@ interface Props {
   viewerUserId?: string;
 }
 
+const DEFAULT_GO_BOARD_SIZE = 9 as const;
+
 function randomFromSequence(values: number[]): () => number {
   const queue = [...values];
   return () => {
@@ -114,6 +116,33 @@ function randomFromSequence(values: number[]): () => number {
     }
     return next;
   };
+}
+
+function parseGoBoardSize(value: unknown): 9 | 13 | 19 | null {
+  return value === 9 || value === 13 || value === 19 ? value : null;
+}
+
+function resolveReplayGoBoardSize(params: {
+  roomConfig?: { goBoardSize?: unknown };
+  moves: Array<{ moveType: string; payload: Record<string, unknown> }>;
+}): 9 | 13 | 19 {
+  const fromRoomConfig = parseGoBoardSize(params.roomConfig?.goBoardSize);
+  if (fromRoomConfig) {
+    return fromRoomConfig;
+  }
+
+  for (const move of params.moves) {
+    if (move.moveType !== 'go.setup') {
+      continue;
+    }
+
+    const boardSize = parseGoBoardSize((move.payload as { boardSize?: unknown }).boardSize);
+    if (boardSize) {
+      return boardSize;
+    }
+  }
+
+  return DEFAULT_GO_BOARD_SIZE;
 }
 
 interface XiangqiStoredMoveLog {
@@ -711,7 +740,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   ]);
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [dotsStates, setDotsStates] = useState<DotsState[]>([createDotsState()]);
-  const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
+  const [goStates, setGoStates] = useState<GoState[]>([createGoState(DEFAULT_GO_BOARD_SIZE)]);
   const [hexStates, setHexStates] = useState<HexState[]>([
     createHexState({
       boardSize: 11
@@ -827,10 +856,18 @@ export function ReplayPage({ api, viewerUserId }: Props) {
         }
 
         if (result.match.gameType === 'go') {
-          let current = createGoState(9);
+          const goBoardSize = resolveReplayGoBoardSize({
+            roomConfig: result.match.roomConfig,
+            moves: result.match.moves
+          });
+          let current = createGoState(goBoardSize);
           const snapshots: GoState[] = [current];
 
           for (const move of result.match.moves) {
+            if (move.moveType === 'go.setup') {
+              continue;
+            }
+
             const payload = move.payload as GoMove;
             if (!payload || typeof payload !== 'object' || !('type' in payload)) {
               continue;

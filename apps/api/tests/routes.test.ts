@@ -7,6 +7,7 @@ import type {
   RatingDTO,
   RatingFormulaDTO,
   ReportDTO,
+  RoomConfigDTO,
   RoomDTO,
   RoomPlayerRole,
   SessionDTO,
@@ -227,11 +228,28 @@ class InMemoryStore implements Store {
     return this.rooms.get(roomId) ?? null;
   }
 
-  async createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO> {
+  async createRoom(
+    hostUserId: string,
+    gameType: GameType,
+    maxPlayers?: number,
+    roomConfig?: RoomConfigDTO
+  ): Promise<RoomDTO> {
     const host = this.users.get(hostUserId);
     if (!host) {
       throw new Error('host_not_found');
     }
+
+    const normalizedRoomConfig =
+      gameType === 'go'
+        ? {
+            goBoardSize:
+              roomConfig?.goBoardSize === 9 ||
+              roomConfig?.goBoardSize === 13 ||
+              roomConfig?.goBoardSize === 19
+                ? roomConfig.goBoardSize
+                : 9
+          }
+        : undefined;
 
     const room: RoomDTO = {
       id: randomUUID(),
@@ -239,6 +257,7 @@ class InMemoryStore implements Store {
       gameType,
       status: 'open',
       maxPlayers: maxPlayers ?? (gameType === 'single_2048' ? 1 : gameType === 'texas_holdem' ? 6 : 4),
+      roomConfig: normalizedRoomConfig,
       createdAt: new Date().toISOString(),
       players: [
         {
@@ -623,6 +642,21 @@ describeIfTcpAvailable('critical API routes', () => {
     );
     expect(watcherRow.role).toBe('spectator');
     expect(watcherRow.seat).toBeNull();
+  });
+
+  it('accepts go room board size config at creation', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store);
+
+    const host = await request(app).post('/auth/guest').send({ displayName: 'Host' }).expect(201);
+
+    const room = await request(app)
+      .post('/rooms')
+      .set('Authorization', `Bearer ${host.body.token}`)
+      .send({ gameType: 'go', maxPlayers: 4, roomConfig: { goBoardSize: 13 } })
+      .expect(201);
+
+    expect(room.body.room.roomConfig.goBoardSize).toBe(13);
   });
 
   it('creates reusable invite links and auto-assigns player then spectator', async () => {

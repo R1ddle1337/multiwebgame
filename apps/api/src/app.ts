@@ -26,31 +26,46 @@ const loginSchema = z.object({
   password: z.string().min(8).max(72)
 });
 
-const createRoomSchema = z.object({
-  gameType: z.enum([
-    'single_2048',
-    'gomoku',
-    'santorini',
-    'onitama',
-    'battleship',
-    'yahtzee',
-    'domination',
-    'love_letter',
-    'codenames_duet',
-    'xiangqi',
-    'go',
-    'connect4',
-    'reversi',
-    'dots',
-    'backgammon',
-    'cards',
-    'quoridor',
-    'hex',
-    'liars_dice',
-    'texas_holdem'
-  ]),
-  maxPlayers: z.number().int().min(1).max(8).optional()
-});
+const createRoomSchema = z
+  .object({
+    gameType: z.enum([
+      'single_2048',
+      'gomoku',
+      'santorini',
+      'onitama',
+      'battleship',
+      'yahtzee',
+      'domination',
+      'love_letter',
+      'codenames_duet',
+      'xiangqi',
+      'go',
+      'connect4',
+      'reversi',
+      'dots',
+      'backgammon',
+      'cards',
+      'quoridor',
+      'hex',
+      'liars_dice',
+      'texas_holdem'
+    ]),
+    maxPlayers: z.number().int().min(1).max(8).optional(),
+    roomConfig: z
+      .object({
+        goBoardSize: z.union([z.literal(9), z.literal(13), z.literal(19)]).optional()
+      })
+      .optional()
+  })
+  .superRefine((input, ctx) => {
+    if (input.roomConfig && input.gameType !== 'go') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['roomConfig'],
+        message: 'roomConfig is only supported for go rooms'
+      });
+    }
+  });
 
 const joinRoomSchema = z.object({
   asSpectator: z.boolean().optional()
@@ -363,7 +378,12 @@ export function createApp(store: Store, options: CreateAppOptions = {}) {
   app.post('/rooms', requireAuth(store), async (req: AuthedRequest, res, next) => {
     try {
       const input = createRoomSchema.parse(req.body);
-      const room = await store.createRoom(req.auth!.userId, input.gameType, input.maxPlayers);
+      const room = await store.createRoom(
+        req.auth!.userId,
+        input.gameType,
+        input.maxPlayers,
+        input.roomConfig
+      );
       res.status(201).json({ room });
     } catch (error) {
       next(error);

@@ -225,15 +225,39 @@ h3 {
   margin-inline: auto;
 }
 
-.go-grid {
-  display: grid;
-  gap: 1px;
-  background: #d6bd83;
+.go-board {
+  position: relative;
+  width: min(100%, 560px);
+  aspect-ratio: 1;
+  margin-inline: auto;
+  padding: 0.65rem;
   border: 2px solid #b89242;
   border-radius: 12px;
-  padding: 4px;
-  max-width: min(100%, 560px);
-  margin-inline: auto;
+  background:
+    radial-gradient(circle at 14% 16%, rgba(253, 236, 193, 0.72), transparent 46%),
+    radial-gradient(circle at 86% 82%, rgba(160, 105, 36, 0.28), transparent 42%),
+    linear-gradient(180deg, #e8cb8f, #dcb879);
+}
+
+.go-lines {
+  position: absolute;
+  inset: 0.65rem;
+  width: calc(100% - 1.3rem);
+  height: calc(100% - 1.3rem);
+  pointer-events: none;
+}
+
+.go-lines line {
+  stroke: #7b5224;
+  stroke-width: 0.06;
+  vector-effect: non-scaling-stroke;
+}
+
+.go-grid {
+  position: absolute;
+  inset: 0.65rem;
+  display: grid;
+  touch-action: manipulation;
 }
 
 .reversi-grid {
@@ -433,9 +457,15 @@ h3 {
   aspect-ratio: 1;
   min-width: 22px;
   border: none;
-  border-radius: 0;
-  background: #f2dca9;
+  border-radius: 999px;
+  background: transparent;
   padding: 0;
+  display: grid;
+  place-items: center;
+}
+
+.go-cell:not(:disabled):hover {
+  background: rgba(185, 126, 53, 0.2);
 }
 
 .reversi-cell {
@@ -925,7 +955,7 @@ button.xiangqi-move-chip:hover {
   }
 
   .gomoku-grid,
-  .go-grid,
+  .go-board,
   .reversi-grid,
   .connect4-grid,
   .dots-board,

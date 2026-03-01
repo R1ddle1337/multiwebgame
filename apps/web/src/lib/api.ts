@@ -7,6 +7,7 @@ import type {
   RatingFormulaDTO,
   RatingDTO,
   ReportDTO,
+  RoomConfigDTO,
   RoomDTO,
   UserDTO
 } from '@multiwebgame/shared-types';
@@ -116,10 +117,14 @@ export class ApiClient {
     return this.request('/rooms');
   }
 
-  createRoom(gameType: BoardGameType | 'single_2048', maxPlayers?: number): Promise<{ room: RoomDTO }> {
+  createRoom(
+    gameType: BoardGameType | 'single_2048',
+    maxPlayers?: number,
+    roomConfig?: RoomConfigDTO
+  ): Promise<{ room: RoomDTO }> {
     return this.request('/rooms', {
       method: 'POST',
-      body: JSON.stringify({ gameType, maxPlayers })
+      body: JSON.stringify({ gameType, maxPlayers, roomConfig })
     });
   }
 

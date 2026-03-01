@@ -1,6 +1,7 @@
 import type {
   BlockDTO,
   GameType,
+  GoBoardSize,
   InviteLinkDTO,
   InvitationDTO,
   MatchDTO,
@@ -8,6 +9,7 @@ import type {
   RatingFormulaDTO,
   RatingDTO,
   ReportDTO,
+  RoomConfigDTO,
   RoomDTO,
   RoomPlayerDTO,
   RoomPlayerRole,
@@ -108,6 +110,32 @@ function normalizeMaxPlayers(gameType: GameType, requested?: number): number {
   }
 
   return maxPlayers;
+}
+
+function parseGoBoardSize(value: unknown): GoBoardSize | null {
+  return value === 9 || value === 13 || value === 19 ? value : null;
+}
+
+function normalizeRoomConfig(gameType: GameType, roomConfig?: RoomConfigDTO): RoomConfigDTO | null {
+  if (gameType !== 'go') {
+    return null;
+  }
+
+  const goBoardSize = parseGoBoardSize(roomConfig?.goBoardSize) ?? 9;
+  return { goBoardSize };
+}
+
+function mapRoomConfig(raw: unknown): RoomConfigDTO | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+
+  const goBoardSize = parseGoBoardSize((raw as { goBoardSize?: unknown }).goBoardSize);
+  if (!goBoardSize) {
+    return undefined;
+  }
+
+  return { goBoardSize };
 }
 
 function createInviteToken(): string {
@@ -243,6 +271,7 @@ function mapMatch(row: {
   status: 'active' | 'completed' | 'abandoned';
   winner_user_id: string | null;
   result_payload: Record<string, unknown> | null;
+  room_config?: unknown;
   started_at: Date | string;
   ended_at: Date | string | null;
 }): MatchDTO {
@@ -253,6 +282,7 @@ function mapMatch(row: {
     status: row.status,
     winnerUserId: row.winner_user_id,
     resultPayload: row.result_payload,
+    roomConfig: mapRoomConfig(row.room_config),
     startedAt: toIso(row.started_at),
     endedAt: row.ended_at ? toIso(row.ended_at) : null,
     moves: []
@@ -379,10 +409,11 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     game_type: GameType;
     status: 'open' | 'in_match' | 'closed';
     max_players: number;
+    room_config: unknown;
     created_at: Date | string;
   }>(
     `
-      SELECT id, host_user_id, game_type, status, max_players, created_at
+      SELECT id, host_user_id, game_type, status, max_players, room_config, created_at
       FROM rooms
       WHERE id = $1
     `,
@@ -450,6 +481,7 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     gameType: roomRow.game_type,
     status: roomRow.status,
     maxPlayers: roomRow.max_players,
+    roomConfig: mapRoomConfig(roomRow.room_config),
     createdAt: toIso(roomRow.created_at),
     players
   };
@@ -907,17 +939,23 @@ export function createPostgresStore(): Store {
       return fetchRoomById(pool, roomId);
     },
 
-    async createRoom(hostUserId: string, gameType: GameType, maxPlayers?: number): Promise<RoomDTO> {
+    async createRoom(
+      hostUserId: string,
+      gameType: GameType,
+      maxPlayers?: number,
+      roomConfig?: RoomConfigDTO
+    ): Promise<RoomDTO> {
       return withTransaction(async (client) => {
         const normalizedMaxPlayers = normalizeMaxPlayers(gameType, maxPlayers);
+        const normalizedRoomConfig = normalizeRoomConfig(gameType, roomConfig);
 
         const roomResult = await client.query<{ id: string }>(
           `
-            INSERT INTO rooms (host_user_id, game_type, status, max_players)
-            VALUES ($1, $2, 'open', $3)
+            INSERT INTO rooms (host_user_id, game_type, status, max_players, room_config)
+            VALUES ($1, $2, 'open', $3, $4::jsonb)
             RETURNING id
           `,
-          [hostUserId, gameType, normalizedMaxPlayers]
+          [hostUserId, gameType, normalizedMaxPlayers, JSON.stringify(normalizedRoomConfig ?? {})]
         );
 
         const roomId = roomResult.rows[0].id;
@@ -1315,6 +1353,7 @@ export function createPostgresStore(): Store {
         status: 'active' | 'completed' | 'abandoned';
         winner_user_id: string | null;
         result_payload: Record<string, unknown> | null;
+        room_config: unknown;
         started_at: Date | string;
         ended_at: Date | string | null;
       }>(
@@ -1326,9 +1365,11 @@ export function createPostgresStore(): Store {
             m.status,
             m.winner_user_id,
             m.result_payload,
+            r.room_config,
             m.started_at,
             m.ended_at
           FROM matches m
+          JOIN rooms r ON r.id = m.room_id
           JOIN room_players rp ON rp.room_id = m.room_id
           WHERE rp.user_id = $1
           ORDER BY m.started_at DESC
@@ -1358,13 +1399,24 @@ export function createPostgresStore(): Store {
         status: 'active' | 'completed' | 'abandoned';
         winner_user_id: string | null;
         result_payload: Record<string, unknown> | null;
+        room_config: unknown;
         started_at: Date | string;
         ended_at: Date | string | null;
       }>(
         `
-          SELECT id, room_id, game_type, status, winner_user_id, result_payload, started_at, ended_at
-          FROM matches
-          WHERE id = $1
+          SELECT
+            m.id,
+            m.room_id,
+            m.game_type,
+            m.status,
+            m.winner_user_id,
+            m.result_payload,
+            r.room_config,
+            m.started_at,
+            m.ended_at
+          FROM matches m
+          JOIN rooms r ON r.id = m.room_id
+          WHERE m.id = $1
           LIMIT 1
         `,
         [matchId]

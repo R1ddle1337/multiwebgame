@@ -57,8 +57,10 @@ Auth uses `Authorization: Bearer <jwt>`.
 
 - `POST /rooms`
   - Auth required
-  - Body: `{ "gameType": "single_2048" | "gomoku" | "santorini" | "onitama" | "battleship" | "yahtzee" | "domination" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number }`
+  - Body: `{ "gameType": "single_2048" | "gomoku" | "santorini" | "onitama" | "battleship" | "yahtzee" | "domination" | "love_letter" | "codenames_duet" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number, "roomConfig"?: { "goBoardSize"?: 9 | 13 | 19 } }`
+  - `roomConfig` is currently supported for `gameType: "go"` only.
   - Returns: `{ room }`
+  - `room.roomConfig.goBoardSize` is persisted and used for deterministic runtime/replay reconstruction.
 
 - `GET /rooms/:roomId`
   - Auth required
@@ -122,6 +124,7 @@ Auth uses `Authorization: Bearer <jwt>`.
 - `GET /matches/:matchId`
   - Auth required
   - Returns: `{ match: MatchDTO }`
+  - `match.roomConfig` carries the persisted room configuration snapshot used for replay reconstruction.
   - `match.resultPayload` includes adjudication/scoring payload when available.
     - RNG proof (when enabled): `rng.serverSeed`, `rng.serverSeedCommit`, `rng.commits`, `rng.nonces`, `rng.rngSeed`.
     - Cards (Crazy Eights): winner/moveCount/handCounts/topCard/activeSuit.

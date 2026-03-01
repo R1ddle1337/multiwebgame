@@ -70,12 +70,19 @@ export interface RoomPlayerDTO {
   user: UserDTO;
 }
 
+export type GoBoardSize = 9 | 13 | 19;
+
+export interface RoomConfigDTO {
+  goBoardSize?: GoBoardSize;
+}
+
 export interface RoomDTO {
   id: string;
   hostUserId: string;
   gameType: GameType;
   status: 'open' | 'in_match' | 'closed';
   maxPlayers: number;
+  roomConfig?: RoomConfigDTO;
   createdAt: string;
   players: RoomPlayerDTO[];
 }
@@ -118,6 +125,7 @@ export interface MatchDTO {
   status: 'active' | 'completed' | 'abandoned';
   winnerUserId: string | null;
   resultPayload: Record<string, unknown> | null;
+  roomConfig?: RoomConfigDTO;
   startedAt: string;
   endedAt: string | null;
   moves: MatchMoveDTO[];

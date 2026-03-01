@@ -283,6 +283,7 @@ export function RoomPage({ api, user }: Props) {
 
   const snapshot = realtime.roomStates[roomId];
   const room = snapshot?.room ?? fallbackRoom;
+  const goBoardSize = room?.roomConfig?.goBoardSize ?? 9;
   const defaultBattleshipState = useMemo<BattleshipState>(
     () => ({
       ...createBattleshipState({
@@ -322,7 +323,7 @@ export function RoomPage({ api, user }: Props) {
     snapshot?.gameType === 'codenames_duet' ? (snapshot.state as CodenamesDuetState | null) : null;
   const connect4State =
     snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
-  const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
+  const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(goBoardSize);
   const hexState =
     snapshot?.gameType === 'hex'
       ? (snapshot.state as HexState)
@@ -2361,6 +2362,7 @@ export function RoomPage({ api, user }: Props) {
 
         {room.gameType === 'go' ? (
           <>
+            <p>{t('room.go.board_size', { size: goState.boardSize })}</p>
             {hasActiveMatch ? (
               <p>
                 {t('room.next_turn', {

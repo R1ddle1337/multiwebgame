@@ -19,6 +19,8 @@ interface Props {
   user: UserDTO;
 }
 
+const GO_BOARD_SIZES = [9, 13, 19] as const;
+
 export function LobbyPage({ api, user }: Props) {
   const realtime = useRealtime();
   const { t, translateError } = useI18n();
@@ -37,6 +39,7 @@ export function LobbyPage({ api, user }: Props) {
   const [loadingReports, setLoadingReports] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeQueueGame, setActiveQueueGame] = useState<BoardGameType | null>(null);
+  const [goRoomBoardSize, setGoRoomBoardSize] = useState<(typeof GO_BOARD_SIZES)[number]>(19);
   const [blockUserId, setBlockUserId] = useState('');
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -182,10 +185,14 @@ export function LobbyPage({ api, user }: Props) {
     realtime.clearLastError();
   }, [realtime, translateError]);
 
-  const createRoom = async (gameType: RoomDTO['gameType']) => {
+  const createRoom = async (
+    gameType: RoomDTO['gameType'],
+    options?: { roomConfig?: { goBoardSize?: (typeof GO_BOARD_SIZES)[number] } }
+  ) => {
     const result = await api.createRoom(
       gameType,
-      gameType === 'single_2048' ? 1 : gameType === 'texas_holdem' ? 6 : 4
+      gameType === 'single_2048' ? 1 : gameType === 'texas_holdem' ? 6 : 4,
+      options?.roomConfig
     );
     navigate(`/rooms/${result.room.id}`);
   };
@@ -265,7 +272,31 @@ export function LobbyPage({ api, user }: Props) {
           <button type="button" onClick={() => createRoom('dots')}>
             {t('lobby.create.dots')}
           </button>
-          <button type="button" onClick={() => createRoom('go')}>
+          <label>
+            {t('lobby.go.board_size')}{' '}
+            <select
+              value={goRoomBoardSize}
+              onChange={(event) =>
+                setGoRoomBoardSize(Number(event.target.value) as (typeof GO_BOARD_SIZES)[number])
+              }
+            >
+              {GO_BOARD_SIZES.map((size) => (
+                <option key={`lobby-go-size-${size}`} value={size}>
+                  {t(`training.go.size_${size}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() =>
+              createRoom('go', {
+                roomConfig: {
+                  goBoardSize: goRoomBoardSize
+                }
+              })
+            }
+          >
             {t('lobby.create.go')}
           </button>
           <button type="button" onClick={() => createRoom('xiangqi')}>
@@ -350,6 +381,9 @@ export function LobbyPage({ api, user }: Props) {
                     status: roomStatusLabel(room.status)
                   })}
                 </p>
+                {room.gameType === 'go' ? (
+                  <p>{t('room.go.board_size', { size: room.roomConfig?.goBoardSize ?? 9 })}</p>
+                ) : null}
               </div>
               <div className="button-row">
                 <button type="button" onClick={() => joinRoom(room.id)}>

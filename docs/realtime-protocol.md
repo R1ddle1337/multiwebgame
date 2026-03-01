@@ -124,6 +124,7 @@ Message shape:
   - Quoridor: `{ room, gameType: "quoridor", state, viewerRole }`
   - Hex: `{ room, gameType: "hex", state, viewerRole }`
   - 2048 room: `{ room, gameType: "single_2048", state: null, viewerRole }`
+  - For Go rooms, `room.roomConfig.goBoardSize` (when present) defines initial board dimensions used for deterministic runtime/reconnect reconstruction.
 
 - `room.player_joined`
   - `{ roomId, user, role }`

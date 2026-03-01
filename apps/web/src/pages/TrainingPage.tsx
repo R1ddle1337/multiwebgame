@@ -154,6 +154,10 @@ const LOVE_LETTER_GUESS_OPTIONS: LoveLetterCardName[] = [
   'princess'
 ];
 
+const GO_BOARD_SIZES = [9, 13, 19] as const;
+type GoBoardSizeOption = (typeof GO_BOARD_SIZES)[number];
+const DEFAULT_GO_BOARD_SIZE: GoBoardSizeOption = 19;
+
 const DEFAULT_YAHTZEE_HOLD = [false, false, false, false, false];
 
 function isPhase2Game(game: TrainingGame): game is Phase2TrainingGame {
@@ -226,7 +230,8 @@ export function TrainingPage() {
     });
 
   const [gomokuState, setGomokuState] = useState(() => createGomokuState(15));
-  const [goState, setGoState] = useState(() => createGoState(9));
+  const [goBoardSize, setGoBoardSize] = useState<GoBoardSizeOption>(DEFAULT_GO_BOARD_SIZE);
+  const [goState, setGoState] = useState(() => createGoState(DEFAULT_GO_BOARD_SIZE));
   const [xiangqiState, setXiangqiState] = useState(() => createXiangqiState());
   const [xiangqiSelection, setXiangqiSelection] = useState<{ x: number; y: number } | null>(null);
 
@@ -436,7 +441,7 @@ export function TrainingPage() {
   }
 
   function resetGo() {
-    setGoState(createGoState(9));
+    setGoState(createGoState(goBoardSize));
   }
 
   function resetXiangqi() {
@@ -585,6 +590,23 @@ export function TrainingPage() {
 
       {game === 'go' ? (
         <>
+          <label>
+            {t('training.go.board_size')}{' '}
+            <select
+              value={goBoardSize}
+              onChange={(event) => {
+                const nextSize = Number(event.target.value) as GoBoardSizeOption;
+                setGoBoardSize(nextSize);
+                setGoState(createGoState(nextSize));
+              }}
+            >
+              {GO_BOARD_SIZES.map((size) => (
+                <option key={`training-go-size-${size}`} value={size}>
+                  {t(`training.go.size_${size}`)}
+                </option>
+              ))}
+            </select>
+          </label>
           <GoBoard
             state={goState}
             disabled={goState.status !== 'playing' || goState.nextPlayer !== 'black'}

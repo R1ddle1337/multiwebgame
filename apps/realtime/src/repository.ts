@@ -1,8 +1,10 @@
 import type {
   GameType,
+  GoBoardSize,
   InvitationDTO,
   MatchDTO,
   MatchMoveDTO,
+  RoomConfigDTO,
   RoomDTO,
   RoomPlayerDTO,
   UserDTO
@@ -115,6 +117,23 @@ function maxPlayerSeatsForGame(gameType: GameType): number {
   }
 
   return 2;
+}
+
+function parseGoBoardSize(value: unknown): GoBoardSize | null {
+  return value === 9 || value === 13 || value === 19 ? value : null;
+}
+
+function mapRoomConfig(raw: unknown): RoomConfigDTO | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+
+  const goBoardSize = parseGoBoardSize((raw as { goBoardSize?: unknown }).goBoardSize);
+  if (!goBoardSize) {
+    return undefined;
+  }
+
+  return { goBoardSize };
 }
 
 async function abandonActiveMatches(
@@ -308,6 +327,7 @@ function mapMatch(row: {
   status: 'active' | 'completed' | 'abandoned';
   winner_user_id: string | null;
   result_payload: Record<string, unknown> | null;
+  room_config?: unknown;
   started_at: Date | string;
   ended_at: Date | string | null;
 }): MatchDTO {
@@ -318,6 +338,7 @@ function mapMatch(row: {
     status: row.status,
     winnerUserId: row.winner_user_id,
     resultPayload: row.result_payload,
+    roomConfig: mapRoomConfig(row.room_config),
     startedAt: toIso(row.started_at),
     endedAt: row.ended_at ? toIso(row.ended_at) : null,
     moves: []
@@ -376,10 +397,11 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     game_type: GameType;
     status: 'open' | 'in_match' | 'closed';
     max_players: number;
+    room_config: unknown;
     created_at: Date | string;
   }>(
     `
-      SELECT id, host_user_id, game_type, status, max_players, created_at
+      SELECT id, host_user_id, game_type, status, max_players, room_config, created_at
       FROM rooms
       WHERE id = $1
       LIMIT 1
@@ -448,6 +470,7 @@ async function fetchRoomById(client: DbExecutor, roomId: string): Promise<RoomDT
     gameType: room.game_type,
     status: room.status,
     maxPlayers: room.max_players,
+    roomConfig: mapRoomConfig(room.room_config),
     createdAt: toIso(room.created_at),
     players: mappedPlayers
   };
@@ -712,14 +735,25 @@ export async function getLatestMatchForRoom(roomId: string): Promise<MatchDTO | 
     status: 'active' | 'completed' | 'abandoned';
     winner_user_id: string | null;
     result_payload: Record<string, unknown> | null;
+    room_config: unknown;
     started_at: Date | string;
     ended_at: Date | string | null;
   }>(
     `
-      SELECT id, room_id, game_type, status, winner_user_id, result_payload, started_at, ended_at
-      FROM matches
-      WHERE room_id = $1
-      ORDER BY started_at DESC
+      SELECT
+        m.id,
+        m.room_id,
+        m.game_type,
+        m.status,
+        m.winner_user_id,
+        m.result_payload,
+        r.room_config,
+        m.started_at,
+        m.ended_at
+      FROM matches m
+      JOIN rooms r ON r.id = m.room_id
+      WHERE m.room_id = $1
+      ORDER BY m.started_at DESC
       LIMIT 1
     `,
     [roomId]
