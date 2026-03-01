@@ -26,33 +26,39 @@ Common legality:
 
 ## Santorini (2-player, no god powers)
 
+Implemented rules (base game only, no powers):
+
+- board is fixed at `5x5`
+- setup phase alternates worker placement until all four workers are placed (`black.a`, `black.b`, `white.a`, `white.b`)
+- each turn is exactly `move` then `build` with the same worker
+- movement constraints:
+  - destination must be adjacent
+  - destination must be empty
+  - destination level must be `< 4` (no dome)
+  - climb is limited to `+1` level
+- build constraints:
+  - build cell must be adjacent to worker's new location
+  - build cell cannot contain a worker
+  - domes (`level 4`) cannot be built on further
+- win/loss:
+  - moving onto level `3` wins immediately
+  - if the player to move has no legal move+build sequence, they lose (`loserReason: "no_legal_move"`)
+
+## Onitama (2-player, full base card pool)
+
 Implemented rules:
 
-- default board `5x5`
-- setup phase: each side places two workers (`a`, `b`) on empty cells
-- turn phase:
-  - move one worker to an adjacent square
-  - destination must be empty and not domed
-  - upward movement is limited to `+1` level
-  - then build one level on an adjacent square
-  - build cannot target a worker-occupied square or an existing dome
-- moving onto level `3` wins immediately
-- if the next player has no legal move, they lose (`loserReason: "no_legal_move"`)
-
-## Onitama (2-player, fixed starter card pool)
-
-Implemented rules:
-
-- default board `5x5`
-- each side starts with 5 pieces (`4` students + `1` master)
-- opening move cards are sampled from a fixed v1 card set:
-  - each player receives 2 cards
-  - one side card is shared on table
-- turn action:
-  - pick one of current player's two cards
-  - move one own piece from `from` to `to` by a legal vector for that card
-  - cannot move out of bounds or onto own piece
-  - then used card swaps with side card
+- board is fixed at `5x5` with standard initial piece layout (`4` students + `1` master per side)
+- card pool is full base set of `16` cards:
+  - `tiger`, `dragon`, `frog`, `rabbit`, `crab`, `elephant`, `goose`, `rooster`
+  - `monkey`, `mantis`, `horse`, `ox`, `crane`, `boar`, `eel`, `cobra`
+- opening setup:
+  - RNG samples `5` unique cards
+  - black gets first `2`, white gets next `2`, final card is side card
+- turn loop:
+  - move one own piece using one card's movement pattern
+  - cannot move off-board or onto own piece
+  - used card swaps with side card
 - win conditions:
   - capture opponent master
   - or move own master to opponent temple square
@@ -61,130 +67,131 @@ Randomness + verification:
 
 - opening card sampling uses commit-reveal verifiable RNG
 - gameplay is blocked until RNG phase is `ready`
-- completed payload includes RNG proof transcript and sampled opening cards for replay verification
+- completed result payload includes full RNG proof transcript for replay verification
 
 ## Battleship (2-player, 10x10)
 
 Implemented rules:
 
-- default board `10x10`
-- fleet lengths: `5/4/3/3/2`
+- board is fixed at `10x10`
+- fleet lengths are fixed at `5/4/3/3/2`
 - placement phase:
-  - each player submits full fleet layout (no overlap, in-bounds)
-  - match enters firing phase after both fleets are validly submitted
+  - each player submits full fleet
+  - ships must be in bounds, exact lengths, and non-overlapping
 - firing phase:
   - players alternate one shot per turn
   - shot result is `miss` / `hit` / `sunk`
-  - repeat shots on the same cell are rejected
-- terminal:
-  - when one side has all ships sunk, shooter wins immediately
+  - repeated shot at the same cell is rejected
+- match ends immediately when one side has all ships sunk
 
 Visibility policy:
 
-- active player only sees own fleet layout
-- spectators do not receive either fleet layout while match is active
-- completed replay/state projection can reveal both full fleets
+- during active play, player view reveals only own fleet layout
+- spectators do not receive either fleet layout during active play
+- completed projection/replay can reveal both fleets
 
 ## Yahtzee (2-player score duel)
 
 Implemented rules:
 
-- each player has the same 13 score categories:
+- each player scores the standard 13 categories once:
   - upper: `ones..sixes`
   - lower: `three_of_a_kind`, `four_of_a_kind`, `full_house`, `small_straight`, `large_straight`, `yahtzee`, `chance`
-- on a turn:
-  - current player may roll up to 3 times
-  - after first roll, player may submit a 5-slot hold mask to keep selected dice and reroll the rest
-  - then player must score exactly one unused category
-- category scoring is deterministic and standard:
-  - kind/chance sum dice as applicable
-  - full house = `25`, small straight = `30`, large straight = `40`, yahtzee = `50`
-- each category can be used once per player
-- match ends when both players fill all 13 categories
-- winner is higher total score (tie allowed)
+- per turn:
+  - up to 3 rolls
+  - after first roll, optional 5-slot hold mask for rerolls
+  - then score exactly one unused category
+- standard category scoring is used (`full_house=25`, `small_straight=30`, `large_straight=40`, `yahtzee=50`)
+- upper section bonus is implemented:
+  - upper subtotal `>= 63` grants `+35`
+  - final total = raw category sum + upper bonus
+- match ends when both players complete all 13 categories; higher total wins (tie allowed)
 
 Randomness + verification:
 
 - all dice rolls use commit-reveal verifiable RNG
 - gameplay is blocked until RNG phase is `ready`
-- completed payload includes totals/category completion and RNG proof transcript for replay verification
+- completed result payload includes totals, upper subtotals/bonus, and RNG proof transcript
 
 ## Domination (2-player, 9x9)
 
-Implemented rules:
+Implemented rules (self-authored mode, intentionally not aligned to external game rules):
 
-- default board `9x9`
-- players alternate placing one stone on an empty cell (`black` first)
-- score is recomputed after every move:
-  - `pieceCounts`: number of placed stones per side
-  - `controlCounts`: for each empty cell, count orthogonal adjacent stones; side with strictly higher adjacent count controls that cell
+- board is fixed at `9x9`
+- players alternate placing one stone on empty cells (`black` first)
+- score is recomputed each move:
+  - `pieceCounts`: own stones on board
+  - `controlCounts`: empty cells controlled by strictly greater orthogonal adjacency
   - `scores = pieceCounts + controlCounts`
-- legality:
-  - out-of-bounds and occupied-cell placements are rejected
-  - turn order is enforced
-- terminal:
-  - board full => match completed
-  - higher final score wins, tie allowed
+- out-of-bounds / occupied / out-of-turn moves are rejected
+- game ends on full board; higher score wins (tie allowed)
 
 ## Codenames Duet (2-player co-op, 5x5)
 
-Implemented rules (v1 simplified co-op loop):
+Implemented rules (faithful duet loop + hidden information):
 
-- default word grid `5x5` (`25` words), sampled from fixed open word pool
-- each player has a private key map (`agent`/`neutral`/`assassin`)
+- word board is `5x5` (`25` unique words) from fixed pool
+- key generation uses duet-style composition:
+  - each player key has `9` contacts (`agent`) and `3` assassins
+  - union constraints are fixed at `15` total contacts with `3` shared contacts
+  - assassin union is fixed at `5` cells (one shared assassin + side-specific assassins)
 - turn loop:
-  - current clue-giver submits clue (`word` + `count`)
-  - partner guesses indices, up to `count + 1`, or ends guess phase early
-  - neutral guess ends turn; assassin guess ends match immediately
-- global win condition: all target cells (union of both key maps' `agent` cells) are revealed
-- loss conditions: assassin revealed or clue rounds exhausted
+  - current clue-giver submits clue (`word`, `count`)
+  - partner guesses up to `count + 1` or ends guesses manually
+  - guess handling:
+    - assassin: immediate loss
+    - non-contact on clue-giver key: turn ends
+    - contact on clue-giver key: guesser may continue while guesses remain
+- win/loss:
+  - win when all `15` contact cells are revealed
+  - lose on assassin reveal or when clue rounds run out
 
 Randomness + verification:
 
-- word grid and both key maps are generated via commit-reveal verifiable RNG
-- gameplay remains blocked until RNG phase is `ready`
-- completed payload includes cooperative outcome and RNG proof transcript for replay verification
+- words and key pair are generated from commit-reveal verifiable RNG
+- gameplay is blocked until RNG phase is `ready`
+- completed result payload includes cooperative outcome, target counts, and RNG proof transcript
 
 Visibility policy:
 
-- active player view only includes own key map
-- spectators do not receive key maps during active play
-- completed replay can reveal both key maps
+- active player sees only own key during live play
+- spectators see no key during live play
+- completed projection/replay can reveal both keys
 
-## Love Letter (2-player MVP)
+## Love Letter (2-player, 2nd-edition style match flow)
 
-Implemented rules (v1 simplified 2-player flow):
+Implemented rules:
 
 - base 16-card deck (`guard/priest/baron/handmaid/prince/king/countess/princess`)
-- round setup:
-  - commit-reveal RNG shuffles deck
-  - one facedown card removed
-  - each player receives one card; starting player receives one extra card
-- turn action: player with two cards plays one card and resolves effect
-- implemented card effects:
-  - Guard: guess opponent hand (cannot guess Guard)
-  - Priest: target validation only (peek is hidden-info side effect)
-  - Baron: compare remaining hand value; lower is eliminated
-  - Handmaid: grants temporary protection
-  - Prince: chosen target discards hand and redraws (Princess discard eliminates)
-  - King: swaps hands
-  - Countess: mandatory play when held with King/Prince
-  - Princess: self-elimination when played/discarded
-- terminal:
-  - one player eliminated -> opponent wins
-  - deck exhausted -> compare remaining hand value; tie allowed
+- two-player round setup:
+  - remove `1` facedown card
+  - remove `3` face-up cards (`removedFaceUp` in state)
+  - deal `1` card to each player
+  - round starter draws one additional card (starts with `2` cards)
+- card effect legality is enforced for all base cards, including:
+  - Countess forced play with King/Prince
+  - Princess self-elimination on play/discard
+  - Handmaid protection targeting restrictions
+- round end:
+  - elimination -> survivor wins round
+  - if deck exhausts, compare remaining hand value
+  - showdown tie-break uses discard-value sum; exact tie awards both players a token
+- match scoring:
+  - tokens of affection tracked across rounds
+  - default two-player target is `7` tokens
+  - round winner starts next round; match ends only when token target is reached
 
 Randomness + verification:
 
-- shuffle/deal uses commit-reveal verifiable RNG
+- each round deck shuffle uses commit-reveal verifiable RNG
 - gameplay is blocked until RNG phase is `ready`
-- completed payload includes RNG proof transcript for replay verification
+- completed result payload includes round/token state and full RNG proof transcript
 
 Visibility policy:
 
-- active player only sees own hand
-- spectators do not see hidden hands during active play
-- replay after completion can reveal full hands/discard progression
+- live player view reveals only own hand
+- spectators do not receive hidden hands during active play
+- replay after completion can reconstruct and reveal full round progression
 
 ## Xiangqi (Chinese Chess)
 

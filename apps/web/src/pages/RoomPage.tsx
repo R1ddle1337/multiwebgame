@@ -1979,6 +1979,18 @@ export function RoomPage({ api, user }: Props) {
               })}
             </p>
             <p>
+              {t('room.yahtzee.upper_totals', {
+                black: yahtzeeState.upperTotals.black,
+                white: yahtzeeState.upperTotals.white
+              })}
+            </p>
+            <p>
+              {t('room.yahtzee.upper_bonus', {
+                black: yahtzeeState.upperBonuses.black,
+                white: yahtzeeState.upperBonuses.white
+              })}
+            </p>
+            <p>
               {t('enum.color.black')}: {yahtzeeState.completedCategories.black}/13 | {t('enum.color.white')}:{' '}
               {yahtzeeState.completedCategories.white}/13
             </p>
@@ -2655,7 +2667,24 @@ export function RoomPage({ api, user }: Props) {
                     })}
                   </p>
                 ) : null}
+                <p>
+                  {t('room.love_letter.round', {
+                    current: loveLetterState.round,
+                    target: loveLetterState.tokenTarget
+                  })}
+                </p>
+                <p>
+                  {t('room.love_letter.tokens', {
+                    black: loveLetterState.tokens.black,
+                    white: loveLetterState.tokens.white
+                  })}
+                </p>
                 <p>{t('room.love_letter.draw_pile', { count: loveLetterState.drawPileCount })}</p>
+                <p>
+                  {t('room.love_letter.removed_face_up', {
+                    cards: loveLetterState.removedFaceUp.join(', ') || '-'
+                  })}
+                </p>
                 <p>
                   {t('room.love_letter.hand_counts', {
                     black: loveLetterState.handCounts.black,

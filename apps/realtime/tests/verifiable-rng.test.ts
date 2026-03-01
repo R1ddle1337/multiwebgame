@@ -1,4 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import {
+  ONITAMA_CARDS,
+  applyCodenamesDuetMove,
+  applyOnitamaMove,
+  createCodenamesDuetKeyPair,
+  createCodenamesDuetState,
+  createCodenamesDuetWordPool,
+  createDeterministicPrng,
+  createOnitamaCardPool,
+  createOnitamaState
+} from '@multiwebgame/game-engines';
 
 import {
   applyPlayerCommit,
@@ -124,5 +135,160 @@ describe('verifiable rng utilities', () => {
 
     expect(isRevealTimedOut(commit2.session, 5019)).toBe(false);
     expect(isRevealTimedOut(commit2.session, 5020)).toBe(true);
+  });
+
+  it('replays onitama opening cards and moves deterministically from rng proof', () => {
+    const session = createVerifiableRngSession({
+      matchId: '00000000-1111-2222-3333-444444444444',
+      playerOneUserId: 'u1',
+      playerTwoUserId: 'u2',
+      serverSeedHex: '11'.repeat(32),
+      revealTimeoutMs: 10_000
+    });
+    const committed = applyPlayerCommit(session, 'u1', createPlayerNonceCommit('onitama-1'), 100);
+    const committedBoth = applyPlayerCommit(
+      committed.session,
+      'u2',
+      createPlayerNonceCommit('onitama-2'),
+      101
+    );
+    const revealed = applyPlayerReveal(committedBoth.session, 'u1', 'onitama-1');
+    const ready = applyPlayerReveal(revealed.session, 'u2', 'onitama-2');
+    expect(ready.accepted).toBe(true);
+    expect(ready.session.phase).toBe('ready');
+
+    const rngSeed = ready.session.rngSeed!;
+    const vectorsByCard = Object.fromEntries(
+      ONITAMA_CARDS.map((card) => [card.name, card.vectors])
+    ) as Record<string, Array<{ dx: number; dy: number }>>;
+
+    const replayOnce = () => {
+      const prng = createDeterministicPrng(rngSeed);
+      const pool = createOnitamaCardPool();
+      prng.shuffleInPlace(pool);
+      const openingCards = pool.slice(0, 5);
+      let state = createOnitamaState({ openingCards });
+
+      let chosenMove: Parameters<typeof applyOnitamaMove>[1] | null = null;
+      outer: for (let y = 0; y < state.boardSize; y += 1) {
+        for (let x = 0; x < state.boardSize; x += 1) {
+          const piece = state.board[y][x];
+          if (!piece || piece.player !== state.nextPlayer) {
+            continue;
+          }
+          for (const card of state.cards[state.nextPlayer]) {
+            const vectors = vectorsByCard[card] ?? [];
+            for (const vector of vectors) {
+              const dx = state.nextPlayer === 'black' ? vector.dx : -vector.dx;
+              const dy = state.nextPlayer === 'black' ? vector.dy : -vector.dy;
+              const toX = x + dx;
+              const toY = y + dy;
+              if (toX < 0 || toY < 0 || toX >= state.boardSize || toY >= state.boardSize) {
+                continue;
+              }
+              const target = state.board[toY][toX];
+              if (target?.player === state.nextPlayer) {
+                continue;
+              }
+              chosenMove = {
+                from: { x, y },
+                to: { x: toX, y: toY },
+                card,
+                player: state.nextPlayer
+              };
+              break outer;
+            }
+          }
+        }
+      }
+
+      expect(chosenMove).not.toBeNull();
+      const applied = applyOnitamaMove(state, chosenMove!);
+      expect(applied.accepted).toBe(true);
+      state = applied.nextState;
+
+      return {
+        openingCards,
+        state
+      };
+    };
+
+    const first = replayOnce();
+    const second = replayOnce();
+
+    expect(first.openingCards).toEqual(second.openingCards);
+    expect(first.state).toEqual(second.state);
+  });
+
+  it('replays codenames duet setup and guesses deterministically from rng proof', () => {
+    const session = createVerifiableRngSession({
+      matchId: '99999999-8888-7777-6666-555555555555',
+      playerOneUserId: 'u1',
+      playerTwoUserId: 'u2',
+      serverSeedHex: '22'.repeat(32),
+      revealTimeoutMs: 10_000
+    });
+    const committed = applyPlayerCommit(session, 'u1', createPlayerNonceCommit('codenames-1'), 200);
+    const committedBoth = applyPlayerCommit(
+      committed.session,
+      'u2',
+      createPlayerNonceCommit('codenames-2'),
+      201
+    );
+    const revealed = applyPlayerReveal(committedBoth.session, 'u1', 'codenames-1');
+    const ready = applyPlayerReveal(revealed.session, 'u2', 'codenames-2');
+    expect(ready.accepted).toBe(true);
+    expect(ready.session.phase).toBe('ready');
+
+    const rngSeed = ready.session.rngSeed!;
+    const replayOnce = () => {
+      const prng = createDeterministicPrng(rngSeed);
+      const words = createCodenamesDuetWordPool();
+      prng.shuffleInPlace(words);
+      const { keyBlack, keyWhite } = createCodenamesDuetKeyPair((items) => {
+        prng.shuffleInPlace(items);
+      });
+
+      let state = createCodenamesDuetState({
+        words: words.slice(0, 25),
+        keyBlack,
+        keyWhite,
+        turns: 9
+      });
+
+      const clue = applyCodenamesDuetMove(state, {
+        type: 'clue',
+        word: 'seed',
+        count: 1,
+        player: 'black'
+      });
+      expect(clue.accepted).toBe(true);
+      state = clue.nextState;
+
+      const guessIndex = keyBlack.findIndex((role) => role === 'agent');
+      expect(guessIndex).toBeGreaterThanOrEqual(0);
+      const guess = applyCodenamesDuetMove(state, {
+        type: 'guess',
+        index: guessIndex,
+        player: 'white'
+      });
+      expect(guess.accepted).toBe(true);
+      state = guess.nextState;
+
+      return {
+        words: words.slice(0, 25),
+        keyBlack,
+        keyWhite,
+        state
+      };
+    };
+
+    const first = replayOnce();
+    const second = replayOnce();
+
+    expect(first.words).toEqual(second.words);
+    expect(first.keyBlack).toEqual(second.keyBlack);
+    expect(first.keyWhite).toEqual(second.keyWhite);
+    expect(first.state).toEqual(second.state);
   });
 });

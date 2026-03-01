@@ -4,6 +4,7 @@ import {
   applyYahtzeeMove,
   applyCardsMove,
   applyCodenamesDuetMove,
+  createCodenamesDuetKeyPair,
   applyDominationMove,
   applyConnect4Move,
   applyDotsMove,
@@ -22,7 +23,6 @@ import {
   createYahtzeeState,
   createCardsDeck,
   createCardsState,
-  createCodenamesDuetRolePool,
   createCodenamesDuetState,
   createCodenamesDuetWordPool,
   createConnect4State,
@@ -397,16 +397,8 @@ function parseOnitamaMove(
   }
 
   const card = source.card;
-  if (
-    card !== 'tiger' &&
-    card !== 'dragon' &&
-    card !== 'frog' &&
-    card !== 'rabbit' &&
-    card !== 'crab' &&
-    card !== 'elephant' &&
-    card !== 'goose' &&
-    card !== 'rooster'
-  ) {
+  const validCards = createOnitamaCardPool();
+  if (typeof card !== 'string' || !validCards.includes(card as (typeof validCards)[number])) {
     return null;
   }
 
@@ -708,11 +700,14 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   ]);
   const [yahtzeeStates, setYahtzeeStates] = useState<YahtzeeRuntimeState[]>([createYahtzeeState()]);
   const [codenamesStates, setCodenamesStates] = useState<CodenamesDuetRuntimeState[]>([
-    createCodenamesDuetState({
-      words: createCodenamesDuetWordPool().slice(0, 25),
-      keyBlack: createCodenamesDuetRolePool(),
-      keyWhite: createCodenamesDuetRolePool()
-    })
+    (() => {
+      const { keyBlack, keyWhite } = createCodenamesDuetKeyPair();
+      return createCodenamesDuetState({
+        words: createCodenamesDuetWordPool().slice(0, 25),
+        keyBlack,
+        keyWhite
+      });
+    })()
   ]);
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [dotsStates, setDotsStates] = useState<DotsState[]>([createDotsState()]);
@@ -1025,10 +1020,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           const prng = createDeterministicPrng(rngSeed);
           const words = createCodenamesDuetWordPool();
           prng.shuffleInPlace(words);
-          const keyBlack = createCodenamesDuetRolePool();
-          const keyWhite = createCodenamesDuetRolePool();
-          prng.shuffleInPlace(keyBlack);
-          prng.shuffleInPlace(keyWhite);
+          const { keyBlack, keyWhite } = createCodenamesDuetKeyPair((items) => {
+            prng.shuffleInPlace(items);
+          });
 
           let current = createCodenamesDuetState({
             words: words.slice(0, 25),
@@ -1332,10 +1326,13 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           const prng = createDeterministicPrng(rngSeed);
-          const deck = createLoveLetterDeck();
-          prng.shuffleInPlace(deck);
+          const drawRoundDeck = (): ReturnType<typeof createLoveLetterDeck> => {
+            const deck = createLoveLetterDeck();
+            prng.shuffleInPlace(deck);
+            return deck;
+          };
 
-          let current = createLoveLetterState({ deck });
+          let current = createLoveLetterState({ deck: drawRoundDeck() });
           const snapshots: LoveLetterRuntimeState[] = [current];
 
           for (const move of result.match.moves) {
@@ -1347,7 +1344,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
               continue;
             }
 
-            const applied = applyLoveLetterMove(current, parsedMove);
+            const applied = applyLoveLetterMove(current, parsedMove, drawRoundDeck);
             if (!applied.accepted) {
               continue;
             }
@@ -1812,6 +1809,18 @@ export function ReplayPage({ api, viewerUserId }: Props) {
             })}
           </p>
           <p>
+            {t('room.yahtzee.upper_totals', {
+              black: yahtzeeStates[clampedStep].upperTotals.black,
+              white: yahtzeeStates[clampedStep].upperTotals.white
+            })}
+          </p>
+          <p>
+            {t('room.yahtzee.upper_bonus', {
+              black: yahtzeeStates[clampedStep].upperBonuses.black,
+              white: yahtzeeStates[clampedStep].upperBonuses.white
+            })}
+          </p>
+          <p>
             {t('enum.color.black')}: {yahtzeeStates[clampedStep].completedCategories.black}/13 |{' '}
             {t('enum.color.white')}: {yahtzeeStates[clampedStep].completedCategories.white}/13
           </p>
@@ -1959,10 +1968,25 @@ export function ReplayPage({ api, viewerUserId }: Props) {
       {gameType === 'love_letter' ? (
         <>
           <p>
+            {t('room.love_letter.round', {
+              current: loveLetterStates[clampedStep].round,
+              target: loveLetterStates[clampedStep].tokenTarget
+            })}
+          </p>
+          <p>
+            {t('room.love_letter.tokens', {
+              black: loveLetterStates[clampedStep].tokens.black,
+              white: loveLetterStates[clampedStep].tokens.white
+            })}
+          </p>
+          <p>
             {t('room.love_letter.draw_pile', {
-              count:
-                loveLetterStates[clampedStep].drawPile.length +
-                (loveLetterStates[clampedStep].facedownCard ? 1 : 0)
+              count: loveLetterStates[clampedStep].drawPile.length
+            })}
+          </p>
+          <p>
+            {t('room.love_letter.removed_face_up', {
+              cards: loveLetterStates[clampedStep].removedFaceUp.join(', ') || '-'
             })}
           </p>
           <p>

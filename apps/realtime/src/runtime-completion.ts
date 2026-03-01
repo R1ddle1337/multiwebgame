@@ -251,6 +251,8 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           moveCount: runtime.state.moveCount,
           turnCount: runtime.state.turnCount,
           totals: runtime.state.totals,
+          upperTotals: runtime.state.upperTotals,
+          upperBonuses: runtime.state.upperBonuses,
           completedCategories: runtime.state.completedCategories
         }
       }
@@ -373,7 +375,11 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           winner: runtime.state.winner,
           moveCount: runtime.state.moveCount,
           turnCount: runtime.state.turnCount,
-          drawPileCount: runtime.state.drawPile.length + (runtime.state.facedownCard ? 1 : 0),
+          round: runtime.state.round,
+          tokenTarget: runtime.state.tokenTarget,
+          tokens: runtime.state.tokens,
+          drawPileCount: runtime.state.drawPile.length,
+          removedFaceUp: runtime.state.removedFaceUp,
           handCounts: {
             black: runtime.state.hands.black.length,
             white: runtime.state.hands.white.length

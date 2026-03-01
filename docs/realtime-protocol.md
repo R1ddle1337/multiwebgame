@@ -41,7 +41,7 @@ Message shape:
   - `{ roomId: string, gameType: "santorini", move: { type: "place", worker: "a" | "b", x, y } | { type: "turn", worker: "a" | "b", to: {x, y}, build: {x, y} } }`
 
 - `room.move` (Onitama)
-  - `{ roomId: string, gameType: "onitama", move: { from: {x, y}, to: {x, y}, card: "tiger" | "dragon" | "frog" | "rabbit" | "crab" | "elephant" | "goose" | "rooster" } }`
+  - `{ roomId: string, gameType: "onitama", move: { from: {x, y}, to: {x, y}, card: "tiger" | "dragon" | "frog" | "rabbit" | "crab" | "elephant" | "goose" | "rooster" | "monkey" | "mantis" | "horse" | "ox" | "crane" | "boar" | "eel" | "cobra" } }`
 
 - `room.move` (Battleship)
   - `{ roomId: string, gameType: "battleship", move: { type: "place_fleet", ships: [{ x, y, orientation: "h" | "v", length }] } | { type: "fire", x, y } }`
@@ -199,6 +199,8 @@ Message shape:
   - Reveal timeout may abandon the active match (`abandonedReason: "rng_reveal_timeout"` in match result payload).
   - Onitama uses RNG commit-reveal to sample opening action cards and publishes proof in completed payload for replay verification.
   - Yahtzee uses RNG commit-reveal for all dice rolls and publishes proof in completed payload for replay verification.
+  - Love Letter uses RNG commit-reveal for every round shuffle in a multi-round token match and publishes proof in completed payload for replay verification.
+  - Codenames Duet uses RNG commit-reveal for both word board and duet key-pair generation and publishes proof in completed payload for replay verification.
 
 - Matchmaking queue:
   - `matchmaking.leave` cancels queue membership.

@@ -3,7 +3,7 @@ import {
   createBattleshipState,
   createCardsDeck,
   createCardsState,
-  createCodenamesDuetRolePool,
+  createCodenamesDuetKeyPair,
   createCodenamesDuetState,
   createCodenamesDuetWordPool,
   createConnect4State,
@@ -130,6 +130,10 @@ describe('deriveRuntimeCompletion', () => {
     state.turnCount = 14;
     state.totals.black = 231;
     state.totals.white = 198;
+    state.upperTotals.black = 68;
+    state.upperTotals.white = 61;
+    state.upperBonuses.black = 35;
+    state.upperBonuses.white = 0;
     state.completedCategories.black = 13;
     state.completedCategories.white = 13;
 
@@ -153,6 +157,14 @@ describe('deriveRuntimeCompletion', () => {
           totals: {
             black: 231,
             white: 198
+          },
+          upperTotals: {
+            black: 68,
+            white: 61
+          },
+          upperBonuses: {
+            black: 35,
+            white: 0
           },
           completedCategories: {
             black: 13,
@@ -255,16 +267,19 @@ describe('deriveRuntimeCompletion', () => {
   });
 
   it('maps codenames duet completion to cooperative payload', () => {
+    const { keyBlack, keyWhite } = createCodenamesDuetKeyPair();
     const state = createCodenamesDuetState({
       words: createCodenamesDuetWordPool().slice(0, 25),
-      keyBlack: createCodenamesDuetRolePool(),
-      keyWhite: createCodenamesDuetRolePool()
+      keyBlack,
+      keyWhite
     });
     state.status = 'completed';
     state.outcome = 'success';
     state.moveCount = 18;
     state.turnsRemaining = 2;
-    state.revealed = state.revealed.map((_value, index) => index < 9);
+    state.revealed = state.revealed.map(
+      (_value, index) => keyBlack[index] === 'agent' || keyWhite[index] === 'agent'
+    );
 
     const completion = deriveRuntimeCompletion({
       gameType: 'codenames_duet',
@@ -284,8 +299,8 @@ describe('deriveRuntimeCompletion', () => {
           moveCount: 18,
           turnsRemaining: 2,
           targetCounts: {
-            total: 9,
-            found: 9
+            total: 15,
+            found: 15
           }
         }
       }
@@ -300,6 +315,12 @@ describe('deriveRuntimeCompletion', () => {
     state.winner = 'white';
     state.moveCount = 14;
     state.turnCount = 8;
+    state.round = 4;
+    state.tokenTarget = 7;
+    state.tokens = {
+      black: 2,
+      white: 7
+    };
 
     const completion = deriveRuntimeCompletion({
       gameType: 'love_letter',
@@ -318,7 +339,14 @@ describe('deriveRuntimeCompletion', () => {
           winner: 'white',
           moveCount: 14,
           turnCount: 8,
-          drawPileCount: state.drawPile.length + (state.facedownCard ? 1 : 0),
+          round: 4,
+          tokenTarget: 7,
+          tokens: {
+            black: 2,
+            white: 7
+          },
+          drawPileCount: state.drawPile.length,
+          removedFaceUp: state.removedFaceUp,
           handCounts: {
             black: state.hands.black.length,
             white: state.hands.white.length

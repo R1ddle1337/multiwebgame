@@ -23,7 +23,7 @@ import {
   createBackgammonState,
   createCardsDeck,
   createCardsState,
-  createCodenamesDuetRolePool,
+  createCodenamesDuetKeyPair,
   createCodenamesDuetState,
   createCodenamesDuetWordPool,
   createConnect4State,
@@ -422,6 +422,25 @@ type ActiveRuntime =
   | HexRuntime
   | XiangqiRuntime;
 
+const ONITAMA_CARD_NAMES = [
+  'tiger',
+  'dragon',
+  'frog',
+  'rabbit',
+  'crab',
+  'elephant',
+  'goose',
+  'rooster',
+  'monkey',
+  'mantis',
+  'horse',
+  'ox',
+  'crane',
+  'boar',
+  'eel',
+  'cobra'
+] as const;
+
 const cardsSuitSchema = z.enum(['clubs', 'diamonds', 'hearts', 'spades']);
 const cardsRankSchema = z.enum(['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']);
 const cardsCardSchema = z.object({
@@ -531,7 +550,7 @@ const roomMoveSchema = z.union([
           x: z.number().int().min(0).max(4),
           y: z.number().int().min(0).max(4)
         }),
-        card: z.enum(['tiger', 'dragon', 'frog', 'rabbit', 'crab', 'elephant', 'goose', 'rooster'])
+        card: z.enum(ONITAMA_CARD_NAMES)
       })
     })
   }),
@@ -1149,6 +1168,12 @@ function ensureLoveLetterPrng(runtime: LoveLetterRuntime): DeterministicPrng | n
   return runtime.rngPrng;
 }
 
+function drawShuffledLoveLetterDeck(prng: DeterministicPrng): ReturnType<typeof createLoveLetterDeck> {
+  const deck = createLoveLetterDeck();
+  prng.shuffleInPlace(deck);
+  return deck;
+}
+
 function ensureLoveLetterRuntimeState(runtime: LoveLetterRuntime): LoveLetterRuntimeState | null {
   if (runtime.state) {
     return runtime.state;
@@ -1159,8 +1184,7 @@ function ensureLoveLetterRuntimeState(runtime: LoveLetterRuntime): LoveLetterRun
     return null;
   }
 
-  const deck = createLoveLetterDeck();
-  prng.shuffleInPlace(deck);
+  const deck = drawShuffledLoveLetterDeck(prng);
   runtime.state = createLoveLetterState({
     deck,
     startingPlayer: 'black'
@@ -1225,10 +1249,9 @@ function ensureCodenamesDuetRuntimeState(runtime: CodenamesDuetRuntime): Codenam
   const words = createCodenamesDuetWordPool();
   prng.shuffleInPlace(words);
 
-  const keyBlack = createCodenamesDuetRolePool();
-  const keyWhite = createCodenamesDuetRolePool();
-  prng.shuffleInPlace(keyBlack);
-  prng.shuffleInPlace(keyWhite);
+  const { keyBlack, keyWhite } = createCodenamesDuetKeyPair((items) => {
+    prng.shuffleInPlace(items);
+  });
 
   runtime.state = createCodenamesDuetState({
     words: words.slice(0, 25),
@@ -2219,14 +2242,7 @@ function isOnitamaPositionRecord(value: unknown): value is OnitamaMove['from'] {
 
 function isOnitamaCardRecord(value: unknown): value is OnitamaMove['card'] {
   return (
-    value === 'tiger' ||
-    value === 'dragon' ||
-    value === 'frog' ||
-    value === 'rabbit' ||
-    value === 'crab' ||
-    value === 'elephant' ||
-    value === 'goose' ||
-    value === 'rooster'
+    typeof value === 'string' && ONITAMA_CARD_NAMES.includes(value as (typeof ONITAMA_CARD_NAMES)[number])
   );
 }
 
@@ -2497,7 +2513,12 @@ function replayMoves(
         continue;
       }
 
-      const applied = applyLoveLetterMove(current.state, parsedMove);
+      const prng = ensureLoveLetterPrng(current);
+      if (!prng) {
+        continue;
+      }
+
+      const applied = applyLoveLetterMove(current.state, parsedMove, () => drawShuffledLoveLetterDeck(prng));
       if (!applied.accepted) {
         continue;
       }
@@ -4028,8 +4049,14 @@ async function handleLoveLetterMove(
     return;
   }
 
+  const prng = ensureLoveLetterPrng(runtime);
+  if (!prng) {
+    sendError(client, 'rng_reveal_pending');
+    return;
+  }
+
   const normalizedMove = normalizeLoveLetterMove(move, player);
-  const applied = applyLoveLetterMove(state, normalizedMove);
+  const applied = applyLoveLetterMove(state, normalizedMove, () => drawShuffledLoveLetterDeck(prng));
   if (!applied.accepted) {
     sendError(client, applied.reason ?? 'invalid_move');
     return;
