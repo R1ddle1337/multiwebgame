@@ -70,6 +70,7 @@ class InMemoryStore implements Store {
     return {
       single_2048: 1200,
       gomoku: 1200,
+      santorini: 1200,
       xiangqi: 1200,
       go: 1200,
       connect4: 1200,
@@ -183,6 +184,7 @@ class InMemoryStore implements Store {
       [
         'single_2048',
         'gomoku',
+        'santorini',
         'xiangqi',
         'go',
         'connect4',

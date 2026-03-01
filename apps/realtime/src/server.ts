@@ -7,6 +7,7 @@ import {
   applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
+  applySantoriniMove,
   applyQuoridorMove,
   applyReversiMove,
   applyXiangqiMove,
@@ -21,11 +22,13 @@ import {
   createLiarsDiceState,
   createGoState,
   createGomokuState,
+  createSantoriniState,
   createQuoridorState,
   hasAnyLegalBackgammonMove,
   createReversiState,
   createXiangqiState,
   formatXiangqiMoveNotation,
+  normalizeSantoriniMove,
   toCardsPublicState,
   toLiarsDicePublicState,
   type CardsRuntimeState,
@@ -55,6 +58,10 @@ import type {
   GoState,
   GomokuMark,
   GomokuState,
+  SantoriniMove,
+  SantoriniMoveInput,
+  SantoriniPlayer,
+  SantoriniState,
   ReversiMove,
   ReversiState,
   QuoridorMove,
@@ -126,6 +133,18 @@ interface GomokuRuntime {
   roomId: string;
   matchId: string;
   state: GomokuState;
+  rngSession?: VerifiableRngSession;
+  players: {
+    black: string;
+    white: string;
+  };
+}
+
+interface SantoriniRuntime {
+  gameType: 'santorini';
+  roomId: string;
+  matchId: string;
+  state: SantoriniState;
   rngSession?: VerifiableRngSession;
   players: {
     black: string;
@@ -261,6 +280,7 @@ type ActiveRuntime =
   | CardsRuntime
   | LiarsDiceRuntime
   | GomokuRuntime
+  | SantoriniRuntime
   | Connect4Runtime
   | GoRuntime
   | ReversiRuntime
@@ -335,6 +355,33 @@ const roomMoveSchema = z.union([
       gameType: z.literal('gomoku'),
       x: z.number().int().min(0),
       y: z.number().int().min(0)
+    })
+  }),
+  z.object({
+    type: z.literal('room.move'),
+    payload: z.object({
+      roomId: z.string().uuid(),
+      gameType: z.literal('santorini'),
+      move: z.discriminatedUnion('type', [
+        z.object({
+          type: z.literal('place'),
+          worker: z.enum(['a', 'b']),
+          x: z.number().int().min(0),
+          y: z.number().int().min(0)
+        }),
+        z.object({
+          type: z.literal('turn'),
+          worker: z.enum(['a', 'b']),
+          to: z.object({
+            x: z.number().int().min(0),
+            y: z.number().int().min(0)
+          }),
+          build: z.object({
+            x: z.number().int().min(0),
+            y: z.number().int().min(0)
+          })
+        })
+      ])
     })
   }),
   z.object({
@@ -478,6 +525,7 @@ const matchmakingJoinSchema = z.object({
   payload: z.object({
     gameType: z.enum([
       'gomoku',
+      'santorini',
       'go',
       'xiangqi',
       'connect4',
@@ -518,6 +566,7 @@ const pendingInactiveRoomLeaves = new Map<string, Map<string, ReturnType<typeof 
 
 function playerSlotsForGame(gameType: BoardGameType): number {
   return gameType === 'gomoku' ||
+    gameType === 'santorini' ||
     gameType === 'go' ||
     gameType === 'xiangqi' ||
     gameType === 'connect4' ||
@@ -663,6 +712,7 @@ function runtimePlayers(runtime: ActiveRuntime): [string, string] {
     runtime.gameType === 'cards' ||
     runtime.gameType === 'liars_dice' ||
     runtime.gameType === 'gomoku' ||
+    runtime.gameType === 'santorini' ||
     runtime.gameType === 'go' ||
     runtime.gameType === 'reversi' ||
     runtime.gameType === 'dots' ||
@@ -1196,6 +1246,21 @@ function createRuntime(room: RoomDTO, matchId: string): ActiveRuntime | null {
     };
   }
 
+  if (room.gameType === 'santorini') {
+    return {
+      gameType: 'santorini',
+      roomId: room.id,
+      matchId,
+      state: createSantoriniState({
+        boardSize: 5
+      }),
+      players: {
+        black: players.first,
+        white: players.second
+      }
+    };
+  }
+
   if (room.gameType === 'go') {
     return {
       gameType: 'go',
@@ -1410,6 +1475,58 @@ function readLiarsDiceMovePayload(payload: Record<string, unknown>): LiarsDiceMo
   return isLiarsDiceMoveRecord(payload) ? payload : null;
 }
 
+function isSantoriniPositionRecord(value: unknown): value is SantoriniState['workers']['black']['a'] {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<NonNullable<SantoriniState['workers']['black']['a']>>;
+  return (
+    typeof typed.x === 'number' &&
+    Number.isInteger(typed.x) &&
+    typeof typed.y === 'number' &&
+    Number.isInteger(typed.y)
+  );
+}
+
+function isSantoriniMoveRecord(value: unknown): value is SantoriniMove {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const typed = value as Partial<SantoriniMove>;
+  if (typed.type === 'place') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      (typed.worker === 'a' || typed.worker === 'b') &&
+      typeof typed.x === 'number' &&
+      Number.isInteger(typed.x) &&
+      typeof typed.y === 'number' &&
+      Number.isInteger(typed.y)
+    );
+  }
+
+  if (typed.type === 'turn') {
+    return (
+      (typed.player === 'black' || typed.player === 'white') &&
+      (typed.worker === 'a' || typed.worker === 'b') &&
+      isSantoriniPositionRecord(typed.to) &&
+      isSantoriniPositionRecord(typed.build)
+    );
+  }
+
+  return false;
+}
+
+function readSantoriniMovePayload(payload: Record<string, unknown>): SantoriniMove | null {
+  const nested = payload.move;
+  if (isSantoriniMoveRecord(nested)) {
+    return nested;
+  }
+
+  return isSantoriniMoveRecord(payload) ? payload : null;
+}
+
 function replayMoves(
   runtime: ActiveRuntime,
   moves: Array<{ payload: Record<string, unknown> }>
@@ -1536,6 +1653,24 @@ function replayMoves(
         player
       });
 
+      if (!applied.accepted) {
+        continue;
+      }
+
+      current = {
+        ...current,
+        state: applied.nextState
+      };
+      continue;
+    }
+
+    if (current.gameType === 'santorini') {
+      const parsedMove = readSantoriniMovePayload(move.payload);
+      if (!parsedMove) {
+        continue;
+      }
+
+      const applied = applySantoriniMove(current.state, parsedMove);
       if (!applied.accepted) {
         continue;
       }
@@ -1836,7 +1971,9 @@ async function ensureRoomMatchIfReady(roomId: string): Promise<ActiveRuntime | n
     existing &&
     (((existing.gameType === 'cards' || existing.gameType === 'liars_dice') &&
       existing.state?.status === 'playing') ||
+      (existing.gameType === 'santorini' && existing.state.status !== 'completed') ||
       (existing.gameType !== 'cards' &&
+        existing.gameType !== 'santorini' &&
         existing.gameType !== 'liars_dice' &&
         existing.state.status === 'playing'))
   ) {
@@ -1952,6 +2089,19 @@ async function sendRoomState(client: ClientContext, roomId: string): Promise<voi
         room,
         gameType: 'gomoku',
         state: runtime?.gameType === 'gomoku' ? runtime.state : createGomokuState(15),
+        viewerRole
+      }
+    });
+    return;
+  }
+
+  if (room.gameType === 'santorini') {
+    send(client, {
+      type: 'room.state',
+      payload: {
+        room,
+        gameType: 'santorini',
+        state: runtime?.gameType === 'santorini' ? runtime.state : createSantoriniState({ boardSize: 5 }),
         viewerRole
       }
     });
@@ -2162,6 +2312,54 @@ async function handleGomokuMove(
         y,
         player: playerMark
       }
+    }
+  });
+
+  await finishMatchIfCompleted(runtime, targets);
+}
+
+async function handleSantoriniMove(
+  client: ClientContext,
+  runtime: SantoriniRuntime,
+  move: SantoriniMoveInput
+): Promise<void> {
+  const userId = client.user!.id;
+  const player: SantoriniPlayer | null =
+    runtime.players.black === userId ? 'black' : runtime.players.white === userId ? 'white' : null;
+
+  if (!player) {
+    sendError(client, 'not_a_match_player');
+    return;
+  }
+
+  const normalizedMove = normalizeSantoriniMove(move, player);
+  const applied = applySantoriniMove(runtime.state, normalizedMove);
+  if (!applied.accepted) {
+    sendError(client, applied.reason ?? 'invalid_move');
+    return;
+  }
+
+  runtime.state = applied.nextState;
+  activeRuntimes.set(runtime.roomId, runtime);
+
+  await createMatchMove({
+    matchId: runtime.matchId,
+    actorUserId: userId,
+    moveIndex: runtime.state.moveCount,
+    moveType: normalizedMove.type === 'place' ? 'santorini.place_worker' : 'santorini.turn',
+    payload: {
+      move: normalizedMove
+    }
+  });
+
+  const targets = roomSubscribers.get(runtime.roomId) ?? new Set<ClientContext>();
+  broadcast(targets, {
+    type: 'match.move_applied',
+    payload: {
+      roomId: runtime.roomId,
+      gameType: 'santorini',
+      state: runtime.state,
+      lastMove: normalizedMove
     }
   });
 
@@ -2899,6 +3097,7 @@ async function handleMove(
     | { roomId: string; gameType: 'cards'; move: CardsMoveInput }
     | { roomId: string; gameType: 'liars_dice'; move: LiarsDiceMoveInput }
     | { roomId: string; gameType: 'gomoku'; x: number; y: number }
+    | { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }
     | { roomId: string; gameType: 'connect4'; column: number }
     | { roomId: string; gameType: 'reversi'; x: number; y: number }
     | { roomId: string; gameType: 'dots'; move: Pick<DotsMove, 'orientation' | 'x' | 'y'> }
@@ -2950,6 +3149,11 @@ async function handleMove(
 
   if (message.gameType === 'gomoku' && runtime.gameType === 'gomoku') {
     await handleGomokuMove(client, runtime, message.x, message.y);
+    return;
+  }
+
+  if (message.gameType === 'santorini' && runtime.gameType === 'santorini') {
+    await handleSantoriniMove(client, runtime, message.move);
     return;
   }
 
@@ -3243,6 +3447,15 @@ wss.on('connection', (socket) => {
             gameType: 'gomoku',
             x: msg.payload.x,
             y: msg.payload.y
+          });
+          return;
+        }
+
+        if (msg.payload.gameType === 'santorini') {
+          await handleMove(client, {
+            roomId: msg.payload.roomId,
+            gameType: 'santorini',
+            move: msg.payload.move
           });
           return;
         }

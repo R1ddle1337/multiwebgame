@@ -1,6 +1,7 @@
 export type GameType =
   | 'single_2048'
   | 'gomoku'
+  | 'santorini'
   | 'xiangqi'
   | 'go'
   | 'connect4'
@@ -13,6 +14,7 @@ export type GameType =
   | 'liars_dice';
 export type BoardGameType =
   | 'gomoku'
+  | 'santorini'
   | 'xiangqi'
   | 'go'
   | 'connect4'
@@ -170,6 +172,58 @@ export interface GomokuState {
   moveCount: number;
   ruleset: GomokuRuleset;
   forbiddenMove: GomokuForbiddenMoveReason | null;
+}
+
+export type SantoriniPlayer = 'black' | 'white';
+export type SantoriniWorkerId = 'a' | 'b';
+
+export interface SantoriniPosition {
+  x: number;
+  y: number;
+}
+
+export type SantoriniMoveInput =
+  | {
+      type: 'place';
+      worker: SantoriniWorkerId;
+      x: number;
+      y: number;
+    }
+  | {
+      type: 'turn';
+      worker: SantoriniWorkerId;
+      to: SantoriniPosition;
+      build: SantoriniPosition;
+    };
+
+export type SantoriniMove =
+  | {
+      type: 'place';
+      worker: SantoriniWorkerId;
+      x: number;
+      y: number;
+      player: SantoriniPlayer;
+    }
+  | {
+      type: 'turn';
+      worker: SantoriniWorkerId;
+      to: SantoriniPosition;
+      build: SantoriniPosition;
+      player: SantoriniPlayer;
+    };
+
+export interface SantoriniState {
+  boardSize: number;
+  levels: number[][];
+  workers: {
+    black: Record<SantoriniWorkerId, SantoriniPosition | null>;
+    white: Record<SantoriniWorkerId, SantoriniPosition | null>;
+  };
+  nextPlayer: SantoriniPlayer;
+  status: 'setup' | 'playing' | 'completed';
+  winner: SantoriniPlayer | null;
+  loserReason: 'no_legal_move' | null;
+  moveCount: number;
 }
 
 export type Connect4Disc = 'red' | 'yellow';
@@ -591,6 +645,12 @@ export type RoomStatePayload =
     }
   | {
       room: RoomDTO;
+      gameType: 'santorini';
+      state: SantoriniState | null;
+      viewerRole: RoomPlayerRole;
+    }
+  | {
+      room: RoomDTO;
       gameType: 'connect4';
       state: Connect4State | null;
       viewerRole: RoomPlayerRole;
@@ -665,6 +725,12 @@ export type MatchMoveAppliedPayload =
     }
   | {
       roomId: string;
+      gameType: 'santorini';
+      state: SantoriniState;
+      lastMove: SantoriniMove;
+    }
+  | {
+      roomId: string;
       gameType: 'connect4';
       state: Connect4State;
       lastMove: Connect4Move;
@@ -732,6 +798,7 @@ export type ClientToServerMessage =
   | WsEnvelope<'room.rng.commit', { roomId: string; commit: string }>
   | WsEnvelope<'room.rng.reveal', { roomId: string; nonce: string }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'gomoku'; x: number; y: number }>
+  | WsEnvelope<'room.move', { roomId: string; gameType: 'santorini'; move: SantoriniMoveInput }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'connect4'; column: number }>
   | WsEnvelope<'room.move', { roomId: string; gameType: 'reversi'; x: number; y: number }>
   | WsEnvelope<

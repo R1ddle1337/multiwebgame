@@ -4,6 +4,7 @@ import {
   createHexState,
   createGoState,
   createGomokuState,
+  createSantoriniState,
   createQuoridorState,
   createReversiState,
   createXiangqiState
@@ -30,6 +31,9 @@ import type {
   ReversiMove,
   ReversiState,
   RoomDTO,
+  SantoriniMove,
+  SantoriniMoveInput,
+  SantoriniState,
   UserDTO,
   XiangqiColor,
   XiangqiMove,
@@ -113,6 +117,19 @@ function formatActionText(
 
 const CARD_SUITS: CardsCard['suit'][] = ['clubs', 'diamonds', 'hearts', 'spades'];
 
+function santoriniWorkerAt(state: SantoriniState, x: number, y: number): string | null {
+  for (const player of ['black', 'white'] as const) {
+    for (const worker of ['a', 'b'] as const) {
+      const position = state.workers[player][worker];
+      if (position && position.x === x && position.y === y) {
+        return `${player === 'black' ? 'B' : 'W'}${worker.toUpperCase()}`;
+      }
+    }
+  }
+
+  return null;
+}
+
 function formatCardsCard(card: CardsCard): string {
   const suitInitial = card.suit.slice(0, 1).toUpperCase();
   return `${card.rank}${suitInitial}`;
@@ -132,6 +149,11 @@ export function RoomPage({ api, user }: Props) {
   const [inviteLinkNotice, setInviteLinkNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [xiangqiSelection, setXiangqiSelection] = useState<{ x: number; y: number } | null>(null);
+  const [santoriniWorker, setSantoriniWorker] = useState<'a' | 'b'>('a');
+  const [santoriniMoveX, setSantoriniMoveX] = useState(0);
+  const [santoriniMoveY, setSantoriniMoveY] = useState(0);
+  const [santoriniBuildX, setSantoriniBuildX] = useState(0);
+  const [santoriniBuildY, setSantoriniBuildY] = useState(0);
   const [liarsBidQuantity, setLiarsBidQuantity] = useState(1);
   const [liarsBidFace, setLiarsBidFace] = useState(1);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -158,6 +180,10 @@ export function RoomPage({ api, user }: Props) {
 
   const gomokuState =
     snapshot?.gameType === 'gomoku' ? (snapshot.state as GomokuState) : createGomokuState(15);
+  const santoriniState =
+    snapshot?.gameType === 'santorini'
+      ? (snapshot.state as SantoriniState)
+      : createSantoriniState({ boardSize: 5 });
   const connect4State =
     snapshot?.gameType === 'connect4' ? (snapshot.state as Connect4State) : createConnect4State();
   const goState = snapshot?.gameType === 'go' ? (snapshot.state as GoState) : createGoState(9);
@@ -200,6 +226,11 @@ export function RoomPage({ api, user }: Props) {
     room?.gameType === 'connect4' &&
     viewerRole === 'player' &&
     connect4State.status === 'playing';
+  const santoriniTurn =
+    hasActiveMatch &&
+    room?.gameType === 'santorini' &&
+    viewerRole === 'player' &&
+    santoriniState.status !== 'completed';
   const goTurn =
     hasActiveMatch && room?.gameType === 'go' && viewerRole === 'player' && goState.status === 'playing';
   const hexTurn =
@@ -240,6 +271,10 @@ export function RoomPage({ api, user }: Props) {
     connect4Turn &&
     ((seat === 1 && connect4State.nextPlayer === 'red') ||
       (seat === 2 && connect4State.nextPlayer === 'yellow'));
+  const canPlaySantorini =
+    santoriniTurn &&
+    ((seat === 1 && santoriniState.nextPlayer === 'black') ||
+      (seat === 2 && santoriniState.nextPlayer === 'white'));
   const canPlayGo =
     goTurn &&
     ((seat === 1 && goState.nextPlayer === 'black') || (seat === 2 && goState.nextPlayer === 'white'));
@@ -271,6 +306,7 @@ export function RoomPage({ api, user }: Props) {
       (seat === 2 && cardsState?.nextPlayer === 'white'));
   const canPlayCurrentTurn =
     canPlayGomoku ||
+    canPlaySantorini ||
     canPlayConnect4 ||
     canPlayGo ||
     canPlayHex ||
@@ -298,6 +334,10 @@ export function RoomPage({ api, user }: Props) {
 
     if (room.gameType === 'connect4') {
       return describeLastMove('connect4', snapshot.lastMove as Connect4Move);
+    }
+
+    if (room.gameType === 'santorini') {
+      return describeLastMove('santorini', snapshot.lastMove as SantoriniMove);
     }
 
     if (room.gameType === 'go') {
@@ -344,6 +384,16 @@ export function RoomPage({ api, user }: Props) {
       return formatResultText(connect4State, statusLabel, colorLabel, t);
     }
 
+    if (room.gameType === 'santorini') {
+      if (santoriniState.status === 'setup') {
+        return t('room.santorini.setup');
+      }
+      if (santoriniState.winner) {
+        return t('room.result.winner', { winner: colorLabel(santoriniState.winner) });
+      }
+      return statusLabel('playing');
+    }
+
     if (room.gameType === 'go') {
       return formatResultText(goState, statusLabel, colorLabel, t);
     }
@@ -377,6 +427,7 @@ export function RoomPage({ api, user }: Props) {
     room,
     latestMoveSummary,
     gomokuState,
+    santoriniState,
     connect4State,
     goState,
     hexState,
@@ -487,6 +538,21 @@ export function RoomPage({ api, user }: Props) {
         gameType: 'gomoku',
         x,
         y
+      }
+    });
+  };
+
+  const sendSantoriniMove = (move: SantoriniMoveInput) => {
+    if (!canPlaySantorini) {
+      return;
+    }
+
+    send({
+      type: 'room.move',
+      payload: {
+        roomId,
+        gameType: 'santorini',
+        move
       }
     });
   };
@@ -875,6 +941,183 @@ export function RoomPage({ api, user }: Props) {
               <p>
                 {gomokuState.winner
                   ? t('room.result.winner', { winner: colorLabel(gomokuState.winner) })
+                  : t('room.result.draw')}
+              </p>
+            ) : null}
+          </>
+        ) : null}
+
+        {room.gameType === 'santorini' ? (
+          <>
+            {hasActiveMatch ? (
+              <p>
+                {t('room.next_turn', {
+                  player: colorLabel(santoriniState.nextPlayer),
+                  status:
+                    santoriniState.status === 'setup' ? t('room.santorini.setup') : statusLabel('playing')
+                })}
+              </p>
+            ) : null}
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${santoriniState.boardSize}, minmax(2.3rem, 1fr))`,
+                gap: '0.3rem',
+                maxWidth: '24rem'
+              }}
+            >
+              {santoriniState.levels.flatMap((row, y) =>
+                row.map((level, x) => (
+                  <div
+                    key={`santorini-${x}-${y}`}
+                    style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: '8px',
+                      padding: '0.35rem',
+                      textAlign: 'center',
+                      fontSize: '0.82rem'
+                    }}
+                  >
+                    <div>L{level}</div>
+                    <div>{santoriniWorkerAt(santoriniState, x, y) ?? '·'}</div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="button-row">
+              <label>
+                Worker{' '}
+                <select
+                  value={santoriniWorker}
+                  onChange={(event) => setSantoriniWorker(event.target.value as 'a' | 'b')}
+                  disabled={!canPlaySantorini}
+                >
+                  <option value="a">A</option>
+                  <option value="b">B</option>
+                </select>
+              </label>
+            </div>
+
+            {santoriniState.status === 'setup' ? (
+              <div className="button-row">
+                <label>
+                  X{' '}
+                  <input
+                    type="number"
+                    min={0}
+                    max={santoriniState.boardSize - 1}
+                    value={santoriniMoveX}
+                    onChange={(event) => setSantoriniMoveX(Number(event.target.value) || 0)}
+                    disabled={!canPlaySantorini}
+                  />
+                </label>
+                <label>
+                  Y{' '}
+                  <input
+                    type="number"
+                    min={0}
+                    max={santoriniState.boardSize - 1}
+                    value={santoriniMoveY}
+                    onChange={(event) => setSantoriniMoveY(Number(event.target.value) || 0)}
+                    disabled={!canPlaySantorini}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    sendSantoriniMove({
+                      type: 'place',
+                      worker: santoriniWorker,
+                      x: santoriniMoveX,
+                      y: santoriniMoveY
+                    })
+                  }
+                  disabled={!canPlaySantorini}
+                >
+                  {t('room.santorini.place')}
+                </button>
+              </div>
+            ) : null}
+
+            {santoriniState.status === 'playing' ? (
+              <>
+                <div className="button-row">
+                  <label>
+                    To X{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={santoriniState.boardSize - 1}
+                      value={santoriniMoveX}
+                      onChange={(event) => setSantoriniMoveX(Number(event.target.value) || 0)}
+                      disabled={!canPlaySantorini}
+                    />
+                  </label>
+                  <label>
+                    To Y{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={santoriniState.boardSize - 1}
+                      value={santoriniMoveY}
+                      onChange={(event) => setSantoriniMoveY(Number(event.target.value) || 0)}
+                      disabled={!canPlaySantorini}
+                    />
+                  </label>
+                </div>
+                <div className="button-row">
+                  <label>
+                    Build X{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={santoriniState.boardSize - 1}
+                      value={santoriniBuildX}
+                      onChange={(event) => setSantoriniBuildX(Number(event.target.value) || 0)}
+                      disabled={!canPlaySantorini}
+                    />
+                  </label>
+                  <label>
+                    Build Y{' '}
+                    <input
+                      type="number"
+                      min={0}
+                      max={santoriniState.boardSize - 1}
+                      value={santoriniBuildY}
+                      onChange={(event) => setSantoriniBuildY(Number(event.target.value) || 0)}
+                      disabled={!canPlaySantorini}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      sendSantoriniMove({
+                        type: 'turn',
+                        worker: santoriniWorker,
+                        to: {
+                          x: santoriniMoveX,
+                          y: santoriniMoveY
+                        },
+                        build: {
+                          x: santoriniBuildX,
+                          y: santoriniBuildY
+                        }
+                      })
+                    }
+                    disabled={!canPlaySantorini}
+                  >
+                    {t('room.santorini.move_build')}
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {santoriniState.status === 'completed' ? (
+              <p>
+                {santoriniState.winner
+                  ? t('room.result.winner', { winner: colorLabel(santoriniState.winner) })
                   : t('room.result.draw')}
               </p>
             ) : null}

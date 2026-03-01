@@ -24,6 +24,21 @@ Common legality:
 - occupied-cell moves rejected
 - draw declared on board fill without winner
 
+## Santorini (2-player, no god powers)
+
+Implemented rules:
+
+- default board `5x5`
+- setup phase: each side places two workers (`a`, `b`) on empty cells
+- turn phase:
+  - move one worker to an adjacent square
+  - destination must be empty and not domed
+  - upward movement is limited to `+1` level
+  - then build one level on an adjacent square
+  - build cannot target a worker-occupied square or an existing dome
+- moving onto level `3` wins immediately
+- if the next player has no legal move, they lose (`loserReason: "no_legal_move"`)
+
 ## Xiangqi (Chinese Chess)
 
 Implemented movement/legality:

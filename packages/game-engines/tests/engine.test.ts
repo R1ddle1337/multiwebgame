@@ -10,6 +10,7 @@ import {
   applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
+  applySantoriniMove,
   applyQuoridorMove,
   applyReversiMove,
   applyXiangqiMove,
@@ -25,6 +26,7 @@ import {
   createLiarsDiceState,
   createGoState,
   createGomokuState,
+  createSantoriniState,
   createQuoridorState,
   createReversiState,
   createXiangqiState
@@ -239,6 +241,88 @@ describe('gomoku engine', () => {
     expect(result.accepted).toBe(true);
     expect(result.nextState.winner).toBe('white');
     expect(result.nextState.status).toBe('completed');
+  });
+});
+
+describe('santorini engine', () => {
+  it('enforces alternating setup placements and starts playing after 4 placements', () => {
+    let state = createSantoriniState();
+    const placements = [
+      { type: 'place' as const, worker: 'a' as const, x: 0, y: 0, player: 'black' as const },
+      { type: 'place' as const, worker: 'a' as const, x: 4, y: 4, player: 'white' as const },
+      { type: 'place' as const, worker: 'b' as const, x: 1, y: 0, player: 'black' as const },
+      { type: 'place' as const, worker: 'b' as const, x: 3, y: 4, player: 'white' as const }
+    ];
+
+    for (const move of placements) {
+      const applied = applySantoriniMove(state, move);
+      expect(applied.accepted).toBe(true);
+      state = applied.nextState;
+    }
+
+    expect(state.status).toBe('playing');
+    expect(state.nextPlayer).toBe('black');
+  });
+
+  it('rejects climbs above one level', () => {
+    let state = createSantoriniState();
+    const setup = [
+      { type: 'place' as const, worker: 'a' as const, x: 0, y: 0, player: 'black' as const },
+      { type: 'place' as const, worker: 'a' as const, x: 4, y: 4, player: 'white' as const },
+      { type: 'place' as const, worker: 'b' as const, x: 1, y: 0, player: 'black' as const },
+      { type: 'place' as const, worker: 'b' as const, x: 3, y: 4, player: 'white' as const }
+    ];
+
+    for (const move of setup) {
+      const applied = applySantoriniMove(state, move);
+      state = applied.nextState;
+    }
+
+    state.levels[1][1] = 3;
+    const invalid = applySantoriniMove(state, {
+      type: 'turn',
+      worker: 'a',
+      to: { x: 1, y: 1 },
+      build: { x: 0, y: 1 },
+      player: 'black'
+    });
+
+    expect(invalid.accepted).toBe(false);
+    expect(invalid.reason).toBe('climb_too_high');
+  });
+
+  it('wins when moving onto level 3', () => {
+    let state = createSantoriniState();
+    const setup = [
+      { type: 'place' as const, worker: 'a' as const, x: 0, y: 0, player: 'black' as const },
+      { type: 'place' as const, worker: 'a' as const, x: 4, y: 4, player: 'white' as const },
+      { type: 'place' as const, worker: 'b' as const, x: 1, y: 0, player: 'black' as const },
+      { type: 'place' as const, worker: 'b' as const, x: 3, y: 4, player: 'white' as const }
+    ];
+
+    for (const move of setup) {
+      const applied = applySantoriniMove(state, move);
+      state = applied.nextState;
+    }
+
+    state.workers.black.a = { x: 1, y: 1 };
+    state.workers.white.a = { x: 4, y: 4 };
+    state.workers.white.b = { x: 3, y: 4 };
+    state.workers.black.b = { x: 0, y: 0 };
+    state.levels[1][1] = 2;
+    state.levels[2][2] = 3;
+
+    const winning = applySantoriniMove(state, {
+      type: 'turn',
+      worker: 'a',
+      to: { x: 2, y: 2 },
+      build: { x: 1, y: 2 },
+      player: 'black'
+    });
+
+    expect(winning.accepted).toBe(true);
+    expect(winning.nextState.status).toBe('completed');
+    expect(winning.nextState.winner).toBe('black');
   });
 });
 

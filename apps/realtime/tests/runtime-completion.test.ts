@@ -9,6 +9,7 @@ import {
   createGoState,
   createBackgammonState,
   createGomokuState,
+  createSantoriniState,
   createQuoridorState,
   createReversiState,
   createXiangqiState
@@ -134,6 +135,35 @@ describe('deriveRuntimeCompletion', () => {
           winner: 'black',
           status: 'completed',
           moveCount: 31
+        }
+      }
+    });
+  });
+
+  it('maps santorini completion to winner and payload', () => {
+    const completion = deriveRuntimeCompletion({
+      gameType: 'santorini',
+      state: {
+        ...createSantoriniState(),
+        status: 'completed',
+        winner: 'white',
+        moveCount: 22,
+        loserReason: 'no_legal_move'
+      },
+      players: {
+        black: 'u201',
+        white: 'u202'
+      }
+    });
+
+    expect(completion).toEqual({
+      winnerUserId: 'u202',
+      status: 'completed',
+      resultPayload: {
+        santorini: {
+          winner: 'white',
+          moveCount: 22,
+          loserReason: 'no_legal_move'
         }
       }
     });

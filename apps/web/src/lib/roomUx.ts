@@ -4,6 +4,7 @@ import type {
   GoMove,
   GomokuMove,
   HexMove,
+  SantoriniMove,
   QuoridorMove,
   ReversiMove,
   XiangqiMove,
@@ -71,6 +72,11 @@ export function describeLastMove(
   _xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
+  gameType: 'santorini',
+  move: SantoriniMove,
+  _xiangqiPerspective?: XiangqiPerspective
+): LastMoveSummary;
+export function describeLastMove(
   gameType: 'go',
   move: GoMove,
   _xiangqiPerspective?: XiangqiPerspective
@@ -101,8 +107,17 @@ export function describeLastMove(
   xiangqiPerspective?: XiangqiPerspective
 ): LastMoveSummary;
 export function describeLastMove(
-  gameType: 'gomoku' | 'connect4' | 'go' | 'reversi' | 'dots' | 'hex' | 'quoridor' | 'xiangqi',
-  move: GomokuMove | Connect4Move | GoMove | ReversiMove | DotsMove | HexMove | QuoridorMove | XiangqiMove,
+  gameType: 'gomoku' | 'connect4' | 'santorini' | 'go' | 'reversi' | 'dots' | 'hex' | 'quoridor' | 'xiangqi',
+  move:
+    | GomokuMove
+    | Connect4Move
+    | SantoriniMove
+    | GoMove
+    | ReversiMove
+    | DotsMove
+    | HexMove
+    | QuoridorMove
+    | XiangqiMove,
   xiangqiPerspective: XiangqiPerspective = 'red'
 ): LastMoveSummary {
   if (gameType === 'gomoku') {
@@ -123,6 +138,33 @@ export function describeLastMove(
       action: {
         kind: 'place',
         point: `C${connect4Move.column + 1}`
+      }
+    };
+  }
+
+  if (gameType === 'santorini') {
+    const santoriniMove = move as SantoriniMove;
+    if (santoriniMove.type === 'place') {
+      return {
+        actor: santoriniMove.player,
+        action: {
+          kind: 'place',
+          point: formatBoardPoint(santoriniMove.x, santoriniMove.y)
+        }
+      };
+    }
+
+    const from = `${santoriniMove.worker.toUpperCase()}:${formatBoardPoint(
+      santoriniMove.to.x,
+      santoriniMove.to.y
+    )}`;
+    const to = `B:${formatBoardPoint(santoriniMove.build.x, santoriniMove.build.y)}`;
+    return {
+      actor: santoriniMove.player,
+      action: {
+        kind: 'move',
+        from,
+        to
       }
     };
   }

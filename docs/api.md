@@ -57,7 +57,7 @@ Auth uses `Authorization: Bearer <jwt>`.
 
 - `POST /rooms`
   - Auth required
-  - Body: `{ "gameType": "single_2048" | "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number }`
+  - Body: `{ "gameType": "single_2048" | "gomoku" | "santorini" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice", "maxPlayers"?: number }`
   - Returns: `{ room }`
 
 - `GET /rooms/:roomId`
@@ -133,6 +133,7 @@ Auth uses `Authorization: Bearer <jwt>`.
     - Hex: winner/moveCount/boardSize.
     - Xiangqi: outcome reason (checkmate/stalemate/repetition policy).
     - Gomoku: ruleset and final status metadata.
+    - Santorini: winner/moveCount and no-legal-move terminal reason.
 
 ## Moderation
 

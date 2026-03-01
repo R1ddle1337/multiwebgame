@@ -37,6 +37,9 @@ Message shape:
 - `room.move` (Connect Four)
   - `{ roomId: string, gameType: "connect4", column: number }`
 
+- `room.move` (Santorini)
+  - `{ roomId: string, gameType: "santorini", move: { type: "place", worker: "a" | "b", x, y } | { type: "turn", worker: "a" | "b", to: {x, y}, build: {x, y} } }`
+
 - `room.move` (Reversi)
   - `{ roomId: string, gameType: "reversi", x: number, y: number }`
 
@@ -62,7 +65,7 @@ Message shape:
   - `{ roomId: string, gameType: "liars_dice", move: { type: "bid", quantity: number, face: 1..6 } | { type: "call_liar" } }`
 
 - `matchmaking.join`
-  - `{ gameType: "gomoku" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
+  - `{ gameType: "gomoku" | "santorini" | "connect4" | "reversi" | "dots" | "go" | "xiangqi" | "backgammon" | "cards" | "quoridor" | "hex" | "liars_dice" }`
 
 - `matchmaking.leave`
   - `{}`
@@ -86,6 +89,7 @@ Message shape:
 
 - `room.state`
   - Gomoku: `{ room, gameType: "gomoku", state, viewerRole }`
+  - Santorini: `{ room, gameType: "santorini", state, viewerRole }`
   - Connect Four: `{ room, gameType: "connect4", state, viewerRole }`
   - Reversi: `{ room, gameType: "reversi", state, viewerRole }`
   - Dots and Boxes: `{ room, gameType: "dots", state, viewerRole }`

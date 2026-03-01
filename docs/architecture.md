@@ -10,6 +10,7 @@
   - Dots and Boxes (5x5 dots default, scoring + extra-turn chaining)
   - Cards / Crazy Eights (2-player, verifiable shuffle, hidden-information projection)
   - Gomoku (`freestyle` + restricted Renju policy support)
+  - Santorini (5x5 no-god-power rules, setup + move/build + no-legal-move loss)
   - Go (capture/ko/suicide + Chinese area scoring + komi)
   - Xiangqi (full movement, check safety, mate/stalemate, repetition policy)
 - `packages/shared-types`: Cross-service DTOs and realtime protocol contracts.

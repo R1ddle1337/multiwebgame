@@ -18,6 +18,7 @@ export { applyDotsMove, createDotsState } from './dots.js';
 export { applyGoMove, calculateGoScore, createGoState } from './go.js';
 export { applyGomokuMove, createGomokuState } from './gomoku.js';
 export { applyHexMove, createHexState } from './hex.js';
+export { applySantoriniMove, createSantoriniState, normalizeSantoriniMove } from './santorini.js';
 export {
   applyLiarsDiceMove,
   createLiarsDiceState,

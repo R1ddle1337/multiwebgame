@@ -72,6 +72,7 @@ export function RealtimeProvider({ token, user, children, onAuthInvalid }: Props
     backgammon: 0,
     cards: 0,
     gomoku: 0,
+    santorini: 0,
     connect4: 0,
     reversi: 0,
     dots: 0,

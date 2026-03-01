@@ -33,7 +33,18 @@ async function run(): Promise<void> {
       `,
       [
         row.id,
-        ['single_2048', 'gomoku', 'xiangqi', 'go', 'connect4', 'reversi', 'dots', 'backgammon', 'cards']
+        [
+          'single_2048',
+          'gomoku',
+          'santorini',
+          'xiangqi',
+          'go',
+          'connect4',
+          'reversi',
+          'dots',
+          'backgammon',
+          'cards'
+        ]
       ]
     );
   }

@@ -7,6 +7,7 @@ import {
   applyLiarsDiceMove,
   applyGoMove,
   applyGomokuMove,
+  applySantoriniMove,
   applyQuoridorMove,
   applyReversiMove,
   applyXiangqiMove,
@@ -19,6 +20,7 @@ import {
   createLiarsDiceState,
   createGoState,
   createGomokuState,
+  createSantoriniState,
   createQuoridorState,
   createReversiState,
   createXiangqiState,
@@ -41,6 +43,8 @@ import type {
   GoState,
   GomokuMark,
   GomokuState,
+  SantoriniMove,
+  SantoriniState,
   HexMove,
   HexState,
   LiarsDiceMove,
@@ -283,8 +287,81 @@ function parseLiarsDiceMove(
   return null;
 }
 
+function parseSantoriniMove(
+  payload: Record<string, unknown>,
+  fallbackPlayer: SantoriniMove['player']
+): SantoriniMove | null {
+  const source = (payload.move ?? payload) as Partial<SantoriniMove>;
+  if (source.type === 'place') {
+    if (
+      typeof source.x !== 'number' ||
+      !Number.isInteger(source.x) ||
+      typeof source.y !== 'number' ||
+      !Number.isInteger(source.y) ||
+      (source.worker !== 'a' && source.worker !== 'b')
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'place',
+      x: source.x,
+      y: source.y,
+      worker: source.worker,
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  if (source.type === 'turn') {
+    if (
+      (source.worker !== 'a' && source.worker !== 'b') ||
+      !source.to ||
+      !source.build ||
+      typeof source.to.x !== 'number' ||
+      typeof source.to.y !== 'number' ||
+      typeof source.build.x !== 'number' ||
+      typeof source.build.y !== 'number' ||
+      !Number.isInteger(source.to.x) ||
+      !Number.isInteger(source.to.y) ||
+      !Number.isInteger(source.build.x) ||
+      !Number.isInteger(source.build.y)
+    ) {
+      return null;
+    }
+
+    return {
+      type: 'turn',
+      worker: source.worker,
+      to: {
+        x: source.to.x,
+        y: source.to.y
+      },
+      build: {
+        x: source.build.x,
+        y: source.build.y
+      },
+      player: source.player === 'black' || source.player === 'white' ? source.player : fallbackPlayer
+    };
+  }
+
+  return null;
+}
+
 function formatCardsCard(card: { rank: string; suit: string }): string {
   return `${card.rank}${card.suit.slice(0, 1).toUpperCase()}`;
+}
+
+function replaySantoriniWorkerAt(state: SantoriniState, x: number, y: number): string | null {
+  for (const player of ['black', 'white'] as const) {
+    for (const worker of ['a', 'b'] as const) {
+      const position = state.workers[player][worker];
+      if (position && position.x === x && position.y === y) {
+        return `${player === 'black' ? 'B' : 'W'}${worker.toUpperCase()}`;
+      }
+    }
+  }
+
+  return null;
 }
 
 export function ReplayPage({ api, viewerUserId }: Props) {
@@ -292,6 +369,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
   const { matchId = '' } = useParams();
   const [gameType, setGameType] = useState<GameType>('gomoku');
   const [gomokuStates, setGomokuStates] = useState<GomokuState[]>([createGomokuState(15)]);
+  const [santoriniStates, setSantoriniStates] = useState<SantoriniState[]>([
+    createSantoriniState({ boardSize: 5 })
+  ]);
   const [connect4States, setConnect4States] = useState<Connect4State[]>([createConnect4State()]);
   const [dotsStates, setDotsStates] = useState<DotsState[]>([createDotsState()]);
   const [goStates, setGoStates] = useState<GoState[]>([createGoState(9)]);
@@ -389,6 +469,35 @@ export function ReplayPage({ api, viewerUserId }: Props) {
           }
 
           setGoStates(snapshots);
+          setXiangqiMoveLog([]);
+          setXiangqiPerspective('red');
+          setStep(snapshots.length - 1);
+          return;
+        }
+
+        if (result.match.gameType === 'santorini') {
+          let current = createSantoriniState({ boardSize: 5 });
+          const snapshots: SantoriniState[] = [current];
+
+          for (const move of result.match.moves) {
+            const parsedMove = parseSantoriniMove(
+              move.payload as Record<string, unknown>,
+              current.nextPlayer
+            );
+            if (!parsedMove) {
+              continue;
+            }
+
+            const applied = applySantoriniMove(current, parsedMove);
+            if (!applied.accepted) {
+              continue;
+            }
+
+            current = applied.nextState;
+            snapshots.push(current);
+          }
+
+          setSantoriniStates(snapshots);
           setXiangqiMoveLog([]);
           setXiangqiPerspective('red');
           setStep(snapshots.length - 1);
@@ -756,6 +865,9 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     if (gameType === 'gomoku') {
       return Math.max(0, gomokuStates.length - 1);
     }
+    if (gameType === 'santorini') {
+      return Math.max(0, santoriniStates.length - 1);
+    }
     if (gameType === 'connect4') {
       return Math.max(0, connect4States.length - 1);
     }
@@ -792,6 +904,7 @@ export function ReplayPage({ api, viewerUserId }: Props) {
     goStates.length,
     hexStates.length,
     gomokuStates.length,
+    santoriniStates.length,
     quoridorStates.length,
     connect4States.length,
     dotsStates.length,
@@ -884,6 +997,34 @@ export function ReplayPage({ api, viewerUserId }: Props) {
       />
 
       {gameType === 'gomoku' ? <GomokuBoard state={gomokuStates[clampedStep]} disabled /> : null}
+      {gameType === 'santorini' ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${santoriniStates[clampedStep].boardSize}, minmax(2.3rem, 1fr))`,
+            gap: '0.3rem',
+            maxWidth: '24rem'
+          }}
+        >
+          {santoriniStates[clampedStep].levels.flatMap((row, y) =>
+            row.map((level, x) => (
+              <div
+                key={`santorini-replay-${x}-${y}`}
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  padding: '0.35rem',
+                  textAlign: 'center',
+                  fontSize: '0.82rem'
+                }}
+              >
+                <div>L{level}</div>
+                <div>{replaySantoriniWorkerAt(santoriniStates[clampedStep], x, y) ?? '·'}</div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
       {gameType === 'connect4' ? <Connect4Board state={connect4States[clampedStep]} disabled /> : null}
       {gameType === 'dots' ? (
         <>

@@ -6,6 +6,7 @@ import type {
   HexState,
   GoState,
   GomokuState,
+  SantoriniState,
   QuoridorState,
   ReversiState,
   XiangqiState
@@ -31,6 +32,14 @@ export type RuntimeCompletionSnapshot =
   | {
       gameType: 'gomoku';
       state: GomokuState;
+      players: {
+        black: string;
+        white: string;
+      };
+    }
+  | {
+      gameType: 'santorini';
+      state: SantoriniState;
       players: {
         black: string;
         white: string;
@@ -189,6 +198,31 @@ export function deriveRuntimeCompletion(runtime: RuntimeCompletionSnapshot): Run
           winner: runtime.state.winner,
           status: runtime.state.status,
           moveCount: runtime.state.moveCount
+        }
+      }
+    };
+  }
+
+  if (runtime.gameType === 'santorini') {
+    if (runtime.state.status !== 'completed') {
+      return null;
+    }
+
+    const winnerUserId =
+      runtime.state.winner === 'black'
+        ? runtime.players.black
+        : runtime.state.winner === 'white'
+          ? runtime.players.white
+          : null;
+
+    return {
+      winnerUserId,
+      status: 'completed',
+      resultPayload: {
+        santorini: {
+          winner: runtime.state.winner,
+          moveCount: runtime.state.moveCount,
+          loserReason: runtime.state.loserReason
         }
       }
     };

@@ -30,6 +30,7 @@ const createRoomSchema = z.object({
   gameType: z.enum([
     'single_2048',
     'gomoku',
+    'santorini',
     'xiangqi',
     'go',
     'connect4',
