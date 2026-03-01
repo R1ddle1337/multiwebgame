@@ -352,6 +352,61 @@ h3 {
   color: #fff;
 }
 
+.santorini-grid {
+  display: grid;
+  gap: 0.3rem;
+  max-width: min(100%, 540px);
+  margin-inline: auto;
+}
+
+.santorini-cell {
+  border: 1px solid #9b8dba;
+  border-radius: 10px;
+  background: linear-gradient(165deg, #f8f7ff 0%, #ece9fb 100%);
+  min-height: 3.1rem;
+  padding: 0.3rem;
+  display: grid;
+  place-items: center;
+  gap: 0.1rem;
+}
+
+.santorini-cell.selected {
+  border-color: #ef6f2f;
+  box-shadow: inset 0 0 0 1px rgba(239, 111, 47, 0.5);
+}
+
+.santorini-cell.target {
+  border-color: #237c8d;
+  box-shadow: inset 0 0 0 1px rgba(35, 124, 141, 0.45);
+}
+
+.santorini-level {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+
+.santorini-worker {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+}
+
+.domination-grid {
+  display: grid;
+  gap: 0.2rem;
+  max-width: min(100%, 620px);
+  margin-inline: auto;
+}
+
+.domination-cell {
+  min-height: 1.9rem;
+  border: 1px solid #94a3ae;
+  border-radius: 7px;
+  background: #f4f7fb;
+  padding: 0.1rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+}
+
 .hex-board {
   display: grid;
   gap: 0.25rem;
@@ -638,6 +693,68 @@ h3 {
   margin-bottom: 1rem;
 }
 
+.training-sandbox-note {
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+}
+
+.training-grid-board {
+  display: grid;
+  gap: 0.2rem;
+  margin-block: 0.45rem 0.75rem;
+  max-width: 100%;
+}
+
+.training-grid-cell {
+  min-height: 1.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.onitama-grid {
+  display: grid;
+  gap: 0.25rem;
+  max-width: min(100%, 420px);
+  margin-inline: auto;
+}
+
+.onitama-cell {
+  min-height: 2.45rem;
+  border: 1px solid #b2a697;
+  border-radius: 8px;
+  background: #f7ede2;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+}
+
+.onitama-cell.selected {
+  border-color: #ef6f2f;
+  box-shadow: inset 0 0 0 1px rgba(239, 111, 47, 0.5);
+}
+
+.backgammon-points-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(2rem, 1fr));
+  gap: 0.3rem;
+  margin: 0.5rem 0 0.8rem;
+}
+
+.backgammon-point {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.8);
+  min-height: 2.5rem;
+  padding: 0.2rem;
+  display: grid;
+  place-items: center;
+  line-height: 1.1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
 .speed-picker {
   display: inline-flex;
   align-items: center;
@@ -812,12 +929,19 @@ button.xiangqi-move-chip:hover {
   .reversi-grid,
   .connect4-grid,
   .dots-board,
-  .xiangqi-board {
+  .xiangqi-board,
+  .santorini-grid,
+  .domination-grid,
+  .onitama-grid {
     max-width: 100%;
   }
 
   .xiangqi-river {
     inset-inline: 0.65rem;
     letter-spacing: 0.14em;
+  }
+
+  .backgammon-points-grid {
+    grid-template-columns: repeat(6, minmax(2rem, 1fr));
   }
 }
