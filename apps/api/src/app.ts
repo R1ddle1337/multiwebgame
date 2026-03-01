@@ -339,7 +339,9 @@ export function createApp(store: Store, options: CreateAppOptions = {}) {
 
   app.get('/ratings/formula', async (_req, res, next) => {
     try {
-      const formulas = await store.listRatingFormulas();
+      const formulas = [...(await store.listRatingFormulas())].sort((left, right) =>
+        left.gameType.localeCompare(right.gameType)
+      );
       res.json({ formulas });
     } catch (error) {
       next(error);

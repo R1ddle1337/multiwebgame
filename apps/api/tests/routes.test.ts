@@ -1016,10 +1016,32 @@ describeIfTcpAvailable('critical API routes', () => {
     const store = new InMemoryStore();
     const app = createApp(store);
 
-    const response = await request(app).get('/ratings/formula').expect(200);
+    const sortByGameType = (formulas: RatingFormulaDTO[]) =>
+      [...formulas].sort((left, right) => left.gameType.localeCompare(right.gameType));
+    const expectedFormulas = sortByGameType(await store.listRatingFormulas());
 
-    expect(response.body.formulas).toHaveLength(8);
-    expect(response.body.formulas[0].system).toBe('elo');
+    const firstResponse = await request(app).get('/ratings/formula').expect(200);
+    const formulas = firstResponse.body.formulas as RatingFormulaDTO[];
+    expect(Array.isArray(formulas)).toBe(true);
+    expect(formulas.every((formula) => formula.system === 'elo')).toBe(true);
+    expect(formulas).toEqual(expectedFormulas);
+
+    const formulaGameTypes = new Set(formulas.map((formula) => formula.gameType));
+    for (const gameType of [
+      'gomoku',
+      'backgammon',
+      'cards',
+      'xiangqi',
+      'go',
+      'santorini',
+      'onitama',
+      'domination'
+    ] as const) {
+      expect(formulaGameTypes.has(gameType)).toBe(true);
+    }
+
+    const secondResponse = await request(app).get('/ratings/formula').expect(200);
+    expect(secondResponse.body.formulas).toEqual(formulas);
   });
 
   it('supports block + report moderation endpoints', async () => {

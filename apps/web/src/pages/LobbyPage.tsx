@@ -117,7 +117,9 @@ export function LobbyPage({ api, user }: Props) {
       .listRatingFormulas()
       .then((result) => {
         if (active) {
-          setRatingFormulas(result.formulas);
+          setRatingFormulas(
+            [...result.formulas].sort((left, right) => left.gameType.localeCompare(right.gameType))
+          );
         }
       })
       .catch(() => {
