@@ -41,7 +41,15 @@ function isCardName(value: unknown): value is OnitamaCardName {
     value === 'crab' ||
     value === 'elephant' ||
     value === 'goose' ||
-    value === 'rooster'
+    value === 'rooster' ||
+    value === 'monkey' ||
+    value === 'mantis' ||
+    value === 'horse' ||
+    value === 'ox' ||
+    value === 'crane' ||
+    value === 'boar' ||
+    value === 'eel' ||
+    value === 'cobra'
   );
 }
 
@@ -120,6 +128,71 @@ export const ONITAMA_CARDS: OnitamaCard[] = [
       { dx: -1, dy: 1 },
       { dx: 1, dy: 0 },
       { dx: 1, dy: -1 }
+    ]
+  },
+  {
+    name: 'monkey',
+    vectors: [
+      { dx: -1, dy: -1 },
+      { dx: -1, dy: 1 },
+      { dx: 1, dy: -1 },
+      { dx: 1, dy: 1 }
+    ]
+  },
+  {
+    name: 'mantis',
+    vectors: [
+      { dx: -1, dy: -1 },
+      { dx: 0, dy: 1 },
+      { dx: 1, dy: -1 }
+    ]
+  },
+  {
+    name: 'horse',
+    vectors: [
+      { dx: -1, dy: 0 },
+      { dx: 0, dy: -1 },
+      { dx: 0, dy: 1 }
+    ]
+  },
+  {
+    name: 'ox',
+    vectors: [
+      { dx: 0, dy: -1 },
+      { dx: 1, dy: 0 },
+      { dx: 0, dy: 1 }
+    ]
+  },
+  {
+    name: 'crane',
+    vectors: [
+      { dx: 0, dy: -1 },
+      { dx: -1, dy: 1 },
+      { dx: 1, dy: 1 }
+    ]
+  },
+  {
+    name: 'boar',
+    vectors: [
+      { dx: -1, dy: 0 },
+      { dx: 0, dy: -1 },
+      { dx: 1, dy: 0 }
+    ]
+  },
+  {
+    name: 'eel',
+    vectors: [
+      { dx: -1, dy: -1 },
+      { dx: -1, dy: 1 },
+      { dx: 1, dy: 0 }
+    ]
+  },
+  {
+    name: 'cobra',
+    vectors: [
+      { dx: -1, dy: 0 },
+      { dx: 1, dy: -1 },
+      { dx: 1, dy: 1 }
     ]
   }
 ];

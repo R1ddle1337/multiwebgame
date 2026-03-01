@@ -22,6 +22,9 @@ const YAHTZEE_CATEGORIES: YahtzeeCategory[] = [
   'chance'
 ];
 const YAHTZEE_DICE_COUNT = 5;
+const YAHTZEE_UPPER_BONUS_THRESHOLD = 63;
+const YAHTZEE_UPPER_BONUS_POINTS = 35;
+const YAHTZEE_UPPER_CATEGORIES: YahtzeeCategory[] = ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes'];
 
 function otherPlayer(player: YahtzeePlayer): YahtzeePlayer {
   return player === 'black' ? 'white' : 'black';
@@ -128,6 +131,14 @@ function totalScore(scoreCard: Partial<Record<YahtzeeCategory, number>>): number
   return Object.values(scoreCard).reduce((total, value) => total + (value ?? 0), 0);
 }
 
+function upperSectionTotal(scoreCard: Partial<Record<YahtzeeCategory, number>>): number {
+  return YAHTZEE_UPPER_CATEGORIES.reduce((total, category) => total + (scoreCard[category] ?? 0), 0);
+}
+
+function upperSectionBonus(upperTotal: number): number {
+  return upperTotal >= YAHTZEE_UPPER_BONUS_THRESHOLD ? YAHTZEE_UPPER_BONUS_POINTS : 0;
+}
+
 export type YahtzeeRuntimeState = YahtzeeState;
 
 export interface CreateYahtzeeStateOptions {
@@ -156,6 +167,14 @@ export function createYahtzeeState(options: CreateYahtzeeStateOptions = {}): Yah
       white: {}
     },
     totals: {
+      black: 0,
+      white: 0
+    },
+    upperTotals: {
+      black: 0,
+      white: 0
+    },
+    upperBonuses: {
       black: 0,
       white: 0
     },
@@ -281,9 +300,17 @@ export function applyYahtzeeMove(
   };
   nextScores[move.player][move.category] = gained;
 
+  const nextUpperTotals = {
+    black: upperSectionTotal(nextScores.black),
+    white: upperSectionTotal(nextScores.white)
+  };
+  const nextUpperBonuses = {
+    black: upperSectionBonus(nextUpperTotals.black),
+    white: upperSectionBonus(nextUpperTotals.white)
+  };
   const nextTotals = {
-    black: totalScore(nextScores.black),
-    white: totalScore(nextScores.white)
+    black: totalScore(nextScores.black) + nextUpperBonuses.black,
+    white: totalScore(nextScores.white) + nextUpperBonuses.white
   };
   const nextCompleted = {
     black: Object.keys(nextScores.black).length,
@@ -312,6 +339,8 @@ export function applyYahtzeeMove(
       rollsUsed: finished ? state.rollsUsed : 0,
       scores: nextScores,
       totals: nextTotals,
+      upperTotals: nextUpperTotals,
+      upperBonuses: nextUpperBonuses,
       completedCategories: nextCompleted
     }
   };

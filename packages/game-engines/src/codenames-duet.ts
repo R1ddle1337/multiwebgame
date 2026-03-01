@@ -9,6 +9,11 @@ import type {
 
 const BOARD_SIZE = 5;
 const CELL_COUNT = BOARD_SIZE * BOARD_SIZE;
+const AGENTS_PER_KEY = 9;
+const ASSASSINS_PER_KEY = 3;
+const TOTAL_TARGETS = 15;
+const SHARED_TARGETS = 3;
+const TOTAL_ASSASSINS = 5;
 
 const WORD_POOL = [
   'anchor',
@@ -152,7 +157,7 @@ function validateRoles(roles: CodenamesDuetCellRole[]): boolean {
     }
   }
 
-  return agents === 9 && assassins === 1;
+  return agents === AGENTS_PER_KEY && assassins === ASSASSINS_PER_KEY;
 }
 
 function cloneClue(clue: CodenamesDuetClue | null): CodenamesDuetClue | null {
@@ -166,6 +171,43 @@ function cloneClue(clue: CodenamesDuetClue | null): CodenamesDuetClue | null {
     by: clue.by,
     remainingGuesses: clue.remainingGuesses
   };
+}
+
+function randomShuffleInPlace<T>(items: T[]): void {
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const value = items[index];
+    items[index] = items[swapIndex];
+    items[swapIndex] = value;
+  }
+}
+
+function validateKeyPair(keyBlack: CodenamesDuetCellRole[], keyWhite: CodenamesDuetCellRole[]): boolean {
+  if (!validateRoles(keyBlack) || !validateRoles(keyWhite)) {
+    return false;
+  }
+
+  let totalTargets = 0;
+  let sharedTargets = 0;
+  let totalAssassins = 0;
+
+  for (let index = 0; index < CELL_COUNT; index += 1) {
+    const blackRole = keyBlack[index];
+    const whiteRole = keyWhite[index];
+    if (blackRole === 'agent' || whiteRole === 'agent') {
+      totalTargets += 1;
+    }
+    if (blackRole === 'agent' && whiteRole === 'agent') {
+      sharedTargets += 1;
+    }
+    if (blackRole === 'assassin' || whiteRole === 'assassin') {
+      totalAssassins += 1;
+    }
+  }
+
+  return (
+    totalTargets === TOTAL_TARGETS && sharedTargets === SHARED_TARGETS && totalAssassins === TOTAL_ASSASSINS
+  );
 }
 
 function keyForPlayer(
@@ -283,32 +325,53 @@ export function createCodenamesDuetWordPool(): string[] {
 
 export function createCodenamesDuetRolePool(): CodenamesDuetCellRole[] {
   return [
-    'agent',
-    'agent',
-    'agent',
-    'agent',
-    'agent',
-    'agent',
-    'agent',
-    'agent',
-    'agent',
-    'assassin',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral',
-    'neutral'
+    ...Array.from({ length: AGENTS_PER_KEY }, () => 'agent' as const),
+    ...Array.from({ length: ASSASSINS_PER_KEY }, () => 'assassin' as const),
+    ...Array.from({ length: CELL_COUNT - AGENTS_PER_KEY - ASSASSINS_PER_KEY }, () => 'neutral' as const)
   ];
+}
+
+export function createCodenamesDuetKeyPair(shuffleInPlace: <T>(items: T[]) => void = randomShuffleInPlace): {
+  keyBlack: CodenamesDuetCellRole[];
+  keyWhite: CodenamesDuetCellRole[];
+} {
+  const slots = Array.from({ length: CELL_COUNT }, (_value, index) => index);
+  shuffleInPlace(slots);
+
+  const take = (count: number): number[] => slots.splice(0, count);
+
+  const sharedAgents = take(SHARED_TARGETS);
+  const blackOnlyAgents = take(AGENTS_PER_KEY - SHARED_TARGETS);
+  const whiteOnlyAgents = take(AGENTS_PER_KEY - SHARED_TARGETS);
+  const sharedAssassin = take(1);
+  const blackOnlyAssassins = take(ASSASSINS_PER_KEY - 1);
+  const whiteOnlyAssassins = take(ASSASSINS_PER_KEY - 1);
+
+  const keyBlack: CodenamesDuetCellRole[] = Array.from({ length: CELL_COUNT }, () => 'neutral');
+  const keyWhite: CodenamesDuetCellRole[] = Array.from({ length: CELL_COUNT }, () => 'neutral');
+
+  for (const index of sharedAgents) {
+    keyBlack[index] = 'agent';
+    keyWhite[index] = 'agent';
+  }
+  for (const index of blackOnlyAgents) {
+    keyBlack[index] = 'agent';
+  }
+  for (const index of whiteOnlyAgents) {
+    keyWhite[index] = 'agent';
+  }
+  for (const index of sharedAssassin) {
+    keyBlack[index] = 'assassin';
+    keyWhite[index] = 'assassin';
+  }
+  for (const index of blackOnlyAssassins) {
+    keyBlack[index] = 'assassin';
+  }
+  for (const index of whiteOnlyAssassins) {
+    keyWhite[index] = 'assassin';
+  }
+
+  return { keyBlack, keyWhite };
 }
 
 export function createCodenamesDuetState(
@@ -329,6 +392,10 @@ export function createCodenamesDuetState(
 
   if (!Array.isArray(options.keyWhite) || !validateRoles(options.keyWhite)) {
     throw new Error('invalid_white_key');
+  }
+
+  if (!validateKeyPair(options.keyBlack, options.keyWhite)) {
+    throw new Error('invalid_key_pair');
   }
 
   const turns = options.turns ?? 9;

@@ -247,7 +247,15 @@ export type OnitamaCardName =
   | 'crab'
   | 'elephant'
   | 'goose'
-  | 'rooster';
+  | 'rooster'
+  | 'monkey'
+  | 'mantis'
+  | 'horse'
+  | 'ox'
+  | 'crane'
+  | 'boar'
+  | 'eel'
+  | 'cobra';
 
 export interface OnitamaPosition {
   x: number;
@@ -393,7 +401,14 @@ export interface LoveLetterState {
   winner: LoveLetterPlayer | null;
   moveCount: number;
   turnCount: number;
+  round: number;
+  tokenTarget: number;
+  tokens: {
+    black: number;
+    white: number;
+  };
   drawPileCount: number;
+  removedFaceUp: LoveLetterCardName[];
   handCounts: {
     black: number;
     white: number;
@@ -533,6 +548,14 @@ export interface YahtzeeState {
     white: Partial<Record<YahtzeeCategory, number>>;
   };
   totals: {
+    black: number;
+    white: number;
+  };
+  upperTotals: {
+    black: number;
+    white: number;
+  };
+  upperBonuses: {
     black: number;
     white: number;
   };

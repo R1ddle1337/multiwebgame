@@ -27,8 +27,8 @@ import {
   createBackgammonState,
   createCardsDeck,
   createCardsState,
+  createCodenamesDuetKeyPair,
   createConnect4State,
-  createCodenamesDuetRolePool,
   createCodenamesDuetState,
   createCodenamesDuetWordPool,
   createDotsState,
@@ -40,6 +40,7 @@ import {
   createYahtzeeState,
   createGoState,
   createGomokuState,
+  createOnitamaCardPool,
   createOnitamaState,
   createSantoriniState,
   createQuoridorState,
@@ -342,6 +343,31 @@ describe('santorini engine', () => {
 });
 
 describe('onitama engine', () => {
+  it('exposes the full 16-card move set', () => {
+    const pool = createOnitamaCardPool();
+    expect(pool).toHaveLength(16);
+    expect(pool).toEqual(
+      expect.arrayContaining([
+        'tiger',
+        'dragon',
+        'frog',
+        'rabbit',
+        'crab',
+        'elephant',
+        'goose',
+        'rooster',
+        'monkey',
+        'mantis',
+        'horse',
+        'ox',
+        'crane',
+        'boar',
+        'eel',
+        'cobra'
+      ])
+    );
+  });
+
   it('initializes board and cards from deterministic opening set', () => {
     const state = createOnitamaState({
       openingCards: ['tiger', 'dragon', 'frog', 'rabbit', 'crab']
@@ -406,8 +432,7 @@ describe('onitama engine', () => {
 describe('codenames duet engine', () => {
   it('accepts clue then guess flow and switches turn when guesses end', () => {
     const words = createCodenamesDuetWordPool().slice(0, 25);
-    const keyBlack = createCodenamesDuetRolePool();
-    const keyWhite = createCodenamesDuetRolePool();
+    const { keyBlack, keyWhite } = createCodenamesDuetKeyPair();
     const agentIndex = keyBlack.findIndex((cell) => cell === 'agent');
 
     let state = createCodenamesDuetState({
@@ -447,8 +472,7 @@ describe('codenames duet engine', () => {
 
   it('ends with assassin outcome when an assassin cell is revealed', () => {
     const words = createCodenamesDuetWordPool().slice(0, 25);
-    const keyBlack = createCodenamesDuetRolePool();
-    const keyWhite = createCodenamesDuetRolePool();
+    const { keyBlack, keyWhite } = createCodenamesDuetKeyPair();
     const assassinIndex = keyBlack.findIndex((cell) => cell === 'assassin');
 
     let state = createCodenamesDuetState({
@@ -477,7 +501,7 @@ describe('codenames duet engine', () => {
 });
 
 describe('love letter engine', () => {
-  it('creates an initial two-card hand for starting player', () => {
+  it('creates a two-player round with one hidden and three face-up removed cards', () => {
     const state = createLoveLetterState({
       deck: createLoveLetterDeck()
     });
@@ -485,6 +509,9 @@ describe('love letter engine', () => {
     expect(state.nextPlayer).toBe('black');
     expect(state.hands.black).toHaveLength(2);
     expect(state.hands.white).toHaveLength(1);
+    expect(state.removedFaceUp).toHaveLength(3);
+    expect(state.round).toBe(1);
+    expect(state.tokenTarget).toBe(7);
   });
 
   it('rejects playing a card not in hand', () => {
@@ -503,7 +530,8 @@ describe('love letter engine', () => {
 
   it('eliminates self when princess is played', () => {
     const state = createLoveLetterState({
-      deck: ['guard', 'priest', 'baron', 'handmaid', 'princess', ...createLoveLetterDeck()]
+      deck: ['guard', 'priest', 'baron', 'handmaid', 'princess', ...createLoveLetterDeck()],
+      tokenTarget: 1
     });
     state.hands.black = ['princess', 'guard'];
     state.hands.white = ['priest'];
@@ -517,6 +545,72 @@ describe('love letter engine', () => {
     expect(result.accepted).toBe(true);
     expect(result.nextState.status).toBe('completed');
     expect(result.nextState.winner).toBe('white');
+  });
+
+  it('tracks tokens across rounds and ends match at threshold', () => {
+    const roundDeck = () =>
+      [
+        'guard',
+        'handmaid',
+        'baron',
+        'prince',
+        'guard',
+        'priest',
+        'countess',
+        ...createLoveLetterDeck()
+      ] as const;
+
+    const queuedDecks = [roundDeck(), roundDeck()];
+    const drawRoundDeck = () => {
+      const next = queuedDecks.shift();
+      if (!next) {
+        return createLoveLetterDeck();
+      }
+      return [...next];
+    };
+
+    const initial = createLoveLetterState({
+      deck: drawRoundDeck(),
+      tokenTarget: 2,
+      startingPlayer: 'black'
+    });
+
+    const firstRound = applyLoveLetterMove(
+      initial,
+      {
+        type: 'play',
+        card: 'guard',
+        guess: 'priest',
+        target: 'white',
+        player: 'black'
+      },
+      drawRoundDeck
+    );
+
+    expect(firstRound.accepted).toBe(true);
+    expect(firstRound.nextState.status).toBe('playing');
+    expect(firstRound.nextState.round).toBe(2);
+    expect(firstRound.nextState.tokens.black).toBe(1);
+    expect(firstRound.nextState.tokens.white).toBe(0);
+    expect(firstRound.nextState.nextPlayer).toBe('black');
+
+    const secondRound = applyLoveLetterMove(
+      firstRound.nextState,
+      {
+        type: 'play',
+        card: 'guard',
+        guess: 'priest',
+        target: 'white',
+        player: 'black'
+      },
+      drawRoundDeck
+    );
+
+    expect(secondRound.accepted).toBe(true);
+    expect(secondRound.nextState.status).toBe('completed');
+    expect(secondRound.nextState.winner).toBe('black');
+    expect(secondRound.nextState.tokens.black).toBe(2);
+    expect(secondRound.nextState.round).toBe(2);
   });
 });
 
@@ -684,6 +778,37 @@ describe('yahtzee engine', () => {
     expect(scored.nextState.scores.black.three_of_a_kind).toBe(21);
     expect(scored.nextState.nextPlayer).toBe('white');
     expect(scored.nextState.rollsUsed).toBe(0);
+  });
+
+  it('awards upper-section bonus when subtotal reaches 63', () => {
+    const initial = createYahtzeeState();
+    const prepared = {
+      ...initial,
+      nextPlayer: 'black' as const,
+      rollsUsed: 1,
+      dice: [6, 6, 6, 1, 1],
+      scores: {
+        black: {
+          ones: 3,
+          twos: 6,
+          threes: 9,
+          fours: 12,
+          fives: 15
+        },
+        white: {}
+      }
+    };
+
+    const scored = applyYahtzeeMove(prepared, {
+      type: 'score',
+      category: 'sixes',
+      player: 'black'
+    });
+
+    expect(scored.accepted).toBe(true);
+    expect(scored.nextState.upperTotals.black).toBe(63);
+    expect(scored.nextState.upperBonuses.black).toBe(35);
+    expect(scored.nextState.totals.black).toBe(98);
   });
 
   it('completes once both players fill all categories', () => {

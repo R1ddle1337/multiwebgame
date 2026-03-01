@@ -46,6 +46,7 @@ export {
 } from './yahtzee.js';
 export {
   applyCodenamesDuetMove,
+  createCodenamesDuetKeyPair,
   createCodenamesDuetRolePool,
   createCodenamesDuetState,
   createCodenamesDuetWordPool,
