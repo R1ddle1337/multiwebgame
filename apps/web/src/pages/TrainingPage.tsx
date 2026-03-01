@@ -51,6 +51,7 @@ import type {
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Connect4Board } from '../components/Connect4Board';
+import { useI18n } from '../context/I18nContext';
 import { DominationBoard } from '../components/DominationBoard';
 import { DotsBoard } from '../components/DotsBoard';
 import { GoBoard } from '../components/GoBoard';
@@ -143,27 +144,6 @@ const PHASE2_GAMES: Phase2TrainingGame[] = [
   'backgammon'
 ];
 
-const GAME_LABEL: Record<TrainingGame, string> = {
-  gomoku: 'Gomoku',
-  go: 'Go',
-  xiangqi: 'Xiangqi',
-  connect4: 'Connect4',
-  reversi: 'Reversi',
-  dots: 'Dots',
-  hex: 'Hex',
-  quoridor: 'Quoridor',
-  santorini: 'Santorini',
-  domination: 'Domination',
-  battleship: 'Battleship',
-  onitama: 'Onitama',
-  yahtzee: 'Yahtzee',
-  love_letter: 'Love Letter',
-  codenames_duet: 'Codenames Duet',
-  cards: 'Cards',
-  liars_dice: "Liar's Dice",
-  backgammon: 'Backgammon'
-};
-
 const LOVE_LETTER_GUESS_OPTIONS: LoveLetterCardName[] = [
   'priest',
   'baron',
@@ -218,13 +198,32 @@ function sortBackgammonMoves(moves: BackgammonMove[]): BackgammonMove[] {
   });
 }
 
-function summarizeGame(game: TrainingGame, status: string, nextPlayer: string, sandbox = false): string {
-  const suffix = sandbox ? 'Training Sandbox' : 'Training';
-  return `${suffix} (${GAME_LABEL[game]}) - status: ${status}, next: ${nextPlayer}`;
-}
-
 export function TrainingPage() {
+  const { t } = useI18n();
   const [game, setGame] = useState<TrainingGame>('gomoku');
+
+  const withFallback = (key: string, fallback: string) => {
+    const translated = t(key);
+    return translated === key ? fallback : translated;
+  };
+  const gameLabel = (type: TrainingGame) => t(`enum.game.${type}`);
+  const colorLabel = (color: string) => withFallback(`enum.color.${color}`, color);
+  const statusLabel = (status: string) => withFallback(`enum.status.${status}`, status);
+  const suitLabel = (suit: string) => withFallback(`enum.suit.${suit}`, suit);
+  const codenamesPhaseLabel = (phase: string) => withFallback(`training.codenames.phase.${phase}`, phase);
+  const battleshipPhaseLabel = (phase: string) => withFallback(`training.battleship.phase.${phase}`, phase);
+  const resetLabel = (type: TrainingGame, sandbox = false) =>
+    t('training.reset', {
+      game: gameLabel(type),
+      scope: t(sandbox ? 'training.mode.sandbox' : 'training.mode.training')
+    });
+  const summarizeGame = (type: TrainingGame, status: string, nextPlayer: string, sandbox = false) =>
+    t('training.summary', {
+      mode: t(sandbox ? 'training.mode.sandbox' : 'training.mode.training'),
+      game: gameLabel(type),
+      status: statusLabel(status),
+      next: colorLabel(nextPlayer)
+    });
 
   const [gomokuState, setGomokuState] = useState(() => createGomokuState(15));
   const [goState, setGoState] = useState(() => createGoState(9));
@@ -326,7 +325,7 @@ export function TrainingPage() {
     }
   }, [backgammonState]);
 
-  const info = useMemo(() => {
+  const info = (() => {
     if (game === 'gomoku') {
       return summarizeGame(game, gomokuState.status, gomokuState.nextPlayer);
     }
@@ -382,44 +381,7 @@ export function TrainingPage() {
     }
 
     return summarizeGame(game, backgammonState.status, backgammonState.nextPlayer, true);
-  }, [
-    backgammonState.nextPlayer,
-    backgammonState.status,
-    battleshipState.nextPlayer,
-    battleshipState.status,
-    cardsState.nextPlayer,
-    cardsState.status,
-    codenamesState,
-    connect4State.nextPlayer,
-    connect4State.status,
-    dominationState.nextPlayer,
-    dominationState.status,
-    dotsState.nextPlayer,
-    dotsState.status,
-    game,
-    goState.nextPlayer,
-    goState.status,
-    gomokuState.nextPlayer,
-    gomokuState.status,
-    hexState.nextPlayer,
-    hexState.status,
-    liarsDiceState.nextPlayer,
-    liarsDiceState.status,
-    loveLetterState.nextPlayer,
-    loveLetterState.status,
-    onitamaState.nextPlayer,
-    onitamaState.status,
-    quoridorState.nextPlayer,
-    quoridorState.status,
-    reversiState.nextPlayer,
-    reversiState.status,
-    santoriniState.nextPlayer,
-    santoriniState.status,
-    xiangqiState.nextPlayer,
-    xiangqiState.status,
-    yahtzeeState.nextPlayer,
-    yahtzeeState.status
-  ]);
+  })();
 
   const yahtzeeAvailableCategories = useMemo(
     () =>
@@ -569,15 +531,11 @@ export function TrainingPage() {
 
   return (
     <main className="panel training-page">
-      <h2>Training Mode</h2>
+      <h2>{t('training.title')}</h2>
       <p>{info}</p>
-      {isPhase2Game(game) ? (
-        <p className="training-sandbox-note">
-          Training Sandbox: deterministic local seed, no realtime commit/reveal.
-        </p>
-      ) : null}
+      {isPhase2Game(game) ? <p className="training-sandbox-note">{t('training.sandbox_note')}</p> : null}
 
-      <h3>Phase 1 - Public Board Games</h3>
+      <h3>{t('training.phase1.title')}</h3>
       <div className="button-row training-tabs">
         {PHASE1_GAMES.map((entry) => (
           <button
@@ -586,12 +544,12 @@ export function TrainingPage() {
             className={game === entry ? '' : 'secondary'}
             onClick={() => setGame(entry)}
           >
-            {GAME_LABEL[entry]}
+            {gameLabel(entry)}
           </button>
         ))}
       </div>
 
-      <h3>Phase 2 - Training Sandbox</h3>
+      <h3>{t('training.phase2.title')}</h3>
       <div className="button-row training-tabs">
         {PHASE2_GAMES.map((entry) => (
           <button
@@ -600,7 +558,7 @@ export function TrainingPage() {
             className={game === entry ? '' : 'secondary'}
             onClick={() => setGame(entry)}
           >
-            {GAME_LABEL[entry]}
+            {gameLabel(entry)}
           </button>
         ))}
       </div>
@@ -620,7 +578,7 @@ export function TrainingPage() {
             }}
           />
           <button type="button" className="secondary" onClick={resetGomoku}>
-            Reset Gomoku Training
+            {resetLabel('gomoku')}
           </button>
         </>
       ) : null}
@@ -671,10 +629,10 @@ export function TrainingPage() {
               }}
               disabled={goState.status !== 'playing' || goState.nextPlayer !== 'black'}
             >
-              Pass
+              {t('room.pass')}
             </button>
             <button type="button" className="secondary" onClick={resetGo}>
-              Reset Go Training
+              {resetLabel('go')}
             </button>
           </div>
         </>
@@ -718,7 +676,7 @@ export function TrainingPage() {
             }}
           />
           <button type="button" className="secondary" onClick={resetXiangqi}>
-            Reset Xiangqi Training
+            {resetLabel('xiangqi')}
           </button>
         </>
       ) : null}
@@ -747,7 +705,7 @@ export function TrainingPage() {
             }}
           />
           <button type="button" className="secondary" onClick={resetConnect4}>
-            Reset Connect4 Training
+            {resetLabel('connect4')}
           </button>
         </>
       ) : null}
@@ -777,10 +735,13 @@ export function TrainingPage() {
             }}
           />
           <p>
-            Counts - black: {reversiState.counts.black}, white: {reversiState.counts.white}
+            {t('room.reversi.counts', {
+              black: reversiState.counts.black,
+              white: reversiState.counts.white
+            })}
           </p>
           <button type="button" className="secondary" onClick={resetReversi}>
-            Reset Reversi Training
+            {resetLabel('reversi')}
           </button>
         </>
       ) : null}
@@ -809,10 +770,13 @@ export function TrainingPage() {
             }}
           />
           <p>
-            Scores - black: {dotsState.scores.black}, white: {dotsState.scores.white}
+            {t('room.dots.scores', {
+              black: dotsState.scores.black,
+              white: dotsState.scores.white
+            })}
           </p>
           <button type="button" className="secondary" onClick={resetDots}>
-            Reset Dots Training
+            {resetLabel('dots')}
           </button>
         </>
       ) : null}
@@ -842,7 +806,7 @@ export function TrainingPage() {
             }}
           />
           <button type="button" className="secondary" onClick={resetHex}>
-            Reset Hex Training
+            {resetLabel('hex')}
           </button>
         </>
       ) : null}
@@ -850,8 +814,10 @@ export function TrainingPage() {
       {game === 'quoridor' ? (
         <>
           <p>
-            Remaining walls - black: {quoridorState.remainingWalls.black}, white:{' '}
-            {quoridorState.remainingWalls.white}
+            {t('room.quoridor.walls_remaining', {
+              black: quoridorState.remainingWalls.black,
+              white: quoridorState.remainingWalls.white
+            })}
           </p>
           <QuoridorBoard
             state={quoridorState}
@@ -899,7 +865,7 @@ export function TrainingPage() {
             }}
           />
           <button type="button" className="secondary" onClick={resetQuoridor}>
-            Reset Quoridor Training
+            {resetLabel('quoridor')}
           </button>
         </>
       ) : null}
@@ -908,7 +874,7 @@ export function TrainingPage() {
         <>
           <div className="button-row">
             <label>
-              Worker{' '}
+              {t('training.label.worker')}{' '}
               <select
                 value={santoriniWorker}
                 onChange={(event) => setSantoriniWorker(event.target.value as SantoriniMoveInput['worker'])}
@@ -921,13 +887,13 @@ export function TrainingPage() {
             {santoriniState.status === 'playing' ? (
               <span>
                 {santoriniMoveTarget
-                  ? 'Click a build cell.'
+                  ? t('training.santorini.prompt.build')
                   : santoriniSelection
-                    ? 'Click destination cell.'
-                    : 'Click one of your workers.'}
+                    ? t('training.santorini.prompt.destination')
+                    : t('training.santorini.prompt.select_worker')}
               </span>
             ) : (
-              <span>Setup: select worker + click a placement cell.</span>
+              <span>{t('training.santorini.prompt.setup')}</span>
             )}
           </div>
 
@@ -1011,7 +977,7 @@ export function TrainingPage() {
           />
 
           <button type="button" className="secondary" onClick={resetSantorini}>
-            Reset Santorini Training
+            {resetLabel('santorini')}
           </button>
         </>
       ) : null}
@@ -1019,14 +985,22 @@ export function TrainingPage() {
       {game === 'domination' ? (
         <>
           <p>
-            Scores - black: {dominationState.scores.black}, white: {dominationState.scores.white}
+            {t('room.domination.scores', {
+              black: dominationState.scores.black,
+              white: dominationState.scores.white
+            })}
           </p>
           <p>
-            Pieces - black: {dominationState.pieceCounts.black}, white: {dominationState.pieceCounts.white}
+            {t('room.domination.pieces', {
+              black: dominationState.pieceCounts.black,
+              white: dominationState.pieceCounts.white
+            })}
           </p>
           <p>
-            Control - black: {dominationState.controlCounts.black}, white:{' '}
-            {dominationState.controlCounts.white}
+            {t('room.domination.controls', {
+              black: dominationState.controlCounts.black,
+              white: dominationState.controlCounts.white
+            })}
           </p>
           <DominationBoard
             state={dominationState}
@@ -1051,7 +1025,7 @@ export function TrainingPage() {
             }}
           />
           <button type="button" className="secondary" onClick={resetDomination}>
-            Reset Domination Training
+            {resetLabel('domination')}
           </button>
         </>
       ) : null}
@@ -1059,12 +1033,18 @@ export function TrainingPage() {
       {game === 'onitama' ? (
         <>
           <p>
-            Black cards: {onitamaState.cards.black.join(', ')} | White cards:{' '}
-            {onitamaState.cards.white.join(', ')} | Side: {onitamaState.cards.side}
+            {t('training.onitama.cards', {
+              blackLabel: colorLabel('black'),
+              blackCards: onitamaState.cards.black.join(', '),
+              whiteLabel: colorLabel('white'),
+              whiteCards: onitamaState.cards.white.join(', '),
+              sideLabel: t('training.label.side'),
+              side: colorLabel(onitamaState.cards.side)
+            })}
           </p>
           <div className="button-row">
             <label>
-              Card{' '}
+              {t('training.label.card')}{' '}
               <select
                 value={onitamaCard}
                 onChange={(event) => setOnitamaCard(event.target.value as OnitamaMoveInput['card'])}
@@ -1079,8 +1059,11 @@ export function TrainingPage() {
             </label>
             <span>
               {onitamaSelection
-                ? `Selected ${onitamaSelection.x},${onitamaSelection.y}`
-                : 'Select one of your pieces'}
+                ? t('training.onitama.selected', {
+                    x: onitamaSelection.x,
+                    y: onitamaSelection.y
+                  })
+                : t('training.onitama.select_piece')}
             </span>
           </div>
 
@@ -1142,7 +1125,7 @@ export function TrainingPage() {
           </div>
 
           <button type="button" className="secondary" onClick={resetOnitama}>
-            Reset Onitama Sandbox
+            {resetLabel('onitama', true)}
           </button>
         </>
       ) : null}
@@ -1150,10 +1133,16 @@ export function TrainingPage() {
       {game === 'battleship' ? (
         <>
           <p>
-            Phase: {battleshipPublic.phase}, sunk by black: {battleshipPublic.sunkShips.black}, sunk by white:{' '}
-            {battleshipPublic.sunkShips.white}
+            {t('training.battleship.status', {
+              phaseLabel: t('training.label.phase'),
+              phase: battleshipPhaseLabel(battleshipPublic.phase),
+              blackLabel: colorLabel('black'),
+              sunkBlack: battleshipPublic.sunkShips.black,
+              whiteLabel: colorLabel('white'),
+              sunkWhite: battleshipPublic.sunkShips.white
+            })}
           </p>
-          <p>Your outgoing shots</p>
+          <p>{t('training.battleship.outgoing_shots')}</p>
           <div
             className="training-grid-board"
             style={{
@@ -1199,7 +1188,7 @@ export function TrainingPage() {
             )}
           </div>
 
-          <p>Your fleet view</p>
+          <p>{t('training.battleship.fleet_view')}</p>
           <div
             className="training-grid-board"
             style={{
@@ -1230,7 +1219,7 @@ export function TrainingPage() {
           </div>
 
           <button type="button" className="secondary" onClick={resetBattleship}>
-            Reset Battleship Sandbox
+            {resetLabel('battleship', true)}
           </button>
         </>
       ) : null}
@@ -1238,8 +1227,13 @@ export function TrainingPage() {
       {game === 'yahtzee' ? (
         <>
           <p>
-            Rolls used: {yahtzeeState.rollsUsed} | totals black/white: {yahtzeeState.totals.black}/
-            {yahtzeeState.totals.white}
+            {t('training.yahtzee.overview', {
+              rollsUsed: yahtzeeState.rollsUsed,
+              blackLabel: colorLabel('black'),
+              totalBlack: yahtzeeState.totals.black,
+              whiteLabel: colorLabel('white'),
+              totalWhite: yahtzeeState.totals.white
+            })}
           </p>
           <div className="button-row">
             {yahtzeeState.dice.map((die, index) => (
@@ -1294,10 +1288,10 @@ export function TrainingPage() {
                 );
               }}
             >
-              Roll
+              {t('room.yahtzee.roll')}
             </button>
             <label>
-              Category{' '}
+              {t('room.yahtzee.category')}{' '}
               <select
                 value={yahtzeeSelectedCategory}
                 disabled={
@@ -1344,11 +1338,11 @@ export function TrainingPage() {
                 );
               }}
             >
-              Score
+              {t('room.yahtzee.score')}
             </button>
           </div>
           <button type="button" className="secondary" onClick={resetYahtzee}>
-            Reset Yahtzee Sandbox
+            {resetLabel('yahtzee', true)}
           </button>
         </>
       ) : null}
@@ -1356,17 +1350,34 @@ export function TrainingPage() {
       {game === 'love_letter' ? (
         <>
           <p>
-            Round {loveLetterPublic.round} / target {loveLetterPublic.tokenTarget} | tokens black/white:{' '}
-            {loveLetterPublic.tokens.black}/{loveLetterPublic.tokens.white}
+            {t('room.love_letter.round', {
+              current: loveLetterPublic.round,
+              target: loveLetterPublic.tokenTarget
+            })}
           </p>
-          <p>Draw pile: {loveLetterPublic.drawPileCount}</p>
           <p>
-            Hand counts black/white: {loveLetterPublic.handCounts.black}/{loveLetterPublic.handCounts.white}
+            {t('room.love_letter.tokens', {
+              black: loveLetterPublic.tokens.black,
+              white: loveLetterPublic.tokens.white
+            })}
           </p>
-          <p>Your hand: {loveLetterPublic.hand?.join(', ') || '(hidden)'}</p>
+          <p>{t('room.love_letter.draw_pile', { count: loveLetterPublic.drawPileCount })}</p>
+          <p>
+            {t('room.love_letter.hand_counts', {
+              black: loveLetterPublic.handCounts.black,
+              white: loveLetterPublic.handCounts.white
+            })}
+          </p>
+          <p>
+            {loveLetterPublic.hand
+              ? t('room.love_letter.your_hand', {
+                  cards: loveLetterPublic.hand.join(', ')
+                })
+              : t('room.love_letter.hidden_hand')}
+          </p>
           <div className="button-row">
             <label>
-              Card{' '}
+              {t('training.label.card')}{' '}
               <select
                 value={loveLetterCard}
                 disabled={loveLetterState.status !== 'playing' || loveLetterState.nextPlayer !== 'black'}
@@ -1382,18 +1393,18 @@ export function TrainingPage() {
               </select>
             </label>
             <label>
-              Target{' '}
+              {t('training.label.target')}{' '}
               <select
                 value={loveLetterTarget}
                 disabled={loveLetterState.status !== 'playing' || loveLetterState.nextPlayer !== 'black'}
                 onChange={(event) => setLoveLetterTarget(event.target.value as 'black' | 'white')}
               >
-                <option value="black">black</option>
-                <option value="white">white</option>
+                <option value="black">{colorLabel('black')}</option>
+                <option value="white">{colorLabel('white')}</option>
               </select>
             </label>
             <label>
-              Guess{' '}
+              {t('training.label.guess')}{' '}
               <select
                 value={loveLetterGuess}
                 disabled={loveLetterState.status !== 'playing' || loveLetterState.nextPlayer !== 'black'}
@@ -1434,11 +1445,11 @@ export function TrainingPage() {
                 );
               }}
             >
-              Play
+              {t('room.love_letter.play')}
             </button>
           </div>
           <button type="button" className="secondary" onClick={resetLoveLetter}>
-            Reset Love Letter Sandbox
+            {resetLabel('love_letter', true)}
           </button>
         </>
       ) : null}
@@ -1446,16 +1457,31 @@ export function TrainingPage() {
       {game === 'codenames_duet' ? (
         <>
           <p>
-            Turns left: {codenamesPublic.turnsRemaining} | targets found: {codenamesPublic.targetCounts.found}
-            /{codenamesPublic.targetCounts.total}
+            {t('room.codenames.turns_remaining', {
+              turns: codenamesPublic.turnsRemaining
+            })}{' '}
+            |{' '}
+            {t('room.codenames.targets', {
+              found: codenamesPublic.targetCounts.found,
+              total: codenamesPublic.targetCounts.total
+            })}
           </p>
           <p>
-            Phase: {codenamesPublic.phase}, cluer: {codenamesPublic.currentCluer}, guesser:{' '}
-            {codenamesPublic.currentGuesser}
+            {t('training.codenames.phase_status', {
+              phaseLabel: t('training.label.phase'),
+              phase: codenamesPhaseLabel(codenamesPublic.phase),
+              cluerLabel: t('training.label.cluer'),
+              cluer: colorLabel(codenamesPublic.currentCluer),
+              guesserLabel: t('training.label.guesser'),
+              guesser: colorLabel(codenamesPublic.currentGuesser)
+            })}
           </p>
           {codenamesPublic.activeClue ? (
             <p>
-              Active clue: {codenamesPublic.activeClue.word} ({codenamesPublic.activeClue.count})
+              {t('training.codenames.active_clue', {
+                word: codenamesPublic.activeClue.word,
+                count: codenamesPublic.activeClue.count
+              })}
             </p>
           ) : null}
           <div
@@ -1471,11 +1497,11 @@ export function TrainingPage() {
                 keyRole === 'agent' ? 'A' : keyRole === 'assassin' ? 'X' : keyRole === 'neutral' ? 'N' : '';
               const revealedMark =
                 revealedRole === 'agent'
-                  ? 'AGENT'
+                  ? t('training.codenames.mark.agent')
                   : revealedRole === 'assassin'
-                    ? 'ASSASSIN'
+                    ? t('training.codenames.mark.assassin')
                     : revealedRole === 'neutral'
-                      ? 'NEUTRAL'
+                      ? t('training.codenames.mark.neutral')
                       : '';
               const canGuess =
                 codenamesPublic.status === 'playing' &&
@@ -1530,14 +1556,14 @@ export function TrainingPage() {
           codenamesPublic.currentCluer === 'black' ? (
             <div className="button-row">
               <label>
-                Clue{' '}
+                {t('training.label.clue')}{' '}
                 <input
                   value={codenamesClueWord}
                   onChange={(event) => setCodenamesClueWord(event.target.value)}
                 />
               </label>
               <label>
-                Count{' '}
+                {t('training.label.count')}{' '}
                 <input
                   type="number"
                   min={1}
@@ -1579,7 +1605,7 @@ export function TrainingPage() {
                   );
                 }}
               >
-                Submit clue
+                {t('room.codenames.submit_clue')}
               </button>
             </div>
           ) : null}
@@ -1618,13 +1644,13 @@ export function TrainingPage() {
                   );
                 }}
               >
-                End guesses
+                {t('room.codenames.end_guesses')}
               </button>
             </div>
           ) : null}
 
           <button type="button" className="secondary" onClick={resetCodenames}>
-            Reset Codenames Sandbox
+            {resetLabel('codenames_duet', true)}
           </button>
         </>
       ) : null}
@@ -1632,11 +1658,17 @@ export function TrainingPage() {
       {game === 'cards' ? (
         <>
           <p>
-            Top: {cardsPublic.topCard.rank}-{cardsPublic.topCard.suit} | active suit: {cardsPublic.activeSuit}
+            {t('room.cards.top', {
+              card: `${cardsPublic.topCard.rank}-${suitLabel(cardsPublic.topCard.suit)}`
+            })}{' '}
+            | {t('room.cards.active_suit', { suit: suitLabel(cardsPublic.activeSuit) })}
           </p>
           <p>
-            Hand counts black/white: {cardsPublic.handCounts.black}/{cardsPublic.handCounts.white} | draw
-            pile: {cardsPublic.drawPileCount}
+            {t('room.cards.hand_counts', {
+              black: cardsPublic.handCounts.black,
+              white: cardsPublic.handCounts.white
+            })}{' '}
+            | {t('room.cards.draw_pile', { count: cardsPublic.drawPileCount ?? t('training.liars.none') })}
           </p>
           {cardsPublic.hand ? (
             <div className="button-row">
@@ -1682,7 +1714,7 @@ export function TrainingPage() {
                       );
                     }}
                   >
-                    {card.rank}-{card.suit[0].toUpperCase()}
+                    {card.rank}-{suitLabel(card.suit)}
                   </button>
                 );
               })}
@@ -1690,14 +1722,14 @@ export function TrainingPage() {
           ) : null}
           <div className="button-row">
             <label>
-              8 suit{' '}
+              {t('training.cards.eight_suit')}{' '}
               <select
                 value={cardsSuit}
                 onChange={(event) => setCardsSuit(event.target.value as (typeof CARD_SUITS)[number])}
               >
                 {CARD_SUITS.map((suit) => (
                   <option key={`training-cards-suit-${suit}`} value={suit}>
-                    {suit}
+                    {suitLabel(suit)}
                   </option>
                 ))}
               </select>
@@ -1723,7 +1755,7 @@ export function TrainingPage() {
                 );
               }}
             >
-              Draw
+              {t('room.cards.draw')}
             </button>
             <button
               type="button"
@@ -1751,12 +1783,12 @@ export function TrainingPage() {
                 );
               }}
             >
-              End Turn
+              {t('room.cards.end_turn')}
             </button>
           </div>
 
           <button type="button" className="secondary" onClick={resetCards}>
-            Reset Cards Sandbox
+            {resetLabel('cards', true)}
           </button>
         </>
       ) : null}
@@ -1764,25 +1796,37 @@ export function TrainingPage() {
       {game === 'liars_dice' ? (
         <>
           <p>
-            Dice counts black/white: {liarsPublic.diceCounts.black}/{liarsPublic.diceCounts.white}
+            {t('room.liars.dice_counts', {
+              black: liarsPublic.diceCounts.black,
+              white: liarsPublic.diceCounts.white
+            })}
           </p>
-          <p>Your dice: {liarsPublic.viewerDice?.join(', ') ?? '(hidden)'}</p>
           <p>
-            Current bid:{' '}
+            {liarsPublic.viewerDice
+              ? t('room.liars.your_dice', {
+                  dice: liarsPublic.viewerDice.join(', ')
+                })
+              : t('room.liars.hidden_dice')}
+          </p>
+          <p>
+            {t('training.liars.current_bid')}{' '}
             {liarsPublic.currentBid
               ? `${liarsPublic.currentBid.quantity} x ${liarsPublic.currentBid.face}`
-              : 'none'}
+              : t('training.liars.none')}
           </p>
           {liarsPublic.lastRound ? (
             <p>
-              Last round - called {liarsPublic.lastRound.calledBid.quantity}x
-              {liarsPublic.lastRound.calledBid.face}, total {liarsPublic.lastRound.totalMatching}, loser{' '}
-              {liarsPublic.lastRound.loser}
+              {t('room.liars.last_round', {
+                quantity: liarsPublic.lastRound.calledBid.quantity,
+                face: liarsPublic.lastRound.calledBid.face,
+                total: liarsPublic.lastRound.totalMatching,
+                loser: colorLabel(liarsPublic.lastRound.loser)
+              })}
             </p>
           ) : null}
           <div className="button-row">
             <label>
-              Quantity{' '}
+              {t('training.label.quantity')}{' '}
               <input
                 type="number"
                 min={1}
@@ -1792,7 +1836,7 @@ export function TrainingPage() {
               />
             </label>
             <label>
-              Face{' '}
+              {t('room.liars.face')}{' '}
               <input
                 type="number"
                 min={1}
@@ -1834,7 +1878,7 @@ export function TrainingPage() {
                 );
               }}
             >
-              Bid
+              {t('room.liars.bid_submit')}
             </button>
             <button
               type="button"
@@ -1866,12 +1910,12 @@ export function TrainingPage() {
                 );
               }}
             >
-              Call Liar
+              {t('room.liars.call_liar')}
             </button>
           </div>
 
           <button type="button" className="secondary" onClick={resetLiarsDice}>
-            Reset Liar's Dice Sandbox
+            {resetLabel('liars_dice', true)}
           </button>
         </>
       ) : null}
@@ -1879,12 +1923,20 @@ export function TrainingPage() {
       {game === 'backgammon' ? (
         <>
           <p>
-            Dice: {backgammonState.dice ? `${backgammonState.dice[0]}, ${backgammonState.dice[1]}` : 'n/a'} |
-            Remaining: {backgammonState.remainingDice.join(', ') || 'none'}
+            {t('training.backgammon.dice', {
+              dice: backgammonState.dice
+                ? `${backgammonState.dice[0]}, ${backgammonState.dice[1]}`
+                : t('training.backgammon.na'),
+              remaining: backgammonState.remainingDice.join(', ') || t('training.backgammon.none')
+            })}
           </p>
           <p>
-            Bar W/B: {backgammonState.bar.white}/{backgammonState.bar.black} | Off W/B:{' '}
-            {backgammonState.borneOff.white}/{backgammonState.borneOff.black}
+            {t('training.backgammon.bar_off', {
+              barWhite: backgammonState.bar.white,
+              barBlack: backgammonState.bar.black,
+              offWhite: backgammonState.borneOff.white,
+              offBlack: backgammonState.borneOff.black
+            })}
           </p>
           <div className="backgammon-points-grid">
             {backgammonState.points.map((point, index) => (
@@ -1895,7 +1947,7 @@ export function TrainingPage() {
             ))}
           </div>
 
-          <p>Legal moves ({backgammonLegalMoves.length}):</p>
+          <p>{t('training.backgammon.legal_moves', { count: backgammonLegalMoves.length })}</p>
           <div className="button-row">
             {backgammonLegalMoves.length > 0 ? (
               backgammonLegalMoves.map((move, index) => (
@@ -1920,12 +1972,12 @@ export function TrainingPage() {
                 </button>
               ))
             ) : (
-              <span>No legal move right now (auto-pass handles blocked turns).</span>
+              <span>{t('training.backgammon.no_legal_moves')}</span>
             )}
           </div>
 
           <button type="button" className="secondary" onClick={resetBackgammon}>
-            Reset Backgammon Sandbox
+            {resetLabel('backgammon', true)}
           </button>
         </>
       ) : null}
