@@ -35,7 +35,7 @@ describe('endpoints', () => {
   });
 
   it('derives same-origin api and wss on https deployments', () => {
-    expect(resolveApiBaseUrl({}, productionLocation)).toBe('https://game.example.com');
-    expect(resolveWsUrl({}, productionLocation)).toBe('wss://game.example.com');
+    expect(resolveApiBaseUrl({}, productionLocation)).toBe('https://game.example.com/api');
+    expect(resolveWsUrl({}, productionLocation)).toBe('wss://game.example.com/ws');
   });
 });

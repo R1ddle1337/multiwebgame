@@ -29,16 +29,8 @@ function isLocalHost(hostname: string): boolean {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
 }
 
-function deriveProtocolLocation(location: RuntimeLocation | null): string {
-  if (!location) {
-    return 'http://localhost:4000';
-  }
-
-  if (isLocalHost(location.hostname) && location.port === '5173') {
-    return `${location.protocol}//${location.hostname}:4000`;
-  }
-
-  return location.origin;
+function isLocalDevWebLocation(location: RuntimeLocation): boolean {
+  return isLocalHost(location.hostname) && location.port === '5173';
 }
 
 function toRuntimeLocation(value: Location | RuntimeLocation | null): RuntimeLocation | null {
@@ -73,7 +65,16 @@ export function resolveApiBaseUrl(
     return configured;
   }
 
-  return trimTrailingSlash(deriveProtocolLocation(toRuntimeLocation(locationInput)));
+  const location = toRuntimeLocation(locationInput);
+  if (!location) {
+    return 'http://localhost:4000';
+  }
+
+  if (isLocalDevWebLocation(location)) {
+    return `${location.protocol}//${location.hostname}:4000`;
+  }
+
+  return trimTrailingSlash(`${trimTrailingSlash(location.origin)}/api`);
 }
 
 export function resolveWsUrl(
@@ -90,9 +91,9 @@ export function resolveWsUrl(
     return 'ws://localhost:4001';
   }
 
-  if (isLocalHost(location.hostname) && location.port === '5173') {
+  if (isLocalDevWebLocation(location)) {
     return `${wsSchemeFromProtocol(location.protocol)}//${location.hostname}:4001`;
   }
 
-  return `${wsSchemeFromProtocol(location.protocol)}//${location.host}`;
+  return trimTrailingSlash(`${wsSchemeFromProtocol(location.protocol)}//${location.host}/ws`);
 }
