@@ -21,6 +21,8 @@ Auth uses `Authorization: Bearer <jwt>`.
 - `POST /auth/login`
   - Body: `{ "email": string, "password": string }`
   - Returns: `{ token, user, session }`
+  - Invalid credentials: `401 { "error": "Invalid credentials" }`
+  - Brute-force lockout: `429 { "error": "Too many login attempts. Try again later." }` + `Retry-After` header (seconds)
 
 - `POST /auth/upgrade`
   - Auth required

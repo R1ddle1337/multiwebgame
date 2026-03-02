@@ -7,6 +7,12 @@ import { ZodError, z } from 'zod';
 
 import { requireAuth, signAuthToken, type AuthedRequest } from './auth.js';
 import { config } from './config.js';
+import {
+  createInMemoryLoginLockout,
+  createRedisBackedLoginLockout,
+  normalizeLoginEmail,
+  type LoginLockoutService
+} from './login-lockout.js';
 import { StoreError, type Store } from './store/types.js';
 
 const createGuestSchema = z.object({
@@ -124,6 +130,7 @@ interface ParsedCorsOrigins {
 
 export interface CreateAppOptions {
   webOrigin?: string;
+  loginLockout?: LoginLockoutService;
 }
 
 function randomGuestName(): string {
@@ -139,6 +146,22 @@ function firstHeader(value: string | string[] | undefined): string | null {
     return null;
   }
   return Array.isArray(value) ? value[0] : value;
+}
+
+function firstForwardedIp(value: string | string[] | undefined): string | null {
+  const header = firstHeader(value);
+  if (!header) {
+    return null;
+  }
+
+  for (const candidate of header.split(',')) {
+    const trimmed = candidate.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  return null;
 }
 
 function normalizeOrigin(origin: string): string {
@@ -218,6 +241,20 @@ function mapStoreError(error: StoreError): { status: number; body: ApiError } {
 export function createApp(store: Store, options: CreateAppOptions = {}) {
   const app = express();
   const parsedCors = parseCorsOrigins(options.webOrigin ?? config.webOrigin);
+  const loginLockout =
+    options.loginLockout ??
+    (process.env.NODE_ENV === 'test'
+      ? createInMemoryLoginLockout({
+          maxFailures: config.loginMaxFailures,
+          windowSeconds: config.loginFailureWindowSeconds,
+          lockoutSeconds: config.loginLockoutSeconds
+        })
+      : createRedisBackedLoginLockout({
+          redisUrl: config.redisUrl,
+          maxFailures: config.loginMaxFailures,
+          windowSeconds: config.loginFailureWindowSeconds,
+          lockoutSeconds: config.loginLockoutSeconds
+        }));
   const corsOptions: CorsOptions = {
     origin(origin, callback) {
       if (!origin) {
@@ -279,20 +316,50 @@ export function createApp(store: Store, options: CreateAppOptions = {}) {
   app.post('/auth/login', async (req, res, next) => {
     try {
       const input = loginSchema.parse(req.body);
-      const found = await store.findUserByEmail(input.email);
+      const normalizedEmail = normalizeLoginEmail(input.email);
+      const ipAddress = firstForwardedIp(req.headers['x-forwarded-for']) ?? req.ip ?? null;
+      const preflightLockout = await loginLockout.check(normalizedEmail, ipAddress);
+      if (preflightLockout.blocked) {
+        res
+          .setHeader('Retry-After', String(preflightLockout.retryAfterSeconds))
+          .status(429)
+          .json({ error: 'Too many login attempts. Try again later.' });
+        return;
+      }
+
+      const found = await store.findUserByEmail(normalizedEmail);
       if (!found) {
+        const lockout = await loginLockout.registerFailure(normalizedEmail, ipAddress);
+        if (lockout.blocked) {
+          res
+            .setHeader('Retry-After', String(lockout.retryAfterSeconds))
+            .status(429)
+            .json({ error: 'Too many login attempts. Try again later.' });
+          return;
+        }
+
         res.status(401).json({ error: 'Invalid credentials' });
         return;
       }
 
       const valid = await bcrypt.compare(input.password, found.passwordHash);
       if (!valid) {
+        const lockout = await loginLockout.registerFailure(normalizedEmail, ipAddress);
+        if (lockout.blocked) {
+          res
+            .setHeader('Retry-After', String(lockout.retryAfterSeconds))
+            .status(429)
+            .json({ error: 'Too many login attempts. Try again later.' });
+          return;
+        }
+
         res.status(401).json({ error: 'Invalid credentials' });
         return;
       }
 
       const session = await store.createSession(found.user.id);
       const token = signAuthToken({ sessionId: session.id, userId: found.user.id });
+      await loginLockout.clear(normalizedEmail, ipAddress);
       res.json({ token, user: found.user, session });
     } catch (error) {
       next(error);

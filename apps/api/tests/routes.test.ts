@@ -19,6 +19,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { createApp } from '../src/app.js';
+import { createInMemoryLoginLockout } from '../src/login-lockout.js';
 import { StoreError, type Store } from '../src/store/types.js';
 
 const canBindTcpPort = await new Promise<boolean>((resolve) => {
@@ -616,6 +617,109 @@ describeIfTcpAvailable('critical API routes', () => {
       .expect(200);
 
     expect(login.body.user.displayName).toBe('Alice Pro');
+  });
+
+  it('locks repeated login failures and returns retry-after', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store, {
+      loginLockout: createInMemoryLoginLockout({
+        maxFailures: 3,
+        windowSeconds: 15 * 60,
+        lockoutSeconds: 15 * 60
+      })
+    });
+
+    const auth = await request(app).post('/auth/guest').send({ displayName: 'Temp' }).expect(201);
+    await request(app)
+      .post('/auth/upgrade')
+      .set('Authorization', `Bearer ${auth.body.token}`)
+      .send({
+        displayName: 'Alice Pro',
+        email: 'alice@example.com',
+        password: 'changeme123'
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'Alice@Example.com',
+        password: 'wrongpass123'
+      })
+      .expect(401);
+
+    await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'alice@example.com',
+        password: 'wrongpass123'
+      })
+      .expect(401);
+
+    const locked = await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'alice@example.com',
+        password: 'wrongpass123'
+      })
+      .expect(429);
+
+    expect(locked.body.error).toBe('Too many login attempts. Try again later.');
+    expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
+  });
+
+  it('clears login failure counters after successful login', async () => {
+    const store = new InMemoryStore();
+    const app = createApp(store, {
+      loginLockout: createInMemoryLoginLockout({
+        maxFailures: 2,
+        windowSeconds: 15 * 60,
+        lockoutSeconds: 15 * 60
+      })
+    });
+
+    const auth = await request(app).post('/auth/guest').send({ displayName: 'Temp' }).expect(201);
+    await request(app)
+      .post('/auth/upgrade')
+      .set('Authorization', `Bearer ${auth.body.token}`)
+      .send({
+        displayName: 'Alice Pro',
+        email: 'alice@example.com',
+        password: 'changeme123'
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'alice@example.com',
+        password: 'wrongpass123'
+      })
+      .expect(401);
+
+    await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'alice@example.com',
+        password: 'changeme123'
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'alice@example.com',
+        password: 'wrongpass123'
+      })
+      .expect(401);
+
+    await request(app)
+      .post('/auth/login')
+      .send({
+        email: 'alice@example.com',
+        password: 'wrongpass123'
+      })
+      .expect(429);
   });
 
   it('supports room spectator joins', async () => {
